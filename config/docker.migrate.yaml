@@ -1,0 +1,5 @@
+database:
+  scylla:
+    hosts:
+      - scylla:9042
+    replication: "{'class': 'SimpleStrategy', 'replication_factor': 1}"

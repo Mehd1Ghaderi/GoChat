@@ -1,0 +1,8 @@
+database:
+  scylla:
+    hosts:
+      - scylla:9042
+
+storage:
+  minio:
+    endpoint: minio:9000

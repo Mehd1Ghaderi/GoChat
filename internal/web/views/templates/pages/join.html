@@ -1,0 +1,28 @@
+{{define "content"}}
+<main class="auth">
+  <div class="auth-card">
+    <div class="brand"><img src="{{static "icon.svg"}}" alt="" width="40" height="40"><span>GoChat</span></div>
+    {{if .Valid}}
+    <h1>Join {{.TeamName}}</h1>
+    <p class="muted">This invite link works once.</p>
+    {{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
+    {{if .User}}
+    <form method="post" action="/join/{{.Token}}" class="stack">
+      <input type="hidden" name="_csrf" value="{{.CSRF}}">
+      <p>Signed in as <strong>{{name .User}}</strong>.</p>
+      <button class="btn primary block" type="submit">Join the team</button>
+    </form>
+    {{else}}
+    <div class="stack">
+      <a class="btn primary block" href="/signup?invite={{.Token}}">Create an account</a>
+      <a class="btn block" href="/login?next=/join/{{.Token}}">I already have an account</a>
+    </div>
+    {{end}}
+    {{else}}
+    <h1>Invite unavailable</h1>
+    <p class="muted">This invite link was already used or has expired. Ask a team admin for a new one.</p>
+    <a class="btn block" href="/">Go home</a>
+    {{end}}
+  </div>
+</main>
+{{end}}

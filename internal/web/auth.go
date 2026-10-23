@@ -1,0 +1,292 @@
+package web
+
+import (
+	"net/http"
+	"net/url"
+	"time"
+
+	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
+	"github.com/ssenerg/gochat/internal/client/drpc"
+	"github.com/ssenerg/gochat/internal/core/secure"
+)
+
+const mfaCookieTTL = 5 * time.Minute
+
+type loginData struct {
+	Page
+	Next  string
+	Login string
+}
+
+// nextParam keeps a redirect target only when it stays on this site.
+func nextParam(r *http.Request) string {
+	n := r.FormValue("next")
+	if safeNext(n) != n {
+		return ""
+	}
+	return n
+}
+
+func (h *Handler) anonymousCtx(r *http.Request) drpc.Call {
+	c := h.call(r)
+	c.Session = ""
+	return c
+}
+
+func (h *Handler) startSession(w http.ResponseWriter, s *pb.Session) {
+	ttl := time.Until(s.GetExpiresAt().AsTime())
+	h.setCookie(w, "session", s.Token, ttl, http.SameSiteLaxMode)
+	// A new session gets a new CSRF token.
+	h.setCookie(w, "csrf", secure.Token(), 0, http.SameSiteStrictMode)
+}
+
+func (h *Handler) loginPage(w http.ResponseWriter, r *http.Request) {
+	next := nextParam(r)
+	if h.currentUser(r) != nil {
+		http.Redirect(w, r, safeNext(next), http.StatusSeeOther)
+		return
+	}
+	h.page(w, r, http.StatusOK, "login", loginData{Page: Page{Title: "Sign in", CSRF: h.csrfToken(w, r)}, Next: next})
+}
+
+func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
+	next := nextParam(r)
+	login := r.PostFormValue("login")
+	ctx, cancel := h.client.Context(r.Context(), h.anonymousCtx(r))
+	defer cancel()
+	res, err := h.client.Auth.Login(ctx, &pb.LoginRequest{Login: login, Password: r.PostFormValue("password")})
+	if err != nil {
+		msg, ok := formError(err)
+		if !ok {
+			msg = drpc.Err(err).Message
+		}
+		if len(login) > 254 {
+			login = ""
+		}
+		h.page(w, r, statusOf(drpc.Err(err).Code), "login", loginData{
+			Page: Page{Title: "Sign in", CSRF: h.csrfToken(w, r), Error: msg}, Next: next, Login: login,
+		})
+		return
+	}
+	if token := res.GetMfaToken(); token != "" {
+		h.setCookie(w, "mfa", token, mfaCookieTTL, http.SameSiteStrictMode)
+		target := "/login/mfa"
+		if next != "" {
+			target += "?next=" + url.QueryEscape(next)
+		}
+		http.Redirect(w, r, target, http.StatusSeeOther)
+		return
+	}
+	h.startSession(w, res.GetSession())
+	http.Redirect(w, r, safeNext(next), http.StatusSeeOther)
+}
+
+func (h *Handler) mfaToken(r *http.Request) string {
+	c, err := r.Cookie(h.cookieName("mfa"))
+	if err != nil || !secure.ValidToken(c.Value) {
+		return ""
+	}
+	return c.Value
+}
+
+func (h *Handler) mfaPage(w http.ResponseWriter, r *http.Request) {
+	if h.mfaToken(r) == "" {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	h.page(w, r, http.StatusOK, "mfa", loginData{Page: Page{Title: "Verify", CSRF: h.csrfToken(w, r)}, Next: nextParam(r)})
+}
+
+func (h *Handler) mfa(w http.ResponseWriter, r *http.Request) {
+	next := nextParam(r)
+	token := h.mfaToken(r)
+	if token == "" {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	ctx, cancel := h.client.Context(r.Context(), h.anonymousCtx(r))
+	defer cancel()
+	res, err := h.client.Auth.VerifyMFA(ctx, &pb.VerifyMFARequest{MfaToken: token, Code: r.PostFormValue("code")})
+	if err != nil {
+		e := drpc.Err(err)
+		if e.Message == "the sign-in attempt expired, sign in again" {
+			h.clearCookie(w, "mfa")
+			h.page(w, r, http.StatusUnauthorized, "login", loginData{Page: Page{Title: "Sign in", CSRF: h.csrfToken(w, r), Error: e.Message}, Next: next})
+			return
+		}
+		h.page(w, r, statusOf(e.Code), "mfa", loginData{Page: Page{Title: "Verify", CSRF: h.csrfToken(w, r), Error: e.Message}, Next: next})
+		return
+	}
+	h.clearCookie(w, "mfa")
+	h.startSession(w, res.Session)
+	http.Redirect(w, r, safeNext(next), http.StatusSeeOther)
+}
+
+type signupForm struct {
+	Username, DisplayName, Email string
+}
+
+type signupData struct {
+	Page
+	Allowed   bool
+	Bootstrap bool
+	Invite    string
+	TeamName  string
+	Next      string
+	Form      signupForm
+}
+
+func (h *Handler) signupInfo(r *http.Request, invite string) (*pb.GetSignupInfoResponse, error) {
+	if invite != "" && !secure.ValidToken(invite) {
+		invite = ""
+	}
+	ctx, cancel := h.client.Context(r.Context(), h.anonymousCtx(r))
+	defer cancel()
+	return h.client.Auth.GetSignupInfo(ctx, &pb.GetSignupInfoRequest{InviteToken: invite})
+}
+
+func (h *Handler) signupPage(w http.ResponseWriter, r *http.Request) {
+	if h.currentUser(r) != nil {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	invite := r.URL.Query().Get("invite")
+	info, err := h.signupInfo(r, invite)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	data := signupData{
+		Page:      Page{Title: "Sign up", CSRF: h.csrfToken(w, r)},
+		Allowed:   info.Bootstrap || info.Open || info.InviteValid,
+		Bootstrap: info.Bootstrap,
+		TeamName:  info.TeamDisplayName,
+		Next:      nextParam(r),
+	}
+	if info.InviteValid {
+		data.Invite = invite
+	}
+	h.page(w, r, http.StatusOK, "signup", data)
+}
+
+func (h *Handler) signup(w http.ResponseWriter, r *http.Request) {
+	invite := r.PostFormValue("invite")
+	form := signupForm{
+		Username:    r.PostFormValue("username"),
+		DisplayName: r.PostFormValue("display_name"),
+		Email:       r.PostFormValue("email"),
+	}
+	info, err := h.signupInfo(r, invite)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	data := signupData{
+		Page:      Page{Title: "Sign up", CSRF: h.csrfToken(w, r)},
+		Allowed:   info.Bootstrap || info.Open || info.InviteValid,
+		Bootstrap: info.Bootstrap,
+		TeamName:  info.TeamDisplayName,
+		Form:      form,
+	}
+	if info.InviteValid {
+		data.Invite = invite
+	}
+	pass := r.PostFormValue("password")
+	if pass != r.PostFormValue("confirm") {
+		data.Error = "The passwords do not match."
+		h.page(w, r, http.StatusBadRequest, "signup", data)
+		return
+	}
+	ctx, cancel := h.client.Context(r.Context(), h.anonymousCtx(r))
+	defer cancel()
+	res, err := h.client.Auth.SignUp(ctx, &pb.SignUpRequest{
+		Username: form.Username, Email: form.Email, DisplayName: form.DisplayName, Password: pass, InviteToken: data.Invite,
+	})
+	if err != nil {
+		data.Error = drpc.Err(err).Message
+		h.page(w, r, statusOf(drpc.Err(err).Code), "signup", data)
+		return
+	}
+	h.startSession(w, res.Session)
+	switch {
+	case res.Team != nil:
+		http.Redirect(w, r, "/t/"+res.Team.Name, http.StatusSeeOther)
+	case info.Bootstrap:
+		http.Redirect(w, r, "/teams/new", http.StatusSeeOther)
+	default:
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	}
+}
+
+func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
+	if token := h.sessionToken(r); token != "" {
+		ctx, cancel := h.ctx(r)
+		_, _ = h.client.Auth.Logout(ctx, &pb.LogoutRequest{})
+		cancel()
+		h.me.Delete(token)
+	}
+	h.clearCookie(w, "session")
+	h.reload(w, r, "/login")
+}
+
+type joinData struct {
+	Page
+	Valid    bool
+	TeamName string
+	Token    string
+}
+
+func (h *Handler) joinData(w http.ResponseWriter, r *http.Request) (joinData, error) {
+	token := r.PathValue("token")
+	data := joinData{Page: Page{Title: "Join", CSRF: h.csrfToken(w, r), User: h.currentUser(r)}}
+	if !secure.ValidToken(token) {
+		return data, nil
+	}
+	ctx, cancel := h.client.Context(r.Context(), h.anonymousCtx(r))
+	defer cancel()
+	res, err := h.client.Teams.GetInvite(ctx, &pb.GetInviteRequest{Token: token})
+	if err != nil {
+		return data, err
+	}
+	data.Valid, data.TeamName, data.Token = res.Valid, res.TeamDisplayName, token
+	return data, nil
+}
+
+func (h *Handler) joinPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	data, err := h.joinData(w, r)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	h.page(w, r, http.StatusOK, "join", data)
+}
+
+func (h *Handler) join(w http.ResponseWriter, r *http.Request) {
+	data, err := h.joinData(w, r)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	if data.User == nil {
+		http.Redirect(w, r, "/login?next="+url.QueryEscape("/join/"+r.PathValue("token")), http.StatusSeeOther)
+		return
+	}
+	if !data.Valid {
+		h.page(w, r, http.StatusNotFound, "join", data)
+		return
+	}
+	ctx, cancel := h.ctx(r)
+	defer cancel()
+	res, err := h.client.Teams.AcceptInvite(ctx, &pb.AcceptInviteRequest{Token: data.Token})
+	if err != nil {
+		if msg, ok := formError(err); ok {
+			data.Error = msg
+			h.page(w, r, statusOf(drpc.Err(err).Code), "join", data)
+			return
+		}
+		h.fail(w, r, err)
+		return
+	}
+	http.Redirect(w, r, "/t/"+res.Team.Name, http.StatusSeeOther)
+}

@@ -1,0 +1,19 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#14213d">
+<meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"allowScriptTags":false,"historyCacheSize":0,"refreshOnHistoryMiss":true,"selfRequestsOnly":true,"scrollIntoViewOnBoost":false}'>
+<title>{{with .Title}}{{.}} · {{end}}GoChat</title>
+<link rel="icon" href="{{static "icon.svg"}}" type="image/svg+xml">
+<link rel="stylesheet" href="{{static "app.css"}}">
+<script src="{{static "htmx.min.js"}}" defer></script>
+<script src="{{static "ws.min.js"}}" defer></script>
+<script src="{{static "app.js"}}" defer></script>
+</head>
+<body hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+{{template "content" .}}
+</body>
+</html>{{end}}

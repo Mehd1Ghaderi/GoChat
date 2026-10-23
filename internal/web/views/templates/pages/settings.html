@@ -1,0 +1,31 @@
+{{define "content"}}
+<main class="page">
+  <header class="page-header">
+    <a class="btn" href="/">← Back</a>
+    <h1>Account settings</h1>
+  </header>
+  <section class="card">
+    <h2>Profile</h2>
+    <p class="muted">@{{.User.Username}} · {{.Email}}</p>
+    <form hx-post="/settings/profile" hx-target="#profile-status" class="stack">
+      <label>Display name
+        <input name="display_name" maxlength="64" required value="{{.User.DisplayName}}">
+      </label>
+      <div class="row"><button class="btn primary" type="submit">Save</button><span id="profile-status" class="status"></span></div>
+    </form>
+  </section>
+  <section class="card">
+    <h2>Password</h2>
+    <p class="muted">Changing it signs out every other session.</p>
+    <form hx-post="/settings/password" hx-target="#password-status" class="stack">
+      <label>Current password<input name="current" type="password" autocomplete="current-password" required maxlength="256"></label>
+      <label>New password<input name="new" type="password" autocomplete="new-password" required minlength="10" maxlength="256"></label>
+      <label>Confirm new password<input name="confirm" type="password" autocomplete="new-password" required minlength="10" maxlength="256"></label>
+      <div class="row"><button class="btn primary" type="submit">Change password</button><span id="password-status" class="status"></span></div>
+    </form>
+  </section>
+  <section class="card" id="totp">
+    {{template "totp" .}}
+  </section>
+</main>
+{{end}}

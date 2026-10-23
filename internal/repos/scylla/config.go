@@ -23,6 +23,9 @@ type Config struct {
 	Timeout           time.Duration `mapstructure:"timeout"`
 	ConnectTimeout    time.Duration `mapstructure:"connect_timeout"`
 	NumConns          int           `mapstructure:"num_conns"`
+	// DisableHostLookup talks only to Hosts, for a node whose advertised
+	// address the client cannot reach (a container seen from its host).
+	DisableHostLookup bool `mapstructure:"disable_host_lookup"`
 	// Replication is the keyspace's replication map, used only when the
 	// migrate command creates the keyspace.
 	Replication string     `mapstructure:"replication"`

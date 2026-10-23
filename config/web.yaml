@@ -1,0 +1,17 @@
+# Development: plain http on localhost, the server on the same host.
+logging:
+  console:
+    level: debug
+    format: text
+
+web:
+  public_url: http://localhost:8080
+  http:
+    address: "127.0.0.1:8080"
+  rate_limit:
+    auth_per_minute: 120
+    auth_burst: 60
+
+client:
+  drpc:
+    address: 127.0.0.1:7070

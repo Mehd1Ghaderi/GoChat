@@ -1,0 +1,7 @@
+# Development: Scylla published on the host by docker-compose.dev.yml.
+database:
+  scylla:
+    hosts:
+      - 127.0.0.1:9042
+    disable_host_lookup: true
+    replication: "{'class': 'SimpleStrategy', 'replication_factor': 1}"

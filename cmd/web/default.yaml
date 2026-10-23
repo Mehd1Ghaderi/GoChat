@@ -1,0 +1,65 @@
+logging:
+  console:
+    enabled: true
+    level: info
+    format: json
+  file:
+    enabled: false
+    name: web
+    level: debug
+    format: json
+    folder: .logs
+    max_size: 10
+    max_age: 7
+    max_backups: 10
+    compress: false
+  version: false
+
+web:
+  # The origin browsers use. https makes every cookie Secure and enables HSTS.
+  public_url: https://chat.example.com
+  trusted_proxies: []
+  upload_limit: 52428800
+  render_cache_size: 20000
+  http:
+    address: "0.0.0.0:8080"
+    read_header_timeout: 5s
+    read_timeout: 30s
+    write_timeout: 30s
+    idle_timeout: 120s
+    transfer_timeout: 10m
+    max_header_bytes: 16384
+    shutdown_timeout: 15s
+  rate_limit:
+    auth_per_minute: 10
+    auth_burst: 10
+    requests_per_second: 30
+    request_burst: 120
+
+client:
+  drpc:
+    address: localhost:7070
+    gateway_key: ""
+    tls:
+      enabled: false
+      ca_file: ""
+      cert_file: ""
+      key_file: ""
+      server_name: ""
+    dial_timeout: 5s
+    request_timeout: 15s
+    pool_capacity: 64
+    pool_expiration: 2m
+    max_message_size: 4194304
+
+gateway:
+  id: ""
+  reconnect_min: 500ms
+  reconnect_max: 15s
+  read_limit: 65536
+  send_queue: 512
+  write_timeout: 10s
+  ping_interval: 25s
+  max_per_user: 20
+  frame_rate: 10
+  frame_burst: 40

@@ -23,5 +23,3 @@ func init() {
 	Cmd.Flags().StringVarP(&configPath, "config-path", "p", "config", "Path to the config file")
 	Cmd.Flags().StringVarP(&configName, "config-name", "n", "web", "Name of the config file")
 }
-
-func Web(_ *cobra.Command, _ []string) error { return nil }

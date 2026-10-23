@@ -1,0 +1,22 @@
+# Development: the stores published on the host by docker-compose.dev.yml.
+# Secrets come from the environment (see .env.template).
+logging:
+  console:
+    level: debug
+    format: text
+
+server:
+  drpc:
+    address: "127.0.0.1:7070"
+  admin:
+    address: "127.0.0.1:9100"
+
+database:
+  scylla:
+    hosts:
+      - 127.0.0.1:9042
+    disable_host_lookup: true
+
+storage:
+  minio:
+    endpoint: 127.0.0.1:19000

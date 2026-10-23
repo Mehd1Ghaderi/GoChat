@@ -77,9 +77,12 @@ func (a *CasbinAdapter) LoadPolicy(m model.Model) error {
 func (a *CasbinAdapter) SavePolicy(m model.Model) error {
 	ctx, cancel := a.ctx()
 	defer cancel()
+	// The deletes go just before the inserts: sharing the batch's timestamp,
+	// the tombstones would shadow them.
+	ts := time.Now().UnixMicro()
 	b := a.repo.batch(ctx, true)
-	b.Query("DELETE FROM casbin_rules WHERE ptype = ?", "p")
-	b.Query("DELETE FROM casbin_rules WHERE ptype = ?", "g")
+	b.Query("DELETE FROM casbin_rules USING TIMESTAMP ? WHERE ptype = ?", ts-1, "p")
+	b.Query("DELETE FROM casbin_rules USING TIMESTAMP ? WHERE ptype = ?", ts-1, "g")
 	for _, sec := range []string{"p", "g"} {
 		for ptype, ast := range m[sec] {
 			for _, rule := range ast.Policy {
@@ -87,7 +90,8 @@ func (a *CasbinAdapter) SavePolicy(m model.Model) error {
 				if err != nil {
 					return err
 				}
-				insertRule(b.Query, r)
+				b.Query("INSERT INTO casbin_rules (ptype, v0, v1, v2, v3, v4, v5) VALUES (?, ?, ?, ?, ?, ?, ?) USING TIMESTAMP ?",
+					r.PType, r.V0, r.V1, r.V2, r.V3, r.V4, r.V5, ts)
 			}
 		}
 	}

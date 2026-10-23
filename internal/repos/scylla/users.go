@@ -127,11 +127,15 @@ func (r *Repository) AdvanceTOTPStep(ctx context.Context, id gocql.UUID, step in
 	return applied, wrap(err)
 }
 
+// ReplaceRecoveryCodes swaps the user's codes. The delete is written just
+// before the inserts: in one batch they would share a timestamp, and the
+// tombstone would win.
 func (r *Repository) ReplaceRecoveryCodes(ctx context.Context, id gocql.UUID, hashes [][]byte) error {
+	ts := time.Now().UnixMicro()
 	b := r.batch(ctx, true)
-	b.Query("DELETE FROM recovery_codes WHERE user_id = ?", id)
+	b.Query("DELETE FROM recovery_codes USING TIMESTAMP ? WHERE user_id = ?", ts-1, id)
 	for _, h := range hashes {
-		b.Query("INSERT INTO recovery_codes (user_id, code_hash) VALUES (?, ?)", id, h)
+		b.Query("INSERT INTO recovery_codes (user_id, code_hash) VALUES (?, ?) USING TIMESTAMP ?", id, h, ts)
 	}
 	return r.execBatch(b)
 }

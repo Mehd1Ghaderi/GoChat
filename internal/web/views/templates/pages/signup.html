@@ -1,0 +1,38 @@
+{{define "content"}}
+<main class="auth">
+  <div class="auth-card">
+    <div class="brand"><img src="{{static "icon.svg"}}" alt="" width="40" height="40"><span>GoChat</span></div>
+    {{if .Allowed}}
+    <h1>{{if .Bootstrap}}Set up GoChat{{else}}Create your account{{end}}</h1>
+    {{if .Bootstrap}}<p class="muted">This first account administers the server.</p>{{end}}
+    {{with .TeamName}}<p class="muted">You were invited to join <strong>{{.}}</strong>.</p>{{end}}
+    {{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
+    <form method="post" action="/signup" class="stack">
+      <input type="hidden" name="_csrf" value="{{.CSRF}}">
+      <input type="hidden" name="invite" value="{{.Invite}}">
+      <label>Username
+        <input name="username" autocomplete="username" required minlength="3" maxlength="32" pattern="[a-z0-9][a-z0-9._\-]{2,31}" value="{{.Form.Username}}" autofocus>
+        <small>Lowercase letters, digits, '.', '_' or '-'.</small>
+      </label>
+      <label>Display name
+        <input name="display_name" autocomplete="name" maxlength="64" value="{{.Form.DisplayName}}">
+      </label>
+      <label>Email
+        <input name="email" type="email" autocomplete="email" required maxlength="254" value="{{.Form.Email}}">
+      </label>
+      <label>Password
+        <input name="password" type="password" autocomplete="new-password" required minlength="10" maxlength="256">
+      </label>
+      <label>Confirm password
+        <input name="confirm" type="password" autocomplete="new-password" required minlength="10" maxlength="256">
+      </label>
+      <button class="btn primary block" type="submit">Create account</button>
+    </form>
+    {{else}}
+    <h1>Invite required</h1>
+    <p class="muted">Accounts on this server are created from an invite link. Ask a team admin for one.</p>
+    {{end}}
+    <p class="muted center">Have an account? <a href="/login{{with .Next}}?next={{.}}{{end}}">Sign in</a></p>
+  </div>
+</main>
+{{end}}

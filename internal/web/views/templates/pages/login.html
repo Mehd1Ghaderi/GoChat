@@ -1,0 +1,21 @@
+{{define "content"}}
+<main class="auth">
+  <div class="auth-card">
+    <div class="brand"><img src="{{static "icon.svg"}}" alt="" width="40" height="40"><span>GoChat</span></div>
+    <h1>Sign in</h1>
+    {{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
+    <form method="post" action="/login" class="stack">
+      <input type="hidden" name="_csrf" value="{{.CSRF}}">
+      <input type="hidden" name="next" value="{{.Next}}">
+      <label>Username or email
+        <input name="login" autocomplete="username" required maxlength="254" value="{{.Login}}" autofocus>
+      </label>
+      <label>Password
+        <input name="password" type="password" autocomplete="current-password" required maxlength="256">
+      </label>
+      <button class="btn primary block" type="submit">Sign in</button>
+    </form>
+    <p class="muted center">No account? <a href="/signup{{with .Next}}?next={{.}}{{end}}">Create one</a></p>
+  </div>
+</main>
+{{end}}

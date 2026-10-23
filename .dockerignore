@@ -1,0 +1,13 @@
+.DS_Store
+.git/
+.bin/
+.logs/
+.env
+.env.template
+playground/
+config/
+deployments/
+Justfile
+README.md
+*.test
+*.out

@@ -48,6 +48,7 @@ database:
     timeout: 5s
     connect_timeout: 10s
     num_conns: 2
+    disable_host_lookup: false
     replication: "{'class': 'NetworkTopologyStrategy', 'replication_factor': 3}"
     tls:
       enabled: false

@@ -1,0 +1,50 @@
+{{define "message"}}
+<article class="msg{{if .Mine}} mine{{end}}" id="msg-{{.Id}}"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>
+  <span class="avatar {{avatar .Author}}" aria-hidden="true">{{initials .Author}}</span>
+  <div class="msg-main">
+    <header>
+      <strong class="author">{{name .Author}}</strong>
+      <time datetime="{{iso .Time}}" title="{{date .Time}}">{{clock .Time}}</time>
+      {{if .Edited}}<span class="edited">(edited)</span>{{end}}
+    </header>
+    {{if .Content}}<div class="body">{{.Body}}</div>{{end}}
+    {{with .Attachments}}<ul class="files">{{range .}}{{template "attachment" .}}{{end}}</ul>{{end}}
+  </div>
+  {{if or .Mine .CanDelete}}
+  <div class="msg-actions">
+    {{if .Mine}}<button class="icon-btn sm" hx-get="/m/{{.ChannelId}}/{{.Id}}/edit" hx-target="#msg-{{.Id}}" hx-swap="outerHTML" aria-label="Edit message" title="Edit">✎</button>{{end}}
+    <button class="icon-btn sm" hx-post="/m/{{.ChannelId}}/{{.Id}}/delete" hx-confirm="Delete this message?" hx-target="#msg-{{.Id}}" hx-swap="outerHTML" aria-label="Delete message" title="Delete">🗑</button>
+  </div>
+  {{end}}
+</article>
+{{end}}
+
+{{define "message-new"}}<div id="msgs-{{.ChannelId}}" hx-swap-oob="afterbegin">{{template "message" .}}</div>{{end}}
+
+{{define "message-deleted"}}<div id="msg-{{.}}" hx-swap-oob="delete"></div>{{end}}
+
+{{define "message-edit"}}
+<article class="msg editing" id="msg-{{.Id}}">
+  <span class="avatar {{avatar .Author}}" aria-hidden="true">{{initials .Author}}</span>
+  <form class="msg-main edit-form" hx-post="/m/{{.ChannelId}}/{{.Id}}" hx-target="#msg-{{.Id}}" hx-swap="outerHTML">
+    <textarea name="content" rows="3" maxlength="16000" aria-label="Edit message" autofocus>{{.Content}}</textarea>
+    <div class="row">
+      <button class="btn primary sm" type="submit">Save</button>
+      <button class="btn sm" type="button" hx-get="/m/{{.ChannelId}}/{{.Id}}" hx-target="#msg-{{.Id}}" hx-swap="outerHTML">Cancel</button>
+    </div>
+  </form>
+</article>
+{{end}}
+
+{{define "attachment"}}
+<li class="file">
+  {{if isImage .ContentType}}
+  <a href="/files/{{.Id}}" class="thumb" target="_blank" rel="noopener"><img src="/files/{{.Id}}/inline" alt="{{.Name}}" loading="lazy" decoding="async"></a>
+  {{end}}
+  <a href="/files/{{.Id}}" class="file-link" download>
+    <span class="file-icon" aria-hidden="true">⇩</span>
+    <span class="file-name">{{.Name}}</span>
+    <small>{{size .Size}}</small>
+  </a>
+</li>
+{{end}}

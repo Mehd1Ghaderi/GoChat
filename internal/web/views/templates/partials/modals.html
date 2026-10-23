@@ -1,0 +1,125 @@
+{{define "modal-start"}}
+<div class="modal-backdrop" data-close-modal>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <header class="modal-header">
+      <h2 id="modal-title">{{.}}</h2>
+      <button class="icon-btn" type="button" data-close-modal aria-label="Close">✕</button>
+    </header>
+    <div class="modal-body">
+{{end}}
+
+{{define "modal-end"}}
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "new-channel"}}
+{{template "modal-start" "Create a channel"}}
+<form hx-post="/t/{{.Team.Name}}/channels" hx-target="#new-channel-error" class="stack">
+  <p id="new-channel-error" class="form-error" role="alert"></p>
+  <label>Name<input name="display_name" required maxlength="64" autofocus></label>
+  <label>URL name<input name="name" required minlength="2" maxlength="50" pattern="[a-z0-9][a-z0-9\-]{1,49}"><small>Lowercase letters, digits and '-'.</small></label>
+  <label>Purpose<input name="purpose" maxlength="250"></label>
+  <fieldset class="choice">
+    <legend>Who can join</legend>
+    <label class="inline"><input type="radio" name="type" value="public" checked> Public: anyone in the team</label>
+    <label class="inline"><input type="radio" name="type" value="private"> Private: by invitation only</label>
+  </fieldset>
+  <button class="btn primary" type="submit">Create</button>
+</form>
+{{template "modal-end"}}
+{{end}}
+
+{{define "browse"}}
+{{template "modal-start" "Browse channels"}}
+{{if .Channels}}
+<ul class="list">
+  {{range .Channels}}
+  <li>
+    <div><strong>#{{.DisplayName}}</strong>{{with .Purpose}}<br><small class="muted">{{.}}</small>{{end}}</div>
+    <button class="btn sm" hx-post="/t/{{$.Team.Name}}/ch/{{.Id}}/join">Join</button>
+  </li>
+  {{end}}
+</ul>
+{{else}}<p class="muted">You are in every public channel of this team.</p>{{end}}
+{{template "modal-end"}}
+{{end}}
+
+{{define "people"}}
+{{template "modal-start" .Heading}}
+<input type="search" name="q" class="search" placeholder="Search by name" aria-label="Search people" autofocus autocomplete="off"
+       hx-get="{{.SearchURL}}" hx-trigger="input changed delay:250ms, search" hx-target="#people-results">
+<div id="people-results">{{template "people-results" .}}</div>
+{{template "modal-end"}}
+{{end}}
+
+{{define "people-results"}}
+{{if .Members}}
+<ul class="list">
+  {{range .Members}}
+  <li>
+    <div class="person"><span class="avatar sm {{avatar .User}}" aria-hidden="true">{{initials .User}}</span><span><strong>{{name .User}}</strong> <small class="muted">@{{.User.Username}}</small></span></div>
+    {{if $.ActionURL}}<button class="btn sm" hx-post="{{$.ActionURL}}" hx-vals='{"user_id": "{{.User.Id}}"}'>{{$.ActionLabel}}</button>{{end}}
+  </li>
+  {{end}}
+</ul>
+{{else}}<p class="muted">Nobody matches.</p>{{end}}
+{{end}}
+
+{{define "channel-members"}}
+{{template "modal-start" "Members"}}
+{{if .CanAdd}}<button class="btn sm" hx-get="/t/{{.Team.Name}}/ch/{{.ChannelID}}/add" hx-target="#modal">Add people</button>{{end}}
+<ul class="list">
+  {{range .Members}}
+  <li>
+    <div class="person"><span class="avatar sm {{avatar .User}}" aria-hidden="true">{{initials .User}}</span><span><strong>{{name .User}}</strong> <small class="muted">@{{.User.Username}}</small></span></div>
+    {{if $.CanRemove}}<button class="btn sm danger" hx-post="/t/{{$.Team.Name}}/ch/{{$.ChannelID}}/members/{{.User.Id}}/remove" hx-confirm="Remove {{name .User}} from the channel?" hx-target="closest li" hx-swap="outerHTML">Remove</button>{{end}}
+  </li>
+  {{end}}
+</ul>
+{{template "modal-end"}}
+{{end}}
+
+{{define "team-members"}}
+{{template "modal-start" "Team members"}}
+<ul class="list">
+  {{range .Members}}
+  <li>
+    <div class="person"><span class="avatar sm {{avatar .User}}" aria-hidden="true">{{initials .User}}</span><span><strong>{{name .User}}</strong> <small class="muted">@{{.User.Username}}{{if eq .Role 2}} · admin{{end}}</small></span></div>
+    {{if and $.Admin (ne .User.Id $.MeID)}}
+    <div class="row">
+      {{if eq .Role 2}}<button class="btn sm" hx-post="/t/{{$.Team.Name}}/members/{{.User.Id}}/role" hx-vals='{"role": "member"}' hx-target="#modal">Make member</button>
+      {{else}}<button class="btn sm" hx-post="/t/{{$.Team.Name}}/members/{{.User.Id}}/role" hx-vals='{"role": "admin"}' hx-target="#modal">Make admin</button>{{end}}
+      <button class="btn sm danger" hx-post="/t/{{$.Team.Name}}/members/{{.User.Id}}/remove" hx-confirm="Remove {{name .User}} from the team?" hx-target="closest li" hx-swap="outerHTML">Remove</button>
+    </div>
+    {{end}}
+  </li>
+  {{end}}
+</ul>
+{{template "modal-end"}}
+{{end}}
+
+{{define "invite"}}
+{{template "modal-start" "Invite people"}}
+<p class="muted">Each link admits one person and expires after a while. Create one per person.</p>
+<div id="invite-result"></div>
+<button class="btn primary" hx-post="/t/{{.Team.Name}}/invites" hx-target="#invite-result">Create invite link</button>
+{{template "modal-end"}}
+{{end}}
+
+{{define "invite-link"}}
+<div class="invite-link">
+  <input type="text" readonly value="{{.URL}}" aria-label="Invite link" data-select-on-focus>
+  <button class="btn sm" type="button" data-copy="{{.URL}}">Copy</button>
+  <small class="muted">Expires {{date .ExpiresAt}}.</small>
+</div>
+{{end}}
+
+{{define "toast"}}<div id="toasts" hx-swap-oob="beforeend"><div class="toast {{.Kind}}" role="status">{{.Text}}</div></div>{{end}}
+
+{{define "status"}}<span class="status {{.Kind}}">{{.Text}}</span>{{end}}
+
+{{define "ws-control"}}<div id="ws-control" hidden hx-swap-oob="outerHTML" data-redirect="{{.}}"></div>{{end}}
+
+{{define "resync"}}<div id="resync" hx-swap-oob="outerHTML" hx-get="{{.}}" hx-trigger="load" hx-target="#main" hidden></div>{{end}}

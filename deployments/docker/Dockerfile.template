@@ -1,0 +1,28 @@
+ARG DOCKER_REGISTRY=docker.io/
+
+FROM ${DOCKER_REGISTRY}library/golang:1.27.3-alpine3.24 AS builder
+
+WORKDIR /src
+
+ARG GOPROXY
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download && go mod verify
+
+COPY . .
+
+ARG LDFLAGS="{{LDFLAGS}}"
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS" -o /out/gochat ./cmd/gochat
+
+FROM ${DOCKER_REGISTRY}library/alpine:3.24
+
+WORKDIR /app
+
+COPY --from=builder /out/gochat ./gochat
+COPY migrations ./migrations
+
+RUN adduser -D -H -u 10001 gochat
+USER 10001:10001
+
+ENTRYPOINT ["./gochat"]
+CMD ["server"]

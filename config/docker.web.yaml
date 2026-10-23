@@ -1,0 +1,7 @@
+web:
+  # Overridden by WEB_PUBLIC_URL.
+  public_url: http://localhost:8080
+
+client:
+  drpc:
+    address: server:7070

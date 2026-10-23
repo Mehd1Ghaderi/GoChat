@@ -17,6 +17,7 @@ func newCluster(cfg *Config, keyspace string) *gocql.ClusterConfig {
 	cluster.Consistency, _ = parseConsistency(cfg.Consistency)
 	cluster.SerialConsistency, _ = parseSerial(cfg.SerialConsistency)
 	cluster.RetryPolicy = &gocql.ExponentialBackoffRetryPolicy{NumRetries: 3}
+	cluster.DisableInitialHostLookup = cfg.DisableHostLookup
 	if cfg.LocalDC != "" {
 		cluster.PoolConfig.HostSelectionPolicy = gocql.TokenAwareHostPolicy(gocql.DCAwareRoundRobinPolicy(cfg.LocalDC))
 	} else {

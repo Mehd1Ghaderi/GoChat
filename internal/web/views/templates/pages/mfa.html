@@ -1,0 +1,19 @@
+{{define "content"}}
+<main class="auth">
+  <div class="auth-card">
+    <div class="brand"><img src="{{static "icon.svg"}}" alt="" width="40" height="40"><span>GoChat</span></div>
+    <h1>Two-factor authentication</h1>
+    <p class="muted">Enter the 6-digit code from your authenticator app, or one of your recovery codes.</p>
+    {{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
+    <form method="post" action="/login/mfa" class="stack">
+      <input type="hidden" name="_csrf" value="{{.CSRF}}">
+      <input type="hidden" name="next" value="{{.Next}}">
+      <label>Code
+        <input name="code" inputmode="numeric" autocomplete="one-time-code" required maxlength="16" autofocus>
+      </label>
+      <button class="btn primary block" type="submit">Verify</button>
+    </form>
+    <p class="muted center"><a href="/login">Start over</a></p>
+  </div>
+</main>
+{{end}}

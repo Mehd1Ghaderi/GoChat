@@ -1,0 +1,40 @@
+{{define "totp"}}
+<h2>Two-factor authentication</h2>
+{{if .User.TotpEnabled}}
+<p><span class="badge on">On</span> Signing in asks for a code from your authenticator app.</p>
+<form hx-post="/settings/totp/disable" hx-target="#totp" class="stack">
+  {{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
+  <label>Password<input name="password" type="password" autocomplete="current-password" required maxlength="256"></label>
+  <label>Code or recovery code<input name="code" inputmode="numeric" autocomplete="one-time-code" required maxlength="16"></label>
+  <button class="btn danger" type="submit">Turn off</button>
+</form>
+{{else}}
+<p class="muted">Add a second step to signing in with an authenticator app.</p>
+<form hx-post="/settings/totp/begin" hx-target="#totp" class="stack">
+  {{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
+  <label>Password<input name="password" type="password" autocomplete="current-password" required maxlength="256"></label>
+  <button class="btn primary" type="submit">Set up</button>
+</form>
+{{end}}
+{{end}}
+
+{{define "totp-setup"}}
+<h2>Scan the code</h2>
+<p class="muted">Scan it with an authenticator app, or type the key, then enter the code it shows.</p>
+<img class="qr" src="{{.QR}}" alt="QR code for your authenticator app" width="200" height="200">
+<p class="secret"><code>{{.Secret}}</code></p>
+<form hx-post="/settings/totp/confirm" hx-target="#totp" class="stack">
+  <input type="hidden" name="secret" value="{{.Secret}}">
+  <input type="hidden" name="url" value="{{.URL}}">
+  {{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
+  <label>Code<input name="code" inputmode="numeric" autocomplete="one-time-code" required maxlength="6" autofocus></label>
+  <button class="btn primary" type="submit">Turn on</button>
+</form>
+{{end}}
+
+{{define "totp-codes"}}
+<h2>Save your recovery codes</h2>
+<p>Two-factor authentication is on. Each code below signs you in once if you lose your device. They are shown only now.</p>
+<ul class="codes">{{range .}}<li><code>{{.}}</code></li>{{end}}</ul>
+<a class="btn" href="/settings">Done</a>
+{{end}}

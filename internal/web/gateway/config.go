@@ -1,0 +1,57 @@
+package gateway
+
+import (
+	"errors"
+	"regexp"
+	"time"
+
+	"github.com/ssenerg/gochat/internal/config"
+)
+
+type Config struct {
+	// ID names this gateway in the server's logs; empty uses the hostname.
+	ID           string        `mapstructure:"id"`
+	ReconnectMin time.Duration `mapstructure:"reconnect_min"`
+	ReconnectMax time.Duration `mapstructure:"reconnect_max"`
+	// ReadLimit bounds one message a browser sends.
+	ReadLimit int64 `mapstructure:"read_limit"`
+	// SendQueue is how many fragments a slow browser may lag behind before
+	// its socket is closed.
+	SendQueue    int           `mapstructure:"send_queue"`
+	WriteTimeout time.Duration `mapstructure:"write_timeout"`
+	PingInterval time.Duration `mapstructure:"ping_interval"`
+	// MaxPerUser bounds the sockets one person may hold open.
+	MaxPerUser int `mapstructure:"max_per_user"`
+	// FrameRate and FrameBurst bound how fast a browser may send.
+	FrameRate  float64 `mapstructure:"frame_rate"`
+	FrameBurst int     `mapstructure:"frame_burst"`
+}
+
+var _ config.Config = (*Config)(nil)
+
+var idRe = regexp.MustCompile(`^[A-Za-z0-9._-]{0,64}$`)
+
+func (c *Config) Validate() error {
+	if !idRe.MatchString(c.ID) {
+		return errors.New("id must be up to 64 letters, digits, '.', '_' or '-'")
+	}
+	if c.ReconnectMin <= 0 || c.ReconnectMax < c.ReconnectMin {
+		return errors.New("reconnect_min must be positive and at most reconnect_max")
+	}
+	if c.ReadLimit < 1024 || c.ReadLimit > 1<<20 {
+		return errors.New("read_limit must be between 1KiB and 1MiB")
+	}
+	if c.SendQueue < 8 {
+		return errors.New("send_queue must be at least 8")
+	}
+	if c.WriteTimeout <= 0 || c.PingInterval <= 0 {
+		return errors.New("write_timeout and ping_interval must be positive")
+	}
+	if c.MaxPerUser < 1 {
+		return errors.New("max_per_user must be at least 1")
+	}
+	if c.FrameRate <= 0 || c.FrameBurst < 1 {
+		return errors.New("frame_rate and frame_burst must be positive")
+	}
+	return nil
+}
