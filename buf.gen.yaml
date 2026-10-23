@@ -1,0 +1,14 @@
+# Plugins run through `go tool`, pinned in go.mod, so generation needs no network.
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/ssenerg/gochat/api/protobuf/gen
+plugins:
+  - local: ["go", "tool", "protoc-gen-go"]
+    out: .
+    opt: module=github.com/ssenerg/gochat
+  - local: ["go", "tool", "protoc-gen-go-drpc"]
+    out: .
+    opt: module=github.com/ssenerg/gochat

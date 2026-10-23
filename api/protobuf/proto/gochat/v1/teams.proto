@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package gochat.v1;
+
+import "gochat/v1/types.proto";
+import "google/protobuf/timestamp.proto";
+
+service TeamService {
+  rpc CreateTeam(CreateTeamRequest) returns (CreateTeamResponse);
+  rpc ListTeams(ListTeamsRequest) returns (ListTeamsResponse);
+  rpc GetTeam(GetTeamRequest) returns (GetTeamResponse);
+  rpc ListTeamMembers(ListTeamMembersRequest) returns (ListTeamMembersResponse);
+  rpc RemoveTeamMember(RemoveTeamMemberRequest) returns (RemoveTeamMemberResponse);
+  rpc UpdateTeamMemberRole(UpdateTeamMemberRoleRequest) returns (UpdateTeamMemberRoleResponse);
+  rpc CreateInvite(CreateInviteRequest) returns (CreateInviteResponse);
+  rpc GetInvite(GetInviteRequest) returns (GetInviteResponse);
+  rpc AcceptInvite(AcceptInviteRequest) returns (AcceptInviteResponse);
+}
+
+message CreateTeamRequest {
+  string name = 1;
+  string display_name = 2;
+  string description = 3;
+}
+
+message CreateTeamResponse {
+  Team team = 1;
+}
+
+message ListTeamsRequest {}
+
+message ListTeamsResponse {
+  repeated Team teams = 1;
+}
+
+message GetTeamRequest {
+  oneof key {
+    string id = 1;
+    string name = 2;
+  }
+}
+
+message GetTeamResponse {
+  Team team = 1;
+}
+
+message ListTeamMembersRequest {
+  string team_id = 1;
+  // Case-insensitive prefix of the username or display name; empty lists all.
+  string query = 2;
+  uint32 limit = 3;
+}
+
+message ListTeamMembersResponse {
+  repeated TeamMember members = 1;
+}
+
+message RemoveTeamMemberRequest {
+  string team_id = 1;
+  string user_id = 2;
+}
+
+message RemoveTeamMemberResponse {}
+
+message UpdateTeamMemberRoleRequest {
+  string team_id = 1;
+  string user_id = 2;
+  TeamRole role = 3;
+}
+
+message UpdateTeamMemberRoleResponse {}
+
+message CreateInviteRequest {
+  string team_id = 1;
+}
+
+message CreateInviteResponse {
+  // Shown once: only its hash is stored.
+  string token = 1;
+  google.protobuf.Timestamp expires_at = 2;
+}
+
+message GetInviteRequest {
+  string token = 1;
+}
+
+message GetInviteResponse {
+  bool valid = 1;
+  string team_display_name = 2;
+}
+
+message AcceptInviteRequest {
+  string token = 1;
+}
+
+message AcceptInviteResponse {
+  Team team = 1;
+}

@@ -1,0 +1,69 @@
+syntax = "proto3";
+
+package gochat.v1;
+
+import "gochat/v1/types.proto";
+
+service MessageService {
+  rpc PostMessage(PostMessageRequest) returns (PostMessageResponse);
+  rpc EditMessage(EditMessageRequest) returns (EditMessageResponse);
+  rpc DeleteMessage(DeleteMessageRequest) returns (DeleteMessageResponse);
+  rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse);
+  rpc GetMessage(GetMessageRequest) returns (GetMessageResponse);
+  rpc SendTyping(SendTypingRequest) returns (SendTypingResponse);
+}
+
+message PostMessageRequest {
+  string channel_id = 1;
+  string content = 2;
+  repeated string attachment_ids = 3;
+}
+
+message PostMessageResponse {
+  Message message = 1;
+}
+
+message EditMessageRequest {
+  string channel_id = 1;
+  string message_id = 2;
+  string content = 3;
+}
+
+message EditMessageResponse {
+  Message message = 1;
+}
+
+message DeleteMessageRequest {
+  string channel_id = 1;
+  string message_id = 2;
+}
+
+message DeleteMessageResponse {}
+
+message ListMessagesRequest {
+  string channel_id = 1;
+  // Exclusive upper bound; empty starts at the newest message.
+  string before_id = 2;
+  uint32 limit = 3;
+}
+
+message ListMessagesResponse {
+  // Newest first.
+  repeated Message messages = 1;
+  bool has_more = 2;
+}
+
+message GetMessageRequest {
+  string channel_id = 1;
+  string message_id = 2;
+}
+
+message GetMessageResponse {
+  Message message = 1;
+}
+
+message SendTypingRequest {
+  string channel_id = 1;
+}
+
+message SendTypingResponse {}

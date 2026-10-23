@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package gochat.v1;
+
+import "gochat/v1/types.proto";
+
+service FileService {
+  // The first message is the header, every other one a chunk.
+  rpc Upload(stream UploadRequest) returns (UploadResponse);
+  // The first message is the header, every other one a chunk.
+  rpc Download(DownloadRequest) returns (stream DownloadResponse);
+}
+
+message UploadHeader {
+  string channel_id = 1;
+  string name = 2;
+}
+
+message UploadRequest {
+  oneof part {
+    UploadHeader header = 1;
+    bytes chunk = 2;
+  }
+}
+
+message UploadResponse {
+  Attachment attachment = 1;
+}
+
+message DownloadRequest {
+  string attachment_id = 1;
+}
+
+message DownloadResponse {
+  oneof part {
+    Attachment header = 1;
+    bytes chunk = 2;
+  }
+}

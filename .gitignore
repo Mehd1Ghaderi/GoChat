@@ -1,0 +1,8 @@
+.DS_Store
+.bin/
+.logs/
+.env
+playground/
+deployments/docker/certs/
+*.test
+*.out

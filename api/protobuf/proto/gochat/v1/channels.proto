@@ -1,0 +1,108 @@
+syntax = "proto3";
+
+package gochat.v1;
+
+import "gochat/v1/types.proto";
+
+service ChannelService {
+  rpc ListChannels(ListChannelsRequest) returns (ListChannelsResponse);
+  rpc BrowseChannels(BrowseChannelsRequest) returns (BrowseChannelsResponse);
+  rpc CreateChannel(CreateChannelRequest) returns (CreateChannelResponse);
+  rpc GetChannel(GetChannelRequest) returns (GetChannelResponse);
+  rpc JoinChannel(JoinChannelRequest) returns (JoinChannelResponse);
+  rpc LeaveChannel(LeaveChannelRequest) returns (LeaveChannelResponse);
+  rpc AddChannelMember(AddChannelMemberRequest) returns (AddChannelMemberResponse);
+  rpc RemoveChannelMember(RemoveChannelMemberRequest) returns (RemoveChannelMemberResponse);
+  rpc ListChannelMembers(ListChannelMembersRequest) returns (ListChannelMembersResponse);
+  rpc OpenDirectChannel(OpenDirectChannelRequest) returns (OpenDirectChannelResponse);
+  rpc MarkChannelRead(MarkChannelReadRequest) returns (MarkChannelReadResponse);
+}
+
+message ListChannelsRequest {
+  // The team's channels the caller belongs to, and every direct channel.
+  string team_id = 1;
+}
+
+message ListChannelsResponse {
+  repeated Channel channels = 1;
+}
+
+message BrowseChannelsRequest {
+  string team_id = 1;
+}
+
+message BrowseChannelsResponse {
+  // Public channels of the team the caller has not joined.
+  repeated Channel channels = 1;
+}
+
+message CreateChannelRequest {
+  string team_id = 1;
+  string name = 2;
+  string display_name = 3;
+  string purpose = 4;
+  ChannelType type = 5;
+}
+
+message CreateChannelResponse {
+  Channel channel = 1;
+}
+
+message GetChannelRequest {
+  string channel_id = 1;
+}
+
+message GetChannelResponse {
+  Channel channel = 1;
+}
+
+message JoinChannelRequest {
+  string channel_id = 1;
+}
+
+message JoinChannelResponse {
+  Channel channel = 1;
+}
+
+message LeaveChannelRequest {
+  string channel_id = 1;
+}
+
+message LeaveChannelResponse {}
+
+message AddChannelMemberRequest {
+  string channel_id = 1;
+  string user_id = 2;
+}
+
+message AddChannelMemberResponse {}
+
+message RemoveChannelMemberRequest {
+  string channel_id = 1;
+  string user_id = 2;
+}
+
+message RemoveChannelMemberResponse {}
+
+message ListChannelMembersRequest {
+  string channel_id = 1;
+}
+
+message ListChannelMembersResponse {
+  repeated ChannelMember members = 1;
+}
+
+message OpenDirectChannelRequest {
+  string user_id = 1;
+}
+
+message OpenDirectChannelResponse {
+  Channel channel = 1;
+}
+
+message MarkChannelReadRequest {
+  string channel_id = 1;
+  string message_id = 2;
+}
+
+message MarkChannelReadResponse {}

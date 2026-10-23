@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package gochat.v1;
+
+import "gochat/v1/types.proto";
+
+service UserService {
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  rpc UpdateProfile(UpdateProfileRequest) returns (UpdateProfileResponse);
+  rpc GetPresence(GetPresenceRequest) returns (GetPresenceResponse);
+}
+
+message GetUserRequest {
+  string user_id = 1;
+}
+
+message GetUserResponse {
+  User user = 1;
+}
+
+message UpdateProfileRequest {
+  string display_name = 1;
+}
+
+message UpdateProfileResponse {
+  User user = 1;
+}
+
+message GetPresenceRequest {
+  repeated string user_ids = 1;
+}
+
+message GetPresenceResponse {
+  repeated string online_user_ids = 1;
+}

@@ -1,0 +1,139 @@
+// Package models holds the stored entities.
+package models
+
+import (
+	"time"
+
+	"github.com/gocql/gocql"
+)
+
+type SystemRole string
+
+const (
+	SystemRoleUser  SystemRole = "system_user"
+	SystemRoleAdmin SystemRole = "system_admin"
+)
+
+type TeamRole string
+
+const (
+	TeamRoleMember TeamRole = "team_member"
+	TeamRoleAdmin  TeamRole = "team_admin"
+)
+
+type ChannelRole string
+
+const (
+	ChannelRoleMember ChannelRole = "channel_member"
+	ChannelRoleAdmin  ChannelRole = "channel_admin"
+)
+
+type ChannelKind string
+
+const (
+	ChannelPublic  ChannelKind = "public"
+	ChannelPrivate ChannelKind = "private"
+	ChannelDirect  ChannelKind = "direct"
+)
+
+type User struct {
+	ID           gocql.UUID `db:"id"`
+	Username     string     `db:"username"`
+	Email        string     `db:"email"`
+	DisplayName  string     `db:"display_name"`
+	PasswordHash string     `db:"password_hash"`
+	Role         SystemRole `db:"system_role"`
+	TOTPEnabled  bool       `db:"totp_enabled"`
+	TOTPSecret   []byte     `db:"totp_secret"`
+	TOTPPending  []byte     `db:"totp_pending"`
+	TOTPLastStep int64      `db:"totp_last_step"`
+	Deactivated  bool       `db:"deactivated"`
+	CreatedAt    time.Time  `db:"created_at"`
+	UpdatedAt    time.Time  `db:"updated_at"`
+}
+
+type Session struct {
+	TokenHash []byte     `db:"token_hash"`
+	UserID    gocql.UUID `db:"user_id"`
+	CreatedAt time.Time  `db:"created_at"`
+	ExpiresAt time.Time  `db:"expires_at"`
+	IP        string     `db:"ip"`
+	UserAgent string     `db:"user_agent"`
+}
+
+type MFAChallenge struct {
+	TokenHash []byte     `db:"token_hash"`
+	UserID    gocql.UUID `db:"user_id"`
+	Attempts  int        `db:"attempts"`
+	ExpiresAt time.Time  `db:"expires_at"`
+	IP        string     `db:"ip"`
+	UserAgent string     `db:"user_agent"`
+}
+
+type Team struct {
+	ID          gocql.UUID `db:"id"`
+	Name        string     `db:"name"`
+	DisplayName string     `db:"display_name"`
+	Description string     `db:"description"`
+	CreatedBy   gocql.UUID `db:"created_by"`
+	CreatedAt   time.Time  `db:"created_at"`
+}
+
+type TeamMember struct {
+	TeamID   gocql.UUID `db:"team_id"`
+	UserID   gocql.UUID `db:"user_id"`
+	Role     TeamRole   `db:"role"`
+	JoinedAt time.Time  `db:"joined_at"`
+}
+
+type Channel struct {
+	ID            gocql.UUID  `db:"id"`
+	TeamID        gocql.UUID  `db:"team_id"`
+	Name          string      `db:"name"`
+	DisplayName   string      `db:"display_name"`
+	Purpose       string      `db:"purpose"`
+	Kind          ChannelKind `db:"kind"`
+	CreatedBy     gocql.UUID  `db:"created_by"`
+	CreatedAt     time.Time   `db:"created_at"`
+	LastMessageID gocql.UUID  `db:"last_message_id"`
+}
+
+type ChannelMember struct {
+	ChannelID gocql.UUID  `db:"channel_id"`
+	UserID    gocql.UUID  `db:"user_id"`
+	TeamID    gocql.UUID  `db:"team_id"`
+	Role      ChannelRole `db:"role"`
+	JoinedAt  time.Time   `db:"joined_at"`
+}
+
+type Message struct {
+	ChannelID   gocql.UUID   `db:"channel_id"`
+	Bucket      int32        `db:"bucket"`
+	ID          gocql.UUID   `db:"id"`
+	UserID      gocql.UUID   `db:"user_id"`
+	Content     string       `db:"content"`
+	Attachments []gocql.UUID `db:"attachments"`
+	EditedAt    time.Time    `db:"edited_at"`
+}
+
+type Attachment struct {
+	ID          gocql.UUID `db:"id"`
+	ChannelID   gocql.UUID `db:"channel_id"`
+	UploaderID  gocql.UUID `db:"uploader_id"`
+	Name        string     `db:"name"`
+	ContentType string     `db:"content_type"`
+	Size        int64      `db:"size"`
+	ObjectKey   string     `db:"object_key"`
+	MessageID   gocql.UUID `db:"message_id"`
+	CreatedAt   time.Time  `db:"created_at"`
+}
+
+type Invite struct {
+	TokenHash []byte     `db:"token_hash"`
+	TeamID    gocql.UUID `db:"team_id"`
+	CreatedBy gocql.UUID `db:"created_by"`
+	CreatedAt time.Time  `db:"created_at"`
+	ExpiresAt time.Time  `db:"expires_at"`
+	UsedBy    gocql.UUID `db:"used_by"`
+	UsedAt    time.Time  `db:"used_at"`
+}

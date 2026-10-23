@@ -1,0 +1,113 @@
+syntax = "proto3";
+
+package gochat.v1;
+
+import "gochat/v1/types.proto";
+
+// AuthService authenticates people. Every RPC but Me, Logout and the TOTP
+// management ones runs without a session.
+service AuthService {
+  rpc GetSignupInfo(GetSignupInfoRequest) returns (GetSignupInfoResponse);
+  rpc SignUp(SignUpRequest) returns (SignUpResponse);
+  rpc Login(LoginRequest) returns (LoginResponse);
+  rpc VerifyMFA(VerifyMFARequest) returns (VerifyMFAResponse);
+  rpc Logout(LogoutRequest) returns (LogoutResponse);
+  rpc Me(MeRequest) returns (MeResponse);
+  rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
+  rpc BeginTOTPSetup(BeginTOTPSetupRequest) returns (BeginTOTPSetupResponse);
+  rpc ConfirmTOTPSetup(ConfirmTOTPSetupRequest) returns (ConfirmTOTPSetupResponse);
+  rpc DisableTOTP(DisableTOTPRequest) returns (DisableTOTPResponse);
+}
+
+message GetSignupInfoRequest {
+  string invite_token = 1;
+}
+
+message GetSignupInfoResponse {
+  // No account exists yet: the first one becomes the system admin.
+  bool bootstrap = 1;
+  bool open = 2;
+  bool invite_valid = 3;
+  string team_display_name = 4;
+}
+
+message SignUpRequest {
+  string username = 1;
+  string email = 2;
+  string display_name = 3;
+  string password = 4;
+  string invite_token = 5;
+}
+
+message SignUpResponse {
+  Session session = 1;
+  // The team the invite joined, if any.
+  Team team = 2;
+}
+
+message LoginRequest {
+  // Username or email.
+  string login = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  oneof result {
+    Session session = 1;
+    // A short-lived challenge to answer with VerifyMFA.
+    string mfa_token = 2;
+  }
+}
+
+message VerifyMFARequest {
+  string mfa_token = 1;
+  // A TOTP code or a recovery code.
+  string code = 2;
+}
+
+message VerifyMFAResponse {
+  Session session = 1;
+}
+
+message LogoutRequest {}
+
+message LogoutResponse {}
+
+message MeRequest {}
+
+message MeResponse {
+  User user = 1;
+  string email = 2;
+  string session_id = 3;
+}
+
+message ChangePasswordRequest {
+  string current_password = 1;
+  string new_password = 2;
+}
+
+message ChangePasswordResponse {}
+
+message BeginTOTPSetupRequest {
+  string password = 1;
+}
+
+message BeginTOTPSetupResponse {
+  string secret = 1;
+  string url = 2;
+}
+
+message ConfirmTOTPSetupRequest {
+  string code = 1;
+}
+
+message ConfirmTOTPSetupResponse {
+  repeated string recovery_codes = 1;
+}
+
+message DisableTOTPRequest {
+  string password = 1;
+  string code = 2;
+}
+
+message DisableTOTPResponse {}

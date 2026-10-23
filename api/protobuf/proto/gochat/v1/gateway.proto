@@ -1,0 +1,116 @@
+syntax = "proto3";
+
+package gochat.v1;
+
+import "gochat/v1/types.proto";
+
+// GatewayService carries the real-time events of the people a web gateway
+// serves. A gateway attaches each of its connections with the session that
+// opened it, and receives the events of those sessions' users only.
+service GatewayService {
+  rpc Connect(stream ConnectRequest) returns (stream ConnectResponse);
+}
+
+message ConnectRequest {
+  oneof frame {
+    Hello hello = 1;
+    Attach attach = 2;
+    Detach detach = 3;
+  }
+}
+
+message Hello {
+  string gateway_id = 1;
+}
+
+message Attach {
+  uint64 conn_id = 1;
+  string session_token = 2;
+}
+
+message Detach {
+  uint64 conn_id = 1;
+}
+
+message ConnectResponse {
+  oneof frame {
+    Welcome welcome = 1;
+    Attached attached = 2;
+    AttachRejected attach_rejected = 3;
+    Event event = 4;
+    SessionsRevoked sessions_revoked = 5;
+  }
+}
+
+message Welcome {}
+
+message Attached {
+  uint64 conn_id = 1;
+  User user = 2;
+  string session_id = 3;
+}
+
+message AttachRejected {
+  uint64 conn_id = 1;
+}
+
+message SessionsRevoked {
+  repeated string session_ids = 1;
+}
+
+message Event {
+  // Recipients on this gateway; ignored when broadcast is set.
+  repeated string user_ids = 1;
+  bool broadcast = 2;
+  oneof payload {
+    MessagePosted message_posted = 3;
+    MessageEdited message_edited = 4;
+    MessageDeleted message_deleted = 5;
+    Typing typing = 6;
+    ChannelJoined channel_joined = 7;
+    ChannelLeft channel_left = 8;
+    Presence presence = 9;
+    TeamJoined team_joined = 10;
+    TeamLeft team_left = 11;
+  }
+}
+
+message MessagePosted {
+  Message message = 1;
+}
+
+message MessageEdited {
+  Message message = 1;
+}
+
+message MessageDeleted {
+  string channel_id = 1;
+  string message_id = 2;
+}
+
+message Typing {
+  string channel_id = 1;
+  User user = 2;
+}
+
+message ChannelJoined {
+  Channel channel = 1;
+}
+
+message ChannelLeft {
+  string channel_id = 1;
+  string team_id = 2;
+}
+
+message Presence {
+  string user_id = 1;
+  bool online = 2;
+}
+
+message TeamJoined {
+  Team team = 1;
+}
+
+message TeamLeft {
+  string team_id = 1;
+}

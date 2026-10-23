@@ -1,0 +1,101 @@
+syntax = "proto3";
+
+package gochat.v1;
+
+import "google/protobuf/timestamp.proto";
+
+enum SystemRole {
+  SYSTEM_ROLE_UNSPECIFIED = 0;
+  SYSTEM_ROLE_USER = 1;
+  SYSTEM_ROLE_ADMIN = 2;
+}
+
+enum TeamRole {
+  TEAM_ROLE_UNSPECIFIED = 0;
+  TEAM_ROLE_MEMBER = 1;
+  TEAM_ROLE_ADMIN = 2;
+}
+
+enum ChannelRole {
+  CHANNEL_ROLE_UNSPECIFIED = 0;
+  CHANNEL_ROLE_MEMBER = 1;
+  CHANNEL_ROLE_ADMIN = 2;
+}
+
+enum ChannelType {
+  CHANNEL_TYPE_UNSPECIFIED = 0;
+  CHANNEL_TYPE_PUBLIC = 1;
+  CHANNEL_TYPE_PRIVATE = 2;
+  CHANNEL_TYPE_DIRECT = 3;
+}
+
+message User {
+  string id = 1;
+  string username = 2;
+  string display_name = 3;
+  SystemRole role = 4;
+  bool totp_enabled = 5;
+  google.protobuf.Timestamp created_at = 6;
+  bool deactivated = 7;
+}
+
+message Session {
+  string token = 1;
+  string id = 2;
+  google.protobuf.Timestamp expires_at = 3;
+}
+
+message Team {
+  string id = 1;
+  string name = 2;
+  string display_name = 3;
+  string description = 4;
+  // The caller's role in the team.
+  TeamRole role = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message TeamMember {
+  User user = 1;
+  TeamRole role = 2;
+  google.protobuf.Timestamp joined_at = 3;
+}
+
+message Channel {
+  string id = 1;
+  string team_id = 2;
+  string name = 3;
+  string display_name = 4;
+  string purpose = 5;
+  ChannelType type = 6;
+  // The caller's role in the channel, unspecified when not a member.
+  ChannelRole role = 7;
+  string last_message_id = 8;
+  string last_read_id = 9;
+  // The other side of a direct channel.
+  User peer = 10;
+  google.protobuf.Timestamp created_at = 11;
+}
+
+message ChannelMember {
+  User user = 1;
+  ChannelRole role = 2;
+  google.protobuf.Timestamp joined_at = 3;
+}
+
+message Attachment {
+  string id = 1;
+  string name = 2;
+  string content_type = 3;
+  int64 size = 4;
+}
+
+message Message {
+  string id = 1;
+  string channel_id = 2;
+  User author = 3;
+  string content = 4;
+  repeated Attachment attachments = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp edited_at = 7;
+}
