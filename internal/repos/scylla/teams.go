@@ -2,10 +2,13 @@ package scylla
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/gocql/gocql"
+	"go.uber.org/zap"
 
+	"github.com/ssenerg/gochat/internal/core/ids"
 	"github.com/ssenerg/gochat/internal/core/models"
 	ierrors "github.com/ssenerg/gochat/internal/errors"
 )
@@ -138,18 +141,72 @@ func (r *Repository) UpdateMemberDisplayName(ctx context.Context, userID gocql.U
 	return nil
 }
 
+const inviteColumns = "token_hash, team_id, created_by, created_at, expires_at, used_by, used_at"
+
+// CreateInvite writes the invite and lists it with its team's open invites.
 func (r *Repository) CreateInvite(ctx context.Context, inv *models.Invite) error {
-	return wrap(r.query(ctx, "INSERT INTO invites (token_hash, team_id, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?) USING TTL ?",
-		inv.TokenHash, inv.TeamID, inv.CreatedBy, inv.CreatedAt, inv.ExpiresAt, ttlSeconds(inv.ExpiresAt, inv.CreatedAt)).ExecRelease())
+	b := r.batch(ctx, true)
+	b.Query("INSERT INTO invites (token_hash, team_id, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?) USING TTL ?",
+		inv.TokenHash, inv.TeamID, inv.CreatedBy, inv.CreatedAt, inv.ExpiresAt, ttlSeconds(inv.ExpiresAt, inv.CreatedAt))
+	listTeamInvite(b, inv, inv.CreatedAt)
+	return r.execBatch(b)
+}
+
+func listTeamInvite(b *gocql.Batch, inv *models.Invite, now time.Time) {
+	b.Query("INSERT INTO team_invites (team_id, token_hash, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?) USING TTL ?",
+		inv.TeamID, inv.TokenHash, inv.CreatedBy, inv.CreatedAt, inv.ExpiresAt, ttlSeconds(inv.ExpiresAt, now))
 }
 
 func (r *Repository) GetInvite(ctx context.Context, hash []byte) (*models.Invite, error) {
 	var inv models.Invite
-	err := r.query(ctx, "SELECT token_hash, team_id, created_by, created_at, expires_at, used_by, used_at FROM invites WHERE token_hash = ?", hash).GetRelease(&inv)
+	err := r.query(ctx, "SELECT "+inviteColumns+" FROM invites WHERE token_hash = ?", hash).GetRelease(&inv)
 	if err != nil {
 		return nil, wrap(err)
 	}
 	return &inv, nil
+}
+
+// ListTeamInvites returns at most limit of the team's invites, newest first,
+// leaving out those used, expired or revoked.
+func (r *Repository) ListTeamInvites(ctx context.Context, teamID gocql.UUID, limit int) ([]*models.Invite, error) {
+	var listed []*models.Invite
+	err := r.query(ctx, "SELECT team_id, token_hash, created_by, created_at, expires_at FROM team_invites WHERE team_id = ? LIMIT ?",
+		teamID, limit).SelectRelease(&listed)
+	if err != nil {
+		return nil, wrap(err)
+	}
+	// The list is cleaned as invites are used, but the invites themselves
+	// decide what is open.
+	open := make(map[string]bool, len(listed))
+	now := time.Now()
+	for chunk := range slices.Chunk(listed, 100) {
+		hashes := make([][]byte, len(chunk))
+		for i, inv := range chunk {
+			hashes[i] = inv.TokenHash
+		}
+		var current []*models.Invite
+		if err := r.query(ctx, "SELECT "+inviteColumns+" FROM invites WHERE token_hash IN ?", hashes).SelectRelease(&current); err != nil {
+			return nil, wrap(err)
+		}
+		for _, inv := range current {
+			if inv.TeamID == teamID && ids.IsZero(inv.UsedBy) && now.Before(inv.ExpiresAt) {
+				open[string(inv.TokenHash)] = true
+			}
+		}
+	}
+	out := slices.DeleteFunc(listed, func(inv *models.Invite) bool { return !open[string(inv.TokenHash)] })
+	slices.SortFunc(out, func(a, b *models.Invite) int { return b.CreatedAt.Compare(a.CreatedAt) })
+	return out, nil
+}
+
+// RevokeInvite deletes an unused invite of teamID, reporting false when it was
+// used or is gone already. It leaves the team's list either way.
+func (r *Repository) RevokeInvite(ctx context.Context, teamID gocql.UUID, hash []byte) (bool, error) {
+	applied, err := r.query(ctx, "DELETE FROM invites WHERE token_hash = ? IF used_by = null AND team_id = ?", hash, teamID).ExecCASRelease()
+	if err != nil {
+		return false, wrap(err)
+	}
+	return applied, wrap(r.query(ctx, "DELETE FROM team_invites WHERE team_id = ? AND token_hash = ?", teamID, hash).ExecRelease())
 }
 
 // ConsumeInvite marks the invite used by userID, reporting false when someone
@@ -167,12 +224,22 @@ func (r *Repository) ConsumeInvite(ctx context.Context, inv *models.Invite, user
 	if err != nil {
 		return false, wrap(err)
 	}
+	if applied {
+		if err := r.query(ctx, "DELETE FROM team_invites WHERE team_id = ? AND token_hash = ?", inv.TeamID, inv.TokenHash).ExecRelease(); err != nil {
+			r.logger.Warn("failed to drop a used invite from its team's list", zap.Error(err))
+		}
+	}
 	return applied || row["used_by"] == userID, nil
 }
 
 // ReleaseInvite undoes a consumption whose join could not complete.
 func (r *Repository) ReleaseInvite(ctx context.Context, inv *models.Invite, userID gocql.UUID, now time.Time) error {
-	_, err := r.query(ctx, "UPDATE invites USING TTL ? SET used_by = null, used_at = null WHERE token_hash = ? IF used_by = ?",
+	applied, err := r.query(ctx, "UPDATE invites USING TTL ? SET used_by = null, used_at = null WHERE token_hash = ? IF used_by = ?",
 		ttlSeconds(inv.ExpiresAt, now), inv.TokenHash, userID).ExecCASRelease()
-	return wrap(err)
+	if err != nil || !applied {
+		return wrap(err)
+	}
+	b := r.batch(ctx, false)
+	listTeamInvite(b, inv, now)
+	return r.execBatch(b)
 }

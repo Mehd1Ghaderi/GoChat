@@ -118,6 +118,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("POST /t/{team}/dm", h.csrf(http.HandlerFunc(h.openDirect)))
 	mux.HandleFunc("GET /t/{team}/invite", h.inviteModal)
 	mux.Handle("POST /t/{team}/invites", h.csrf(http.HandlerFunc(h.createInvite)))
+	mux.Handle("POST /t/{team}/invites/{invite}/revoke", h.csrf(http.HandlerFunc(h.revokeInvite)))
 	mux.HandleFunc("GET /t/{team}/members", h.teamMembers)
 	mux.Handle("POST /t/{team}/members/{user}/remove", h.csrf(http.HandlerFunc(h.removeTeamMember)))
 	mux.Handle("POST /t/{team}/members/{user}/role", h.csrf(http.HandlerFunc(h.teamMemberRole)))

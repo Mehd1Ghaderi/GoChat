@@ -61,7 +61,9 @@ one process. Scylla and MinIO scale independently.
 - TOTP: optional per user, secrets sealed with AES-256-GCM bound to the user
   id, codes single-use, ten hashed single-use recovery codes.
 - Invites: one-time, expiring links; only the token hash is stored and it is
-  consumed with a lightweight transaction.
+  consumed with a lightweight transaction. Team admins see the open invites
+  and can revoke them; an invite is suspended while its creator may not
+  invite, and creating them is capped per person.
 - Web: strict CSP (no inline script, no eval), CSRF double-submit token plus
   `Origin` and `Sec-Fetch-Site` checks, `__Host-` `Secure` cookies and HSTS on
   https, `X-Frame-Options: DENY`, `nosniff`, per-IP rate limits.

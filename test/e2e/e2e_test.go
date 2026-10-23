@@ -26,6 +26,8 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/pquerna/otp/totp"
+
+	"github.com/ssenerg/gochat/internal/core/secure"
 )
 
 var (
@@ -414,6 +416,42 @@ func TestEndToEnd(t *testing.T) {
 		admin.hx("/t/"+teamName+"/members/"+bobID+"/role", url.Values{"role": {"member"}})
 		if _, page := newClient(t, "carol").get("/join/" + link[1]); !strings.Contains(page, "Invite unavailable") {
 			t.Fatalf("an invite outlived its creator's admin role: %s", page)
+		}
+		_, modal := admin.do(http.MethodGet, "/t/"+teamName+"/invite", nil, "", true)
+		entry := "/invites/" + secure.PublicID(secure.Hash(link[1])) + "/revoke"
+		if i := strings.Index(modal, entry); i < 0 || !strings.Contains(modal[:i], "Suspended") {
+			t.Fatalf("the suspended invite is not shown as such: %s", modal)
+		}
+	})
+
+	t.Run("revoked invites stop working", func(t *testing.T) {
+		_, body := admin.hx("/t/"+teamName+"/invites", url.Values{})
+		link := inviteRe.FindStringSubmatch(body)
+		if link == nil {
+			t.Fatalf("no invite link in %s", body)
+		}
+		revoke := "/t/" + teamName + "/invites/" + secure.PublicID(secure.Hash(link[1])) + "/revoke"
+		if !strings.Contains(body, revoke) {
+			t.Fatalf("the new invite is not listed: %s", body)
+		}
+		if i := strings.Index(body, `id="invite-list"`); i < 0 || strings.Contains(body[i:], link[1]) {
+			t.Fatalf("the open invites are missing or show tokens: %s", body)
+		}
+		if res, _ := bob.do(http.MethodGet, "/t/"+teamName+"/invite", nil, "", true); res.StatusCode != http.StatusForbidden {
+			t.Fatalf("a member listed the invites: %d", res.StatusCode)
+		}
+		if res, _ := bob.hx(revoke, url.Values{}); res.StatusCode != http.StatusForbidden {
+			t.Fatalf("a member revoked an invite: %d", res.StatusCode)
+		}
+		_, list := admin.hx(revoke, url.Values{})
+		if strings.Contains(list, revoke) {
+			t.Fatalf("a revoked invite is still listed: %s", list)
+		}
+		if _, page := newClient(t, "dave").get("/join/" + link[1]); !strings.Contains(page, "Invite unavailable") {
+			t.Fatalf("a revoked invite still works: %s", page)
+		}
+		if _, again := admin.hx(revoke, url.Values{}); !strings.Contains(again, "invite not found") {
+			t.Fatalf("revoking twice: %s", again)
 		}
 	})
 

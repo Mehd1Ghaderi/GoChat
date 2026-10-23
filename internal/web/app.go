@@ -2,8 +2,10 @@ package web
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -541,15 +543,35 @@ func (h *Handler) openDirect(w http.ResponseWriter, r *http.Request) {
 	h.navigate(w, r, "/t/"+team.Name+"/ch/"+res.Channel.Id, true)
 }
 
+type inviteListData struct {
+	Team    *pb.Team
+	Invites []*pb.InviteSummary
+	OOB     bool
+}
+
+func (h *Handler) invites(ctx context.Context, team *pb.Team) (inviteListData, error) {
+	res, err := h.client.Teams.ListInvites(ctx, &pb.ListInvitesRequest{TeamId: team.Id})
+	if err != nil {
+		return inviteListData{}, err
+	}
+	return inviteListData{Team: team, Invites: res.Invites}, nil
+}
+
 func (h *Handler) inviteModal(w http.ResponseWriter, r *http.Request) {
-	_, team, _, cancel := h.teamFor(w, r)
+	_, team, ctx, cancel := h.teamFor(w, r)
 	if team == nil {
 		return
 	}
 	defer cancel()
-	h.fragment(w, http.StatusOK, "invite", struct{ Team *pb.Team }{team})
+	data, err := h.invites(ctx, team)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	h.fragment(w, http.StatusOK, "invite", data)
 }
 
+// createInvite shows the new link, once, and refreshes the open invites.
 func (h *Handler) createInvite(w http.ResponseWriter, r *http.Request) {
 	_, team, ctx, cancel := h.teamFor(w, r)
 	if team == nil {
@@ -561,10 +583,55 @@ func (h *Handler) createInvite(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "invite-link", struct {
+	var out strings.Builder
+	err = h.render.Fragment(&out, "invite-link", struct {
 		URL       string
 		ExpiresAt time.Time
 	}{h.cfg.PublicURL + "/join/" + res.Token, res.ExpiresAt.AsTime()})
+	if err == nil {
+		if data, lerr := h.invites(ctx, team); lerr == nil {
+			data.OOB = true
+			err = h.render.Fragment(&out, "invite-list", data)
+		}
+	}
+	if err != nil {
+		h.fail(w, r, ierrors.Internal(err))
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = io.WriteString(w, out.String())
+}
+
+// revokeInvite answers with the open invites, and why when the invite could
+// not be revoked.
+func (h *Handler) revokeInvite(w http.ResponseWriter, r *http.Request) {
+	_, team, ctx, cancel := h.teamFor(w, r)
+	if team == nil {
+		return
+	}
+	defer cancel()
+	_, err := h.client.Teams.RevokeInvite(ctx, &pb.RevokeInviteRequest{TeamId: team.Id, InviteId: r.PathValue("invite")})
+	code := drpc.Err(err).Code
+	if err != nil && code != ierrors.CodeFailedPrecondition && code != ierrors.CodeNotFound {
+		h.fail(w, r, err)
+		return
+	}
+	data, lerr := h.invites(ctx, team)
+	if lerr != nil {
+		h.fail(w, r, lerr)
+		return
+	}
+	var out strings.Builder
+	rerr := h.render.Fragment(&out, "invite-list", data)
+	if rerr == nil && err != nil {
+		rerr = h.render.Fragment(&out, "toast", render.Toast{Kind: "error", Text: drpc.Err(err).Message})
+	}
+	if rerr != nil {
+		h.fail(w, r, ierrors.Internal(rerr))
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = io.WriteString(w, out.String())
 }
 
 type teamMembersData struct {

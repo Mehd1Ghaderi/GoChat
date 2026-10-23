@@ -50,6 +50,16 @@ type Invite struct {
 	ExpiresAt time.Time
 }
 
+type ListInvites struct {
+	P      *models.Principal
+	TeamID string
+}
+
+type RevokeInvite struct {
+	P                *models.Principal
+	TeamID, InviteID string
+}
+
 type GetInvite struct{ Token string }
 
 type InviteInfo struct {

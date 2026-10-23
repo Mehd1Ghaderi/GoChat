@@ -316,6 +316,8 @@ fieldset.choice legend { font-weight: 600; font-size: .92rem; padding: 0 .3rem; 
 .list li:last-child { border-bottom: 0; }
 .person { display: flex; align-items: center; gap: .6rem; min-width: 0; }
 .person span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.subhead { margin: 1.25rem 0 .25rem; font-size: .95rem; }
+.list li .meta { display: grid; gap: .1rem; min-width: 0; overflow-wrap: anywhere; }
 .invite-link { display: grid; grid-template-columns: 1fr auto; gap: .5rem; align-items: center; }
 .invite-link small { grid-column: 1 / -1; }
 .toasts { position: fixed; right: 16px; bottom: 90px; z-index: 60; display: grid; gap: 8px; max-width: calc(100vw - 32px); }

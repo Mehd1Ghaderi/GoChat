@@ -7,6 +7,7 @@ package directory
 import (
 	"cmp"
 	"context"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -48,6 +49,8 @@ type Repo interface {
 	RemoveTeamMember(ctx context.Context, teamID, userID gocql.UUID) error
 	UpdateTeamMemberRole(ctx context.Context, teamID, userID gocql.UUID, role models.TeamRole) error
 	CreateInvite(ctx context.Context, inv *models.Invite) error
+	ListTeamInvites(ctx context.Context, teamID gocql.UUID, limit int) ([]*models.Invite, error)
+	RevokeInvite(ctx context.Context, teamID gocql.UUID, hash []byte) (bool, error)
 	GetInvite(ctx context.Context, hash []byte) (*models.Invite, error)
 	ConsumeInvite(ctx context.Context, inv *models.Invite, userID gocql.UUID, now time.Time) (bool, error)
 	ReleaseInvite(ctx context.Context, inv *models.Invite, userID gocql.UUID, now time.Time) error
@@ -109,6 +112,10 @@ func (w *worker) Receive(c *actor.Context) {
 		out, err = w.updateTeamMemberRole(ctx, msg)
 	case CreateInvite:
 		out, err = w.createInvite(ctx, msg)
+	case ListInvites:
+		out, err = w.listInvites(ctx, msg)
+	case RevokeInvite:
+		out, err = w.revokeInvite(ctx, msg)
 	case GetInvite:
 		out, err = w.getInvite(ctx, msg.Token)
 	case AcceptInvite:
@@ -400,17 +407,26 @@ func (w *worker) updateTeamMemberRole(ctx context.Context, msg UpdateTeamMemberR
 	return Done{}, w.Repo.UpdateTeamMemberRole(ctx, teamID, target, msg.Role)
 }
 
+// inviter returns the team of rawID when p may manage its invites.
+func (w *worker) inviter(ctx context.Context, p *models.Principal, rawID string) (gocql.UUID, error) {
+	teamID, err := parseID(rawID, "team")
+	if err != nil {
+		return gocql.UUID{}, err
+	}
+	m, err := w.membership(ctx, teamID, p.UserID)
+	if err != nil {
+		return gocql.UUID{}, err
+	}
+	if !w.Authz.Can(authz.ObjInvite, authz.ActCreate, string(m.Role), string(p.Role)) {
+		return gocql.UUID{}, ierrors.PermissionDenied()
+	}
+	return teamID, nil
+}
+
 func (w *worker) createInvite(ctx context.Context, msg CreateInvite) (*Invite, error) {
-	teamID, err := parseID(msg.TeamID, "team")
+	teamID, err := w.inviter(ctx, msg.P, msg.TeamID)
 	if err != nil {
 		return nil, err
-	}
-	m, err := w.membership(ctx, teamID, msg.P.UserID)
-	if err != nil {
-		return nil, err
-	}
-	if !w.Authz.Can(authz.ObjInvite, authz.ActCreate, string(m.Role), string(msg.P.Role)) {
-		return nil, ierrors.PermissionDenied()
 	}
 	if key := msg.P.UserID.String(); w.invited.Blocked(key) {
 		return nil, ierrors.ResourceExhausted("too many invites created, try again later")
@@ -430,6 +446,80 @@ func (w *worker) createInvite(ctx context.Context, msg CreateInvite) (*Invite, e
 		return nil, err
 	}
 	return &Invite{Token: token, ExpiresAt: inv.ExpiresAt}, nil
+}
+
+const maxListedInvites = 200
+
+func (w *worker) listInvites(ctx context.Context, msg ListInvites) ([]*pb.InviteSummary, error) {
+	teamID, err := w.inviter(ctx, msg.P, msg.TeamID)
+	if err != nil {
+		return nil, err
+	}
+	invs, err := w.Repo.ListTeamInvites(ctx, teamID, maxListedInvites)
+	if err != nil {
+		return nil, err
+	}
+	creatorIDs := make([]gocql.UUID, 0, len(invs))
+	for _, inv := range invs {
+		if !slices.Contains(creatorIDs, inv.CreatedBy) {
+			creatorIDs = append(creatorIDs, inv.CreatedBy)
+		}
+	}
+	creators, err := w.Users.GetMany(ctx, creatorIDs)
+	if err != nil {
+		return nil, err
+	}
+	active := make(map[gocql.UUID]bool, len(creatorIDs))
+	for _, id := range creatorIDs {
+		ok, err := invites.CanInvite(ctx, w.Repo, w.Authz, w.Users, teamID, id)
+		if err != nil && !ierrors.Is(err, ierrors.CodeNotFound) {
+			return nil, err
+		}
+		active[id] = ok
+	}
+	out := make([]*pb.InviteSummary, 0, len(invs))
+	for _, inv := range invs {
+		s := &pb.InviteSummary{
+			Id: secure.PublicID(inv.TokenHash), CreatedAt: convert.Time(inv.CreatedAt), ExpiresAt: convert.Time(inv.ExpiresAt),
+			Active: active[inv.CreatedBy],
+		}
+		if u := creators[inv.CreatedBy]; u != nil {
+			s.CreatedBy = convert.PublicUser(u)
+		}
+		out = append(out, s)
+	}
+	return out, nil
+}
+
+var inviteIDRe = regexp.MustCompile(`^[0-9a-f]{24}$`)
+
+func (w *worker) revokeInvite(ctx context.Context, msg RevokeInvite) (Done, error) {
+	teamID, err := w.inviter(ctx, msg.P, msg.TeamID)
+	if err != nil {
+		return Done{}, err
+	}
+	if !inviteIDRe.MatchString(msg.InviteID) {
+		return Done{}, ierrors.InvalidArgument("invalid invite id")
+	}
+	invs, err := w.Repo.ListTeamInvites(ctx, teamID, maxListedInvites)
+	if err != nil {
+		return Done{}, err
+	}
+	for _, inv := range invs {
+		if secure.PublicID(inv.TokenHash) != msg.InviteID {
+			continue
+		}
+		revoked, err := w.Repo.RevokeInvite(ctx, teamID, inv.TokenHash)
+		if err != nil {
+			return Done{}, err
+		}
+		if !revoked {
+			return Done{}, ierrors.FailedPrecondition("the invite was used or has expired")
+		}
+		w.Logger.Info("invite revoked", zap.String("team", teamID.String()), zap.String("invite", msg.InviteID), zap.String("by", msg.P.UserID.String()))
+		return Done{}, nil
+	}
+	return Done{}, ierrors.NotFound("invite not found")
 }
 
 func (w *worker) getInvite(ctx context.Context, token string) (*InviteInfo, error) {

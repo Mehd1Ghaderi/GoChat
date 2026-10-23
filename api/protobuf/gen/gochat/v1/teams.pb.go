@@ -902,6 +902,261 @@ func (x *AcceptInviteResponse) GetTeam() *Team {
 	return nil
 }
 
+type ListInvitesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TeamId        string                 `protobuf:"bytes,1,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListInvitesRequest) Reset() {
+	*x = ListInvitesRequest{}
+	mi := &file_gochat_v1_teams_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListInvitesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListInvitesRequest) ProtoMessage() {}
+
+func (x *ListInvitesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_teams_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListInvitesRequest.ProtoReflect.Descriptor instead.
+func (*ListInvitesRequest) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_teams_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ListInvitesRequest) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
+// InviteSummary describes an open invite without its token.
+type InviteSummary struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// id names the invite for revoking it; the link cannot be derived from it.
+	Id        string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	CreatedBy *User                  `protobuf:"bytes,2,opt,name=created_by,json=createdBy,proto3" json:"created_by,omitempty"`
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	ExpiresAt *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	// active is false while the creator may not invite, which suspends it.
+	Active        bool `protobuf:"varint,5,opt,name=active,proto3" json:"active,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InviteSummary) Reset() {
+	*x = InviteSummary{}
+	mi := &file_gochat_v1_teams_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InviteSummary) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InviteSummary) ProtoMessage() {}
+
+func (x *InviteSummary) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_teams_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InviteSummary.ProtoReflect.Descriptor instead.
+func (*InviteSummary) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_teams_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *InviteSummary) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *InviteSummary) GetCreatedBy() *User {
+	if x != nil {
+		return x.CreatedBy
+	}
+	return nil
+}
+
+func (x *InviteSummary) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+func (x *InviteSummary) GetExpiresAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return nil
+}
+
+func (x *InviteSummary) GetActive() bool {
+	if x != nil {
+		return x.Active
+	}
+	return false
+}
+
+type ListInvitesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Invites       []*InviteSummary       `protobuf:"bytes,1,rep,name=invites,proto3" json:"invites,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListInvitesResponse) Reset() {
+	*x = ListInvitesResponse{}
+	mi := &file_gochat_v1_teams_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListInvitesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListInvitesResponse) ProtoMessage() {}
+
+func (x *ListInvitesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_teams_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListInvitesResponse.ProtoReflect.Descriptor instead.
+func (*ListInvitesResponse) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_teams_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *ListInvitesResponse) GetInvites() []*InviteSummary {
+	if x != nil {
+		return x.Invites
+	}
+	return nil
+}
+
+type RevokeInviteRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TeamId        string                 `protobuf:"bytes,1,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	InviteId      string                 `protobuf:"bytes,2,opt,name=invite_id,json=inviteId,proto3" json:"invite_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RevokeInviteRequest) Reset() {
+	*x = RevokeInviteRequest{}
+	mi := &file_gochat_v1_teams_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RevokeInviteRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RevokeInviteRequest) ProtoMessage() {}
+
+func (x *RevokeInviteRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_teams_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RevokeInviteRequest.ProtoReflect.Descriptor instead.
+func (*RevokeInviteRequest) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_teams_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *RevokeInviteRequest) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
+func (x *RevokeInviteRequest) GetInviteId() string {
+	if x != nil {
+		return x.InviteId
+	}
+	return ""
+}
+
+type RevokeInviteResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RevokeInviteResponse) Reset() {
+	*x = RevokeInviteResponse{}
+	mi := &file_gochat_v1_teams_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RevokeInviteResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RevokeInviteResponse) ProtoMessage() {}
+
+func (x *RevokeInviteResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_teams_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RevokeInviteResponse.ProtoReflect.Descriptor instead.
+func (*RevokeInviteResponse) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_teams_proto_rawDescGZIP(), []int{22}
+}
+
 var File_gochat_v1_teams_proto protoreflect.FileDescriptor
 
 const file_gochat_v1_teams_proto_rawDesc = "" +
@@ -951,7 +1206,24 @@ const file_gochat_v1_teams_proto_rawDesc = "" +
 	"\x13AcceptInviteRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\";\n" +
 	"\x14AcceptInviteResponse\x12#\n" +
-	"\x04team\x18\x01 \x01(\v2\x0f.gochat.v1.TeamR\x04team2\xec\x05\n" +
+	"\x04team\x18\x01 \x01(\v2\x0f.gochat.v1.TeamR\x04team\"-\n" +
+	"\x12ListInvitesRequest\x12\x17\n" +
+	"\ateam_id\x18\x01 \x01(\tR\x06teamId\"\xdd\x01\n" +
+	"\rInviteSummary\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12.\n" +
+	"\n" +
+	"created_by\x18\x02 \x01(\v2\x0f.gochat.v1.UserR\tcreatedBy\x129\n" +
+	"\n" +
+	"created_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
+	"\n" +
+	"expires_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\x12\x16\n" +
+	"\x06active\x18\x05 \x01(\bR\x06active\"I\n" +
+	"\x13ListInvitesResponse\x122\n" +
+	"\ainvites\x18\x01 \x03(\v2\x18.gochat.v1.InviteSummaryR\ainvites\"K\n" +
+	"\x13RevokeInviteRequest\x12\x17\n" +
+	"\ateam_id\x18\x01 \x01(\tR\x06teamId\x12\x1b\n" +
+	"\tinvite_id\x18\x02 \x01(\tR\binviteId\"\x16\n" +
+	"\x14RevokeInviteResponse2\x8b\a\n" +
 	"\vTeamService\x12I\n" +
 	"\n" +
 	"CreateTeam\x12\x1c.gochat.v1.CreateTeamRequest\x1a\x1d.gochat.v1.CreateTeamResponse\x12F\n" +
@@ -962,7 +1234,9 @@ const file_gochat_v1_teams_proto_rawDesc = "" +
 	"\x14UpdateTeamMemberRole\x12&.gochat.v1.UpdateTeamMemberRoleRequest\x1a'.gochat.v1.UpdateTeamMemberRoleResponse\x12O\n" +
 	"\fCreateInvite\x12\x1e.gochat.v1.CreateInviteRequest\x1a\x1f.gochat.v1.CreateInviteResponse\x12F\n" +
 	"\tGetInvite\x12\x1b.gochat.v1.GetInviteRequest\x1a\x1c.gochat.v1.GetInviteResponse\x12O\n" +
-	"\fAcceptInvite\x12\x1e.gochat.v1.AcceptInviteRequest\x1a\x1f.gochat.v1.AcceptInviteResponseB\x9f\x01\n" +
+	"\fAcceptInvite\x12\x1e.gochat.v1.AcceptInviteRequest\x1a\x1f.gochat.v1.AcceptInviteResponse\x12L\n" +
+	"\vListInvites\x12\x1d.gochat.v1.ListInvitesRequest\x1a\x1e.gochat.v1.ListInvitesResponse\x12O\n" +
+	"\fRevokeInvite\x12\x1e.gochat.v1.RevokeInviteRequest\x1a\x1f.gochat.v1.RevokeInviteResponseB\x9f\x01\n" +
 	"\rcom.gochat.v1B\n" +
 	"TeamsProtoP\x01Z=github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1;gochatv1\xa2\x02\x03GXX\xaa\x02\tGochat.V1\xca\x02\tGochat\\V1\xe2\x02\x15Gochat\\V1\\GPBMetadata\xea\x02\n" +
 	"Gochat::V1b\x06proto3"
@@ -979,7 +1253,7 @@ func file_gochat_v1_teams_proto_rawDescGZIP() []byte {
 	return file_gochat_v1_teams_proto_rawDescData
 }
 
-var file_gochat_v1_teams_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_gochat_v1_teams_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_gochat_v1_teams_proto_goTypes = []any{
 	(*CreateTeamRequest)(nil),            // 0: gochat.v1.CreateTeamRequest
 	(*CreateTeamResponse)(nil),           // 1: gochat.v1.CreateTeamResponse
@@ -999,42 +1273,56 @@ var file_gochat_v1_teams_proto_goTypes = []any{
 	(*GetInviteResponse)(nil),            // 15: gochat.v1.GetInviteResponse
 	(*AcceptInviteRequest)(nil),          // 16: gochat.v1.AcceptInviteRequest
 	(*AcceptInviteResponse)(nil),         // 17: gochat.v1.AcceptInviteResponse
-	(*Team)(nil),                         // 18: gochat.v1.Team
-	(*TeamMember)(nil),                   // 19: gochat.v1.TeamMember
-	(TeamRole)(0),                        // 20: gochat.v1.TeamRole
-	(*timestamppb.Timestamp)(nil),        // 21: google.protobuf.Timestamp
+	(*ListInvitesRequest)(nil),           // 18: gochat.v1.ListInvitesRequest
+	(*InviteSummary)(nil),                // 19: gochat.v1.InviteSummary
+	(*ListInvitesResponse)(nil),          // 20: gochat.v1.ListInvitesResponse
+	(*RevokeInviteRequest)(nil),          // 21: gochat.v1.RevokeInviteRequest
+	(*RevokeInviteResponse)(nil),         // 22: gochat.v1.RevokeInviteResponse
+	(*Team)(nil),                         // 23: gochat.v1.Team
+	(*TeamMember)(nil),                   // 24: gochat.v1.TeamMember
+	(TeamRole)(0),                        // 25: gochat.v1.TeamRole
+	(*timestamppb.Timestamp)(nil),        // 26: google.protobuf.Timestamp
+	(*User)(nil),                         // 27: gochat.v1.User
 }
 var file_gochat_v1_teams_proto_depIdxs = []int32{
-	18, // 0: gochat.v1.CreateTeamResponse.team:type_name -> gochat.v1.Team
-	18, // 1: gochat.v1.ListTeamsResponse.teams:type_name -> gochat.v1.Team
-	18, // 2: gochat.v1.GetTeamResponse.team:type_name -> gochat.v1.Team
-	19, // 3: gochat.v1.ListTeamMembersResponse.members:type_name -> gochat.v1.TeamMember
-	20, // 4: gochat.v1.UpdateTeamMemberRoleRequest.role:type_name -> gochat.v1.TeamRole
-	21, // 5: gochat.v1.CreateInviteResponse.expires_at:type_name -> google.protobuf.Timestamp
-	18, // 6: gochat.v1.AcceptInviteResponse.team:type_name -> gochat.v1.Team
-	0,  // 7: gochat.v1.TeamService.CreateTeam:input_type -> gochat.v1.CreateTeamRequest
-	2,  // 8: gochat.v1.TeamService.ListTeams:input_type -> gochat.v1.ListTeamsRequest
-	4,  // 9: gochat.v1.TeamService.GetTeam:input_type -> gochat.v1.GetTeamRequest
-	6,  // 10: gochat.v1.TeamService.ListTeamMembers:input_type -> gochat.v1.ListTeamMembersRequest
-	8,  // 11: gochat.v1.TeamService.RemoveTeamMember:input_type -> gochat.v1.RemoveTeamMemberRequest
-	10, // 12: gochat.v1.TeamService.UpdateTeamMemberRole:input_type -> gochat.v1.UpdateTeamMemberRoleRequest
-	12, // 13: gochat.v1.TeamService.CreateInvite:input_type -> gochat.v1.CreateInviteRequest
-	14, // 14: gochat.v1.TeamService.GetInvite:input_type -> gochat.v1.GetInviteRequest
-	16, // 15: gochat.v1.TeamService.AcceptInvite:input_type -> gochat.v1.AcceptInviteRequest
-	1,  // 16: gochat.v1.TeamService.CreateTeam:output_type -> gochat.v1.CreateTeamResponse
-	3,  // 17: gochat.v1.TeamService.ListTeams:output_type -> gochat.v1.ListTeamsResponse
-	5,  // 18: gochat.v1.TeamService.GetTeam:output_type -> gochat.v1.GetTeamResponse
-	7,  // 19: gochat.v1.TeamService.ListTeamMembers:output_type -> gochat.v1.ListTeamMembersResponse
-	9,  // 20: gochat.v1.TeamService.RemoveTeamMember:output_type -> gochat.v1.RemoveTeamMemberResponse
-	11, // 21: gochat.v1.TeamService.UpdateTeamMemberRole:output_type -> gochat.v1.UpdateTeamMemberRoleResponse
-	13, // 22: gochat.v1.TeamService.CreateInvite:output_type -> gochat.v1.CreateInviteResponse
-	15, // 23: gochat.v1.TeamService.GetInvite:output_type -> gochat.v1.GetInviteResponse
-	17, // 24: gochat.v1.TeamService.AcceptInvite:output_type -> gochat.v1.AcceptInviteResponse
-	16, // [16:25] is the sub-list for method output_type
-	7,  // [7:16] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	23, // 0: gochat.v1.CreateTeamResponse.team:type_name -> gochat.v1.Team
+	23, // 1: gochat.v1.ListTeamsResponse.teams:type_name -> gochat.v1.Team
+	23, // 2: gochat.v1.GetTeamResponse.team:type_name -> gochat.v1.Team
+	24, // 3: gochat.v1.ListTeamMembersResponse.members:type_name -> gochat.v1.TeamMember
+	25, // 4: gochat.v1.UpdateTeamMemberRoleRequest.role:type_name -> gochat.v1.TeamRole
+	26, // 5: gochat.v1.CreateInviteResponse.expires_at:type_name -> google.protobuf.Timestamp
+	23, // 6: gochat.v1.AcceptInviteResponse.team:type_name -> gochat.v1.Team
+	27, // 7: gochat.v1.InviteSummary.created_by:type_name -> gochat.v1.User
+	26, // 8: gochat.v1.InviteSummary.created_at:type_name -> google.protobuf.Timestamp
+	26, // 9: gochat.v1.InviteSummary.expires_at:type_name -> google.protobuf.Timestamp
+	19, // 10: gochat.v1.ListInvitesResponse.invites:type_name -> gochat.v1.InviteSummary
+	0,  // 11: gochat.v1.TeamService.CreateTeam:input_type -> gochat.v1.CreateTeamRequest
+	2,  // 12: gochat.v1.TeamService.ListTeams:input_type -> gochat.v1.ListTeamsRequest
+	4,  // 13: gochat.v1.TeamService.GetTeam:input_type -> gochat.v1.GetTeamRequest
+	6,  // 14: gochat.v1.TeamService.ListTeamMembers:input_type -> gochat.v1.ListTeamMembersRequest
+	8,  // 15: gochat.v1.TeamService.RemoveTeamMember:input_type -> gochat.v1.RemoveTeamMemberRequest
+	10, // 16: gochat.v1.TeamService.UpdateTeamMemberRole:input_type -> gochat.v1.UpdateTeamMemberRoleRequest
+	12, // 17: gochat.v1.TeamService.CreateInvite:input_type -> gochat.v1.CreateInviteRequest
+	14, // 18: gochat.v1.TeamService.GetInvite:input_type -> gochat.v1.GetInviteRequest
+	16, // 19: gochat.v1.TeamService.AcceptInvite:input_type -> gochat.v1.AcceptInviteRequest
+	18, // 20: gochat.v1.TeamService.ListInvites:input_type -> gochat.v1.ListInvitesRequest
+	21, // 21: gochat.v1.TeamService.RevokeInvite:input_type -> gochat.v1.RevokeInviteRequest
+	1,  // 22: gochat.v1.TeamService.CreateTeam:output_type -> gochat.v1.CreateTeamResponse
+	3,  // 23: gochat.v1.TeamService.ListTeams:output_type -> gochat.v1.ListTeamsResponse
+	5,  // 24: gochat.v1.TeamService.GetTeam:output_type -> gochat.v1.GetTeamResponse
+	7,  // 25: gochat.v1.TeamService.ListTeamMembers:output_type -> gochat.v1.ListTeamMembersResponse
+	9,  // 26: gochat.v1.TeamService.RemoveTeamMember:output_type -> gochat.v1.RemoveTeamMemberResponse
+	11, // 27: gochat.v1.TeamService.UpdateTeamMemberRole:output_type -> gochat.v1.UpdateTeamMemberRoleResponse
+	13, // 28: gochat.v1.TeamService.CreateInvite:output_type -> gochat.v1.CreateInviteResponse
+	15, // 29: gochat.v1.TeamService.GetInvite:output_type -> gochat.v1.GetInviteResponse
+	17, // 30: gochat.v1.TeamService.AcceptInvite:output_type -> gochat.v1.AcceptInviteResponse
+	20, // 31: gochat.v1.TeamService.ListInvites:output_type -> gochat.v1.ListInvitesResponse
+	22, // 32: gochat.v1.TeamService.RevokeInvite:output_type -> gochat.v1.RevokeInviteResponse
+	22, // [22:33] is the sub-list for method output_type
+	11, // [11:22] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_gochat_v1_teams_proto_init() }
@@ -1053,7 +1341,7 @@ func file_gochat_v1_teams_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gochat_v1_teams_proto_rawDesc), len(file_gochat_v1_teams_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   18,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

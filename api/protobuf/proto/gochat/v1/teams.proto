@@ -15,6 +15,8 @@ service TeamService {
   rpc CreateInvite(CreateInviteRequest) returns (CreateInviteResponse);
   rpc GetInvite(GetInviteRequest) returns (GetInviteResponse);
   rpc AcceptInvite(AcceptInviteRequest) returns (AcceptInviteResponse);
+  rpc ListInvites(ListInvitesRequest) returns (ListInvitesResponse);
+  rpc RevokeInvite(RevokeInviteRequest) returns (RevokeInviteResponse);
 }
 
 message CreateTeamRequest {
@@ -96,3 +98,29 @@ message AcceptInviteRequest {
 message AcceptInviteResponse {
   Team team = 1;
 }
+
+message ListInvitesRequest {
+  string team_id = 1;
+}
+
+// InviteSummary describes an open invite without its token.
+message InviteSummary {
+  // id names the invite for revoking it; the link cannot be derived from it.
+  string id = 1;
+  User created_by = 2;
+  google.protobuf.Timestamp created_at = 3;
+  google.protobuf.Timestamp expires_at = 4;
+  // active is false while the creator may not invite, which suspends it.
+  bool active = 5;
+}
+
+message ListInvitesResponse {
+  repeated InviteSummary invites = 1;
+}
+
+message RevokeInviteRequest {
+  string team_id = 1;
+  string invite_id = 2;
+}
+
+message RevokeInviteResponse {}

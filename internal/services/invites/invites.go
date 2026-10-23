@@ -40,22 +40,32 @@ func Valid(ctx context.Context, repo Repo, az *authz.Authorizer, userCache *user
 	if !ids.IsZero(inv.UsedBy) && (ids.IsZero(caller) || inv.UsedBy != caller) {
 		return nil, ErrInvalid
 	}
-	creator, err := userCache.Get(ctx, inv.CreatedBy)
+	ok, err := CanInvite(ctx, repo, az, userCache, inv.TeamID, inv.CreatedBy)
 	if err != nil {
 		return nil, notFound(err)
 	}
+	if !ok {
+		return nil, ErrInvalid
+	}
+	return inv, nil
+}
+
+// CanInvite reports whether userID may invite people to teamID, which an
+// invite's creator must still be able to for it to work.
+func CanInvite(ctx context.Context, repo Repo, az *authz.Authorizer, userCache *users.Cache, teamID, userID gocql.UUID) (bool, error) {
+	u, err := userCache.Get(ctx, userID)
+	if err != nil {
+		return false, err
+	}
 	var teamRole string
-	m, err := repo.GetTeamMember(ctx, inv.TeamID, inv.CreatedBy)
+	m, err := repo.GetTeamMember(ctx, teamID, userID)
 	switch {
 	case err == nil:
 		teamRole = string(m.Role)
 	case !ierrors.Is(err, ierrors.CodeNotFound):
-		return nil, err
+		return false, err
 	}
-	if creator.Deactivated || !az.Can(authz.ObjInvite, authz.ActCreate, teamRole, string(creator.Role)) {
-		return nil, ErrInvalid
-	}
-	return inv, nil
+	return !u.Deactivated && az.Can(authz.ObjInvite, authz.ActCreate, teamRole, string(u.Role)), nil
 }
 
 func notFound(err error) error {

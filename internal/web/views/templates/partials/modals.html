@@ -105,7 +105,30 @@
 <p class="muted">Each link admits one person and expires after a while. Create one per person.</p>
 <div id="invite-result"></div>
 <button class="btn primary" hx-post="/t/{{.Team.Name}}/invites" hx-target="#invite-result">Create invite link</button>
+<h3 class="subhead">Open invites</h3>
+{{template "invite-list" .}}
 {{template "modal-end"}}
+{{end}}
+
+{{define "invite-list"}}
+<div id="invite-list"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>
+  {{if .Invites}}
+  <ul class="list">
+    {{range .Invites}}
+    <li>
+      <div class="meta">
+        <span>{{with .CreatedBy}}{{name .}}{{else}}Someone{{end}}</span>
+        <small class="muted">Created {{date .CreatedAt.AsTime}} · expires {{date .ExpiresAt.AsTime}}</small>
+        {{if not .Active}}<small class="muted">Suspended: its creator can no longer invite.</small>{{end}}
+      </div>
+      <button class="btn sm danger" hx-post="/t/{{$.Team.Name}}/invites/{{.Id}}/revoke" hx-confirm="Revoke this invite? Its link stops working." hx-target="#invite-list" hx-swap="outerHTML">Revoke</button>
+    </li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p class="muted">No open invites.</p>
+  {{end}}
+</div>
 {{end}}
 
 {{define "invite-link"}}

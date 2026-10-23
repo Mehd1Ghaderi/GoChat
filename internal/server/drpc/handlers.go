@@ -315,6 +315,29 @@ func (s *teamService) AcceptInvite(ctx context.Context, req *pb.AcceptInviteRequ
 	return &pb.AcceptInviteResponse{Team: team}, nil
 }
 
+func (s *teamService) ListInvites(ctx context.Context, req *pb.ListInvitesRequest) (*pb.ListInvitesResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	invs, err := actors.Ask[[]*pb.InviteSummary](ctx, s.sys.Engine, s.sys.Directory, directory.ListInvites{P: p, TeamID: req.TeamId})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ListInvitesResponse{Invites: invs}, nil
+}
+
+func (s *teamService) RevokeInvite(ctx context.Context, req *pb.RevokeInviteRequest) (*pb.RevokeInviteResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := actors.Ask[directory.Done](ctx, s.sys.Engine, s.sys.Directory, directory.RevokeInvite{P: p, TeamID: req.TeamId, InviteID: req.InviteId}); err != nil {
+		return nil, err
+	}
+	return &pb.RevokeInviteResponse{}, nil
+}
+
 type channelService struct{ *base }
 
 func (s *channelService) ListChannels(ctx context.Context, req *pb.ListChannelsRequest) (*pb.ListChannelsResponse, error) {
