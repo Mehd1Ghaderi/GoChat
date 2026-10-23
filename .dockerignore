@@ -11,3 +11,4 @@ Justfile
 README.md
 *.test
 *.out
+!config/docker.*.yaml

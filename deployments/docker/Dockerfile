@@ -2,7 +2,10 @@
 
 ARG DOCKER_REGISTRY=docker.io/
 
-FROM ${DOCKER_REGISTRY}library/golang:1.27.3-alpine3.24 AS builder
+# Go cross-compiles: images for other platforms (--platform) build without
+# emulation.
+FROM --platform=$BUILDPLATFORM ${DOCKER_REGISTRY}library/golang:1.27.3-alpine3.24 AS builder
+ARG TARGETOS TARGETARCH
 
 WORKDIR /src
 
@@ -14,7 +17,7 @@ COPY . .
 
 ARG LDFLAGS="-s -w -X 'github.com/ssenerg/gochat/internal.appName=gochat' -X 'github.com/ssenerg/gochat/internal.appNamePretty=GoChat' -X 'github.com/ssenerg/gochat/internal.version=v0.1.0'"
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS" -o /out/gochat ./cmd/gochat
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "$LDFLAGS" -o /out/gochat ./cmd/gochat
 
 FROM ${DOCKER_REGISTRY}library/alpine:3.24
 
@@ -22,8 +25,10 @@ WORKDIR /app
 
 COPY --from=builder /out/gochat ./gochat
 COPY migrations ./migrations
+COPY config/docker.server.yaml config/server.yaml
+COPY config/docker.web.yaml config/web.yaml
+COPY config/docker.migrate.yaml config/migrate.yaml
 
-RUN adduser -D -H -u 10001 gochat
 USER 10001:10001
 
 ENTRYPOINT ["./gochat"]

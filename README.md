@@ -130,6 +130,72 @@ These use the development configs in [config/](config).
 | `just lint`, `just test`, `just test-race` | checks |
 | `just pre-commit` | generate, tidy, lint and test |
 
+## Deploying
+
+Every push to `main` that passes CI is deployed to a Linux server with
+Docker Compose: the `deploy` job builds the image, sends it over SSH and runs
+[`deploy.sh`](deployments/docker/deploy.sh) there, which applies the
+migrations and restarts the server and the web gateway with it. If they do
+not come up healthy, the script puts the image that ran before back and the
+job fails, with their last logs. Scylla and MinIO keep running across
+deploys; the server pulls no GoChat image from a registry.
+
+Once, on the server, as root: a user to deploy as (in the `docker` group,
+which is as good as root on that server) and the directory GoChat runs from,
+holding its `.env` (see [`.env.template`](.env.template); generate every
+secret, e.g. with `openssl rand -hex 32`, and keep it, since the data is
+only readable with the same credentials):
+
+```sh
+useradd --create-home --groups docker deploy
+install -d -o deploy -g deploy -m 750 /opt/apps/gochat
+install -o deploy -g deploy -m 600 .env /opt/apps/gochat/.env
+```
+
+The web gateway listens on `127.0.0.1:$WEB_PORT`: put a TLS-terminating
+proxy or tunnel in front of it, set `WEB_PUBLIC_URL` to the `https` address
+people use and `WEB_TRUSTED_PROXIES` to where the proxy's requests come
+from. Set `SERVICES_ACCOUNTS_SETUP_TOKEN` until the first account exists.
+
+On your computer, a key for GitHub to sign in with. Add `gochat-deploy.pub`
+to `~deploy/.ssh/authorized_keys` on the server, with `restrict ` in front
+of it (no shells, no forwarding), and check the server's key that
+`ssh-keyscan` prints against `ssh-keygen -lf
+/etc/ssh/ssh_host_ed25519_key.pub` on the server:
+
+```sh
+ssh-keygen -t ed25519 -N '' -C gochat-deploy -f gochat-deploy
+ssh-keyscan -t ed25519 SERVER > known_hosts   # with -p PORT for another port
+```
+
+On GitHub, under Settings → Environments, create the environment
+`production`, let only `main` deploy to it (Deployment branches → Selected
+branches), and give it these secrets:
+
+```sh
+gh secret set DEPLOY_HOST --env production --body SERVER
+gh secret set DEPLOY_SSH_KEY --env production < gochat-deploy
+gh secret set DEPLOY_KNOWN_HOSTS --env production < known_hosts
+rm gochat-deploy   # GitHub has it now
+```
+
+Its variables, all optional: `DEPLOY_USER` (`deploy`), `DEPLOY_PORT`
+(`22`), `DEPLOY_PATH` (`/opt/apps/gochat`), `DEPLOY_PLATFORM`
+(`linux/amd64`; `linux/arm64` when `uname -m` says `aarch64`) and
+`DEPLOY_URL`, the address shown with each deploy. Until the secrets are set,
+the job skips deploying with a warning.
+
+To deploy again, run the CI workflow on `main` (Actions → CI → Run
+workflow), or from your computer with `just deploy deploy@SERVER`. To go
+back one deploy on the server:
+
+```sh
+cd /opt/apps/gochat && docker image tag gochat:previous gochat:latest && docker compose up -d --no-deps --force-recreate server web
+```
+
+Migrations only add to the schema, so going back works as long as they keep
+doing so.
+
 ## Command line
 
 ```

@@ -227,11 +227,31 @@ var (
 	teamIDRe  = regexp.MustCompile(`data-team="([0-9a-f-]{36})"`)
 )
 
+// bootstrap sets a fresh server up with the admin and the team the tests use.
+func bootstrap(t *testing.T, admin *client) {
+	t.Helper()
+	admin.get("/signup")
+	res, body := admin.form("/signup", url.Values{
+		"username": {adminName}, "display_name": {"Ada Admin"}, "email": {adminName + "@example.test"},
+		"password": {adminPass}, "confirm": {adminPass},
+	})
+	if res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("bootstrap sign-up: %d %s", res.StatusCode, body)
+	}
+	res, body = admin.form("/teams", url.Values{"name": {teamName}, "display_name": {"Acme"}})
+	if res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("bootstrap team: %d %s", res.StatusCode, body)
+	}
+}
+
 func TestEndToEnd(t *testing.T) {
 	if baseURL == "" {
 		t.Skip("GOCHAT_E2E_URL is not set")
 	}
 	admin := newClient(t, "admin")
+	if os.Getenv("GOCHAT_E2E_BOOTSTRAP") != "" {
+		bootstrap(t, admin)
+	}
 	admin.login(adminName, adminPass)
 
 	// One-time invite.

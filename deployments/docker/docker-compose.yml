@@ -71,9 +71,6 @@ services:
     environment:
       DATABASE_SCYLLA_USERNAME: ${DATABASE_SCYLLA_USERNAME}
       DATABASE_SCYLLA_PASSWORD: ${DATABASE_SCYLLA_PASSWORD}
-    volumes:
-      - ../../config/docker.migrate.yaml:/app/config/migrate.yaml:ro
-      - ../../migrations:/app/migrations:ro
     depends_on:
       scylla-init:
         condition: service_completed_successfully
@@ -93,8 +90,6 @@ services:
       SERVER_DRPC_GATEWAY_KEY: ${GATEWAY_KEY}
       SERVICES_ACCOUNTS_SECRET_KEY: ${SERVICES_ACCOUNTS_SECRET_KEY}
       SERVICES_ACCOUNTS_SETUP_TOKEN: ${SERVICES_ACCOUNTS_SETUP_TOKEN:-}
-    volumes:
-      - ../../config/docker.server.yaml:/app/config/server.yaml:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9100/readyz"]
       interval: 10s
@@ -116,10 +111,11 @@ services:
     environment:
       CLIENT_DRPC_GATEWAY_KEY: ${GATEWAY_KEY}
       WEB_PUBLIC_URL: ${WEB_PUBLIC_URL:-http://localhost:8080}
-    volumes:
-      - ../../config/docker.web.yaml:/app/config/web.yaml:ro
+      WEB_TRUSTED_PROXIES: ${WEB_TRUSTED_PROXIES:-}
+    # The default only accepts connections from this machine, such as a
+    # TLS-terminating proxy or tunnel there.
     ports:
-      - "${WEB_PORT:-8080}:8080"
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8080}:8080"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 10s

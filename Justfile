@@ -74,6 +74,14 @@ ps:
 image: generate
     @docker build --build-arg DOCKER_REGISTRY="${DOCKER_REGISTRY:-docker.io/}" -t {{app_name}}:latest -f deployments/docker/Dockerfile .
 
+# Build the image for a server and deploy it there over SSH: just deploy deploy@host
+deploy target path="/opt/apps/gochat" platform="linux/amd64": generate
+    @docker build --pull --platform {{platform}} --build-arg DOCKER_REGISTRY="${DOCKER_REGISTRY:-docker.io/}" \
+        --label org.opencontainers.image.title=gochat --label org.opencontainers.image.revision="$(git rev-parse HEAD)" \
+        -t gochat:latest -f deployments/docker/Dockerfile .
+    @tar -cf - -C deployments/docker docker-compose.yml deploy.sh | ssh {{target}} "mkdir -p '{{path}}' && tar -xf - -C '{{path}}'"
+    @docker save gochat:latest | gzip | ssh {{target}} "sh '{{path}}/deploy.sh'"
+
 # Regenerate the protobuf code and the Dockerfile.
 generate: _assert_version proto dockerfile
 
