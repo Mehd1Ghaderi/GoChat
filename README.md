@@ -78,9 +78,8 @@ one process. Scylla and MinIO scale independently.
 
 ## Requirements
 
-- Go 1.27, [just](https://github.com/casey/just), [buf](https://buf.build)
+- Go 1.27.3, [just](https://github.com/casey/just), [buf](https://buf.build)
 - Docker with Compose v2
-- golangci-lint (for `just lint`)
 
 ## Getting started
 
