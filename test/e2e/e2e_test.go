@@ -24,6 +24,11 @@ import (
 	"testing"
 	"time"
 
+	"image"
+	"image/color"
+	_ "image/jpeg" // decodes the stored photos
+	"image/png"
+
 	"github.com/coder/websocket"
 	"github.com/pquerna/otp/totp"
 
@@ -225,6 +230,7 @@ var (
 	secretRe  = regexp.MustCompile(`<code>([A-Z2-7]{16,})</code>`)
 	codeRe    = regexp.MustCompile(`<code>([a-z2-7]{5}-[a-z2-7]{5})</code>`)
 	teamIDRe  = regexp.MustCompile(`data-team="([0-9a-f-]{36})"`)
+	photoRe   = regexp.MustCompile(`/photos/([ut])/([0-9a-f-]{36})/([0-9a-f]{16})`)
 )
 
 // bootstrap sets a fresh server up with the admin and the team the tests use.
@@ -472,6 +478,76 @@ func TestEndToEnd(t *testing.T) {
 		}
 		if _, again := admin.hx(revoke, url.Values{}); !strings.Contains(again, "invite not found") {
 			t.Fatalf("revoking twice: %s", again)
+		}
+	})
+
+	t.Run("profile and team photos", func(t *testing.T) {
+		pic := image.NewRGBA(image.Rect(0, 0, 400, 300))
+		for i := range pic.Pix {
+			if pic.Pix[i] = uint8(i); i%4 == 3 {
+				pic.Pix[i] = 255
+			}
+		}
+		var raw bytes.Buffer
+		_ = png.Encode(&raw, pic)
+		upload := func(c *client, path string, name string, data []byte) string {
+			var buf bytes.Buffer
+			mw := multipart.NewWriter(&buf)
+			fw, _ := mw.CreateFormFile("photo", name)
+			_, _ = fw.Write(data)
+			_ = mw.Close()
+			res, body := c.do(http.MethodPost, path, &buf, mw.FormDataContentType(), true)
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("%s: %d %s", path, res.StatusCode, body)
+			}
+			return body
+		}
+		body := upload(bob, "/settings/photo", "me.png", raw.Bytes())
+		m := photoRe.FindStringSubmatch(body)
+		if m == nil || m[1] != "u" {
+			t.Fatalf("no photo after upload: %s", body)
+		}
+		userPhoto := m[0]
+		res, got := admin.get(userPhoto)
+		if res.StatusCode != http.StatusOK || res.Header.Get("Content-Type") != "image/jpeg" || !strings.Contains(res.Header.Get("Cache-Control"), "immutable") {
+			t.Fatalf("photo: %d %v", res.StatusCode, res.Header)
+		}
+		if cfg, _, err := image.DecodeConfig(strings.NewReader(got)); err != nil || cfg.Width != 256 || cfg.Height != 256 {
+			t.Fatalf("photo is not a 256px square: %v %v", cfg, err)
+		}
+		if res, _ := newClient(t, "anon").get(userPhoto); res.StatusCode == http.StatusOK {
+			t.Fatal("a signed-out client got a photo")
+		}
+		if body := upload(bob, "/settings/photo", "x.svg", []byte("<svg xmlns='http://www.w3.org/2000/svg'/>")); !strings.Contains(body, "Use a JPEG, PNG, GIF or WebP picture") {
+			t.Fatalf("svg accepted: %s", body)
+		}
+
+		if body := upload(bob, "/t/"+teamName+"/photo", "team.png", raw.Bytes()); !strings.Contains(body, "form-error") || photoRe.MatchString(body) {
+			t.Fatalf("a member set the team photo: %s", body)
+		}
+		var tinted bytes.Buffer
+		sq := image.NewNRGBA(image.Rect(0, 0, 64, 64))
+		for i := range 64 * 64 {
+			sq.Set(i%64, i/64, color.NRGBA{200, 210, 250, 120})
+		}
+		_ = png.Encode(&tinted, sq)
+		body = upload(admin, "/t/"+teamName+"/photo", "team.png", tinted.Bytes())
+		m = photoRe.FindStringSubmatch(body)
+		if m == nil || m[1] != "t" || !strings.Contains(body, `id="team-rail"`) {
+			t.Fatalf("team photo: %s", body)
+		}
+		if res, _ := bob.get(m[0]); res.StatusCode != http.StatusOK || res.Header.Get("Content-Type") != "image/png" {
+			t.Fatalf("member fetching the team photo: %d %v", res.StatusCode, res.Header)
+		}
+		if _, body := admin.hx("/t/"+teamName+"/photo/remove", url.Values{}); photoRe.MatchString(body) {
+			t.Fatalf("team photo not removed: %s", body)
+		}
+
+		if _, body := bob.hx("/settings/photo/remove", url.Values{}); photoRe.MatchString(body) {
+			t.Fatalf("photo not removed: %s", body)
+		}
+		if res, _ := admin.get(userPhoto); res.StatusCode != http.StatusNotFound {
+			t.Fatalf("removed photo still served: %d", res.StatusCode)
 		}
 	})
 

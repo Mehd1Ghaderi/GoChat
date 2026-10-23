@@ -9,6 +9,7 @@ service FileService {
   rpc Upload(stream UploadRequest) returns (UploadResponse);
   // The first message is the header, every other one a chunk.
   rpc Download(DownloadRequest) returns (stream DownloadResponse);
+  rpc GetPhoto(GetPhotoRequest) returns (GetPhotoResponse);
 }
 
 message UploadHeader {
@@ -36,4 +37,20 @@ message DownloadResponse {
     Attachment header = 1;
     bytes chunk = 2;
   }
+}
+
+message GetPhotoRequest {
+  oneof owner {
+    string user_id = 1;
+    string team_id = 2;
+  }
+  string version = 3;
+}
+
+message GetPhotoResponse {
+  bytes image = 1;
+  string content_type = 2;
+  // The current version, which differs from the one asked for once the photo
+  // changed.
+  string version = 3;
 }

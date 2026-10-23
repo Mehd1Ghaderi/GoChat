@@ -37,11 +37,13 @@ type Repo interface {
 	GetUser(ctx context.Context, id gocql.UUID) (*models.User, error)
 	UpdateDisplayName(ctx context.Context, id gocql.UUID, name string, now time.Time) error
 	UpdateMemberDisplayName(ctx context.Context, userID gocql.UUID, name string) error
+	SetUserPhoto(ctx context.Context, id gocql.UUID, version string, now time.Time) error
 
 	CreateTeam(ctx context.Context, t *models.Team) error
 	GetTeam(ctx context.Context, id gocql.UUID) (*models.Team, error)
 	GetTeamIDByName(ctx context.Context, name string) (gocql.UUID, error)
 	GetTeams(ctx context.Context, ids []gocql.UUID) ([]*models.Team, error)
+	SetTeamPhoto(ctx context.Context, id gocql.UUID, version string) error
 	AddTeamMember(ctx context.Context, m *models.TeamMember, username, displayName string) error
 	GetTeamMember(ctx context.Context, teamID, userID gocql.UUID) (*models.TeamMember, error)
 	ListTeamMembers(ctx context.Context, teamID gocql.UUID) ([]*scylla.TeamMemberEntry, error)
@@ -68,6 +70,7 @@ type Deps struct {
 	Logger   *zap.Logger
 	Cfg      *Config
 	Repo     Repo
+	Storage  Storage
 	Authz    *authz.Authorizer
 	Users    *users.Cache
 	Engine   *actor.Engine
@@ -134,6 +137,12 @@ func (w *worker) Receive(c *actor.Context) {
 		out, err = w.getUser(ctx, msg)
 	case UpdateProfile:
 		out, err = w.updateProfile(ctx, msg)
+	case SetPhoto:
+		out, err = w.setPhoto(ctx, msg.P, msg.Image)
+	case SetTeamPhoto:
+		out, err = w.setTeamPhoto(ctx, msg.P, msg.TeamID, msg.Image)
+	case GetPhoto:
+		out, err = w.getPhoto(ctx, msg)
 	case Me:
 		out, err = w.me(ctx, msg.P)
 	case Presence:
@@ -314,6 +323,19 @@ func (w *worker) listTeamMembers(ctx context.Context, msg ListTeamMembers) ([]*p
 		})
 		if len(out) >= limit {
 			break
+		}
+	}
+	userIDs := make([]gocql.UUID, 0, len(out))
+	for _, m := range out {
+		if id, ok := ids.Parse(m.User.Id); ok {
+			userIDs = append(userIDs, id)
+		}
+	}
+	if found, err := w.Users.GetMany(ctx, userIDs); err == nil {
+		for _, m := range out {
+			if id, ok := ids.Parse(m.User.Id); ok && found[id] != nil {
+				m.User.Photo = found[id].Photo
+			}
 		}
 	}
 	return out, nil

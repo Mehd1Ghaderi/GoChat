@@ -134,6 +134,7 @@ func (r *Renderer) funcs() template.FuncMap {
 			return Initials(&pb.User{DisplayName: t.DisplayName})
 		},
 		"avatar":  AvatarClass,
+		"icon":    Icon,
 		"size":    HumanSize,
 		"isImage": IsImage,
 		"iso":     func(t time.Time) string { return t.UTC().Format(time.RFC3339) },

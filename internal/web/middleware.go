@@ -84,16 +84,20 @@ const maxFormBytes = 1 << 20
 
 // csrf requires a same-origin request carrying the token of the CSRF cookie,
 // in the X-CSRF-Token header (htmx) or the _csrf field (plain forms).
-func (h *Handler) csrf(next http.Handler) http.Handler {
+func (h *Handler) csrf(next http.Handler) http.Handler { return h.guard(next, false) }
+
+// csrfMultipart guards a handler that reads a multipart body and bounds it
+// itself.
+func (h *Handler) csrfMultipart(next http.Handler) http.Handler { return h.guard(next, true) }
+
+func (h *Handler) guard(next http.Handler, multipart bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !h.sameOrigin(r) {
 			h.logger.Warn("cross-origin request refused", zap.String("path", r.URL.Path), zap.String("origin", r.Header.Get("Origin")))
 			http.Error(w, "cross-origin request refused", http.StatusForbidden)
 			return
 		}
-		// Only uploads stream large or multipart bodies; anything else is a
-		// small form.
-		if r.URL.Path != "/upload" {
+		if !multipart {
 			if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
 				http.Error(w, "unsupported request body", http.StatusUnsupportedMediaType)
 				return

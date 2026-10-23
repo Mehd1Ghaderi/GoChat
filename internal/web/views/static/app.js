@@ -5,6 +5,8 @@
 
   var socket = null;
   var opened = false;
+  // Phones and tablets: no hover, and no Shift on their keyboards.
+  var touch = window.matchMedia("(hover: none) and (pointer: coarse)");
 
   function view() {
     return document.getElementById("channel-view");
@@ -194,7 +196,17 @@
       var menu = target.closest("details");
       if (menu) menu.open = false;
     }
+    if (touch.matches) toggleActions(target);
   });
+
+  // A tap on a message shows its actions, which a mouse shows on hover.
+  function toggleActions(target) {
+    var msg = target.closest(".msg");
+    if (msg && target.closest("a, button, textarea, input, .msg-actions")) return;
+    var open = msg && !msg.classList.contains("show-actions");
+    document.querySelectorAll(".msg.show-actions").forEach(function (m) { m.classList.remove("show-actions"); });
+    if (open && msg.querySelector(".msg-actions")) msg.classList.add("show-actions");
+  }
 
   document.addEventListener("focusin", function (e) {
     if (e.target instanceof HTMLInputElement && e.target.hasAttribute("data-select-on-focus")) e.target.select();
@@ -204,7 +216,7 @@
     if (e.key === "Escape") closeModal();
     var t = e.target;
     if (!(t instanceof HTMLTextAreaElement) || !t.form || t.form.id !== "composer") return;
-    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !touch.matches) {
       e.preventDefault();
       t.form.requestSubmit();
     }

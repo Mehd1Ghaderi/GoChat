@@ -1,16 +1,16 @@
 {{define "channel"}}
 <section class="channel" id="channel-view" data-team="{{.Team.Id}}" data-team-name="{{.Team.Name}}" data-channel="{{.Channel.Id}}" data-title="{{.Title}}" data-newest="{{.Newest}}"{{if .Moderator}} data-moderator="1"{{end}}>
   <header class="channel-header">
-    <label for="nav-toggle" class="icon-btn menu-btn" aria-label="Open navigation">☰</label>
+    <label for="nav-toggle" class="icon-btn menu-btn" aria-label="Open navigation">{{icon "menu"}}</label>
     <div class="channel-title">
-      <h1>{{if isDirect .Channel}}<span class="presence{{if .PeerOnline}} on{{end}}" aria-hidden="true"></span>{{else if isPrivate .Channel}}<span class="glyph">◈</span>{{else}}<span class="glyph">#</span>{{end}}{{.Title}}</h1>
+      <h1>{{if isDirect .Channel}}<span class="presence{{if .PeerOnline}} on{{end}}" aria-hidden="true"></span>{{else if isPrivate .Channel}}<span class="glyph" aria-hidden="true">{{icon "lock"}}</span>{{else}}<span class="glyph" aria-hidden="true">{{icon "hash"}}</span>{{end}}<span class="title-text">{{.Title}}</span></h1>
       {{with .Channel.Purpose}}<p class="purpose">{{.}}</p>{{end}}
     </div>
     <div class="channel-actions">
       {{if and .Member (not (isDirect .Channel))}}
-      <button class="icon-btn" hx-get="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/members" hx-target="#modal" aria-label="Members" title="Members">👥</button>
+      <button class="icon-btn" hx-get="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/members" hx-target="#modal" aria-label="Members" title="Members">{{icon "members"}}</button>
       {{if ne .Channel.Name "town-square"}}
-      <button class="icon-btn" hx-post="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/leave" hx-confirm="Leave this channel?" aria-label="Leave channel" title="Leave channel">⇥</button>
+      <button class="icon-btn" hx-post="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/leave" hx-confirm="Leave this channel?" aria-label="Leave channel" title="Leave channel">{{icon "leave"}}</button>
       {{end}}
       {{end}}
     </div>
@@ -56,7 +56,7 @@
     <form class="upload-form" hx-post="/upload?channel={{.Channel.Id}}" hx-encoding="multipart/form-data"
           hx-target="#pending-{{.Channel.Id}}" hx-swap="beforeend" hx-trigger="change">
       <label class="icon-btn attach" title="Attach files" aria-label="Attach files">
-        <input type="file" name="file" multiple class="visually-hidden">📎
+        <input type="file" name="file" multiple class="visually-hidden">{{icon "attach"}}
       </label>
     </form>
     <form id="composer" class="composer" ws-send>
@@ -64,7 +64,7 @@
       <input type="hidden" name="channel_id" value="{{.Channel.Id}}">
       <textarea name="content" rows="1" maxlength="16000" autocomplete="off" aria-label="Message"
                 placeholder="Message {{if isDirect .Channel}}{{.Title}}{{else}}#{{.Title}}{{end}}"></textarea>
-      <button class="send" type="submit" aria-label="Send">➤</button>
+      <button class="send" type="submit" aria-label="Send">{{icon "send"}}</button>
     </form>
   </div>
   <progress class="upload-progress" max="100" value="0" hidden></progress>
@@ -75,7 +75,7 @@
 <span class="chip">
   <input type="hidden" name="attachment" value="{{.Id}}" form="composer">
   <span class="chip-name">{{.Name}}</span><small>{{size .Size}}</small>
-  <button type="button" class="chip-remove" aria-label="Remove {{.Name}}">✕</button>
+  <button type="button" class="chip-remove" aria-label="Remove {{.Name}}">{{icon "close"}}</button>
 </span>
 {{end}}
 

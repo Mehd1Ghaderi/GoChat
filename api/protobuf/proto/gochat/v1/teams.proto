@@ -17,6 +17,9 @@ service TeamService {
   rpc AcceptInvite(AcceptInviteRequest) returns (AcceptInviteResponse);
   rpc ListInvites(ListInvitesRequest) returns (ListInvitesResponse);
   rpc RevokeInvite(RevokeInviteRequest) returns (RevokeInviteResponse);
+  // SetTeamPhoto takes a processed photo: see the photo package.
+  rpc SetTeamPhoto(SetTeamPhotoRequest) returns (SetTeamPhotoResponse);
+  rpc RemoveTeamPhoto(RemoveTeamPhotoRequest) returns (RemoveTeamPhotoResponse);
 }
 
 message CreateTeamRequest {
@@ -124,3 +127,20 @@ message RevokeInviteRequest {
 }
 
 message RevokeInviteResponse {}
+
+message SetTeamPhotoRequest {
+  string team_id = 1;
+  bytes image = 2;
+}
+
+message SetTeamPhotoResponse {
+  Team team = 1;
+}
+
+message RemoveTeamPhotoRequest {
+  string team_id = 1;
+}
+
+message RemoveTeamPhotoResponse {
+  Team team = 1;
+}

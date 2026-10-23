@@ -338,6 +338,33 @@ func (s *teamService) RevokeInvite(ctx context.Context, req *pb.RevokeInviteRequ
 	return &pb.RevokeInviteResponse{}, nil
 }
 
+func (s *teamService) SetTeamPhoto(ctx context.Context, req *pb.SetTeamPhotoRequest) (*pb.SetTeamPhotoResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(req.Image) == 0 {
+		return nil, ierrors.InvalidArgument("the photo is empty")
+	}
+	team, err := actors.Ask[*pb.Team](ctx, s.sys.Engine, s.sys.Directory, directory.SetTeamPhoto{P: p, TeamID: req.TeamId, Image: req.Image})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.SetTeamPhotoResponse{Team: team}, nil
+}
+
+func (s *teamService) RemoveTeamPhoto(ctx context.Context, req *pb.RemoveTeamPhotoRequest) (*pb.RemoveTeamPhotoResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	team, err := actors.Ask[*pb.Team](ctx, s.sys.Engine, s.sys.Directory, directory.SetTeamPhoto{P: p, TeamID: req.TeamId})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.RemoveTeamPhotoResponse{Team: team}, nil
+}
+
 type channelService struct{ *base }
 
 func (s *channelService) ListChannels(ctx context.Context, req *pb.ListChannelsRequest) (*pb.ListChannelsResponse, error) {
@@ -579,6 +606,33 @@ func (s *userService) UpdateProfile(ctx context.Context, req *pb.UpdateProfileRe
 		return nil, err
 	}
 	return &pb.UpdateProfileResponse{User: u}, nil
+}
+
+func (s *userService) SetPhoto(ctx context.Context, req *pb.SetPhotoRequest) (*pb.SetPhotoResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(req.Image) == 0 {
+		return nil, ierrors.InvalidArgument("the photo is empty")
+	}
+	u, err := actors.Ask[*pb.User](ctx, s.sys.Engine, s.sys.Directory, directory.SetPhoto{P: p, Image: req.Image})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.SetPhotoResponse{User: u}, nil
+}
+
+func (s *userService) RemovePhoto(ctx context.Context, _ *pb.RemovePhotoRequest) (*pb.RemovePhotoResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	u, err := actors.Ask[*pb.User](ctx, s.sys.Engine, s.sys.Directory, directory.SetPhoto{P: p})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.RemovePhotoResponse{User: u}, nil
 }
 
 func (s *userService) GetPresence(ctx context.Context, req *pb.GetPresenceRequest) (*pb.GetPresenceResponse, error) {

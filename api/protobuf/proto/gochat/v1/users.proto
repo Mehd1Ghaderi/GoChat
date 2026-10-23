@@ -8,6 +8,9 @@ service UserService {
   rpc GetUser(GetUserRequest) returns (GetUserResponse);
   rpc UpdateProfile(UpdateProfileRequest) returns (UpdateProfileResponse);
   rpc GetPresence(GetPresenceRequest) returns (GetPresenceResponse);
+  // SetPhoto takes a processed photo: see the photo package.
+  rpc SetPhoto(SetPhotoRequest) returns (SetPhotoResponse);
+  rpc RemovePhoto(RemovePhotoRequest) returns (RemovePhotoResponse);
 }
 
 message GetUserRequest {
@@ -32,4 +35,18 @@ message GetPresenceRequest {
 
 message GetPresenceResponse {
   repeated string online_user_ids = 1;
+}
+
+message SetPhotoRequest {
+  bytes image = 1;
+}
+
+message SetPhotoResponse {
+  User user = 1;
+}
+
+message RemovePhotoRequest {}
+
+message RemovePhotoResponse {
+  User user = 1;
 }

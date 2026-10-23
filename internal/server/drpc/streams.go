@@ -19,6 +19,7 @@ import (
 	ierrors "github.com/ssenerg/gochat/internal/errors"
 	"github.com/ssenerg/gochat/internal/services/accounts"
 	"github.com/ssenerg/gochat/internal/services/convert"
+	"github.com/ssenerg/gochat/internal/services/directory"
 	"github.com/ssenerg/gochat/internal/services/files"
 	"github.com/ssenerg/gochat/internal/services/hub"
 )
@@ -168,6 +169,20 @@ func (s *fileService) nextChunk(stream pb.DRPCFileService_UploadStream) ([]byte,
 			return chunk, nil
 		}
 	}
+}
+
+func (s *fileService) GetPhoto(ctx context.Context, req *pb.GetPhotoRequest) (*pb.GetPhotoResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ph, err := actors.Ask[*directory.Photo](ctx, s.sys.Engine, s.sys.Directory, directory.GetPhoto{
+		P: p, UserID: req.GetUserId(), TeamID: req.GetTeamId(), Version: req.Version,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.GetPhotoResponse{Image: ph.Data, ContentType: ph.ContentType, Version: ph.Version}, nil
 }
 
 func (s *fileService) Download(req *pb.DownloadRequest, stream pb.DRPCFileService_DownloadStream) error {

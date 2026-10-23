@@ -38,8 +38,11 @@ type Handler struct {
 	auth    *ipLimiter
 	reqs    *ipLimiter
 	me      *cache.Cache[string, *pb.User]
-	connSeq atomic.Uint64
-	csp     string
+	// photoReads and photoWork bound the photo uploads handled at once.
+	photoReads chan struct{}
+	photoWork  chan struct{}
+	connSeq    atomic.Uint64
+	csp        string
 }
 
 func NewHandler(logger *zap.Logger, cfg *Config, client *drpc.Client, r *render.Renderer, engine *actor.Engine, gw *gateway.Deps) *Handler {
@@ -56,6 +59,9 @@ func NewHandler(logger *zap.Logger, cfg *Config, client *drpc.Client, r *render.
 		auth:   newIPLimiter(rate.Limit(cfg.RateLimit.AuthPerMinute/60), cfg.RateLimit.AuthBurst),
 		reqs:   newIPLimiter(rate.Limit(cfg.RateLimit.RequestsPerSecond), cfg.RateLimit.RequestBurst),
 		me:     cache.New[string, *pb.User](100_000, meCacheTTL),
+
+		photoReads: make(chan struct{}, photoReaders),
+		photoWork:  make(chan struct{}, photoDecoders),
 	}
 	wsScheme := "ws"
 	if h.secure {
@@ -120,6 +126,9 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("POST /t/{team}/invites", h.csrf(http.HandlerFunc(h.createInvite)))
 	mux.Handle("POST /t/{team}/invites/{invite}/revoke", h.csrf(http.HandlerFunc(h.revokeInvite)))
 	mux.HandleFunc("GET /t/{team}/members", h.teamMembers)
+	mux.HandleFunc("GET /t/{team}/settings", h.teamSettings)
+	mux.Handle("POST /t/{team}/photo", h.csrfMultipart(http.HandlerFunc(h.setTeamPhoto)))
+	mux.Handle("POST /t/{team}/photo/remove", h.csrf(http.HandlerFunc(h.setTeamPhoto)))
 	mux.Handle("POST /t/{team}/members/{user}/remove", h.csrf(http.HandlerFunc(h.removeTeamMember)))
 	mux.Handle("POST /t/{team}/members/{user}/role", h.csrf(http.HandlerFunc(h.teamMemberRole)))
 
@@ -128,12 +137,16 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("POST /m/{channel}/{message}", h.csrf(http.HandlerFunc(h.editMessage)))
 	mux.Handle("POST /m/{channel}/{message}/delete", h.csrf(http.HandlerFunc(h.deleteMessage)))
 
-	mux.Handle("POST /upload", h.csrf(http.HandlerFunc(h.upload)))
+	mux.Handle("POST /upload", h.csrfMultipart(http.HandlerFunc(h.upload)))
 	mux.HandleFunc("GET /files/{id}", h.download)
 	mux.HandleFunc("GET /files/{id}/inline", h.download)
+	mux.HandleFunc("GET /photos/u/{id}/{version}", h.servePhoto)
+	mux.HandleFunc("GET /photos/t/{id}/{version}", h.servePhoto)
 
 	mux.HandleFunc("GET /settings", h.settingsPage)
 	mux.Handle("POST /settings/profile", h.csrf(http.HandlerFunc(h.updateProfile)))
+	mux.Handle("POST /settings/photo", h.csrfMultipart(http.HandlerFunc(h.setPhoto)))
+	mux.Handle("POST /settings/photo/remove", h.csrf(http.HandlerFunc(h.setPhoto)))
 	mux.Handle("POST /settings/password", h.csrf(http.HandlerFunc(h.changePassword)))
 	mux.Handle("POST /settings/totp/begin", h.csrf(http.HandlerFunc(h.beginTOTP)))
 	mux.Handle("POST /settings/totp/confirm", h.csrf(http.HandlerFunc(h.confirmTOTP)))

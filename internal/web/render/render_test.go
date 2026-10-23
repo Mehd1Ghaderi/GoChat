@@ -96,3 +96,35 @@ func TestMessageFragment(t *testing.T) {
 		t.Errorf("missing oob: %s", out)
 	}
 }
+
+func TestPhotos(t *testing.T) {
+	r, err := New(16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := &pb.User{Id: "11111111-1111-4111-8111-111111111111", Username: "ann", Photo: "0123456789abcdef"}
+	var out bytes.Buffer
+	field := map[string]any{"ID": "profile-photo", "URL": "/settings/photo", "User": u}
+	if err := r.Fragment(&out, "photo-field", field); err != nil {
+		t.Fatal(err)
+	}
+	if s := out.String(); !strings.Contains(s, `src="/photos/u/`+u.Id+`/0123456789abcdef"`) || !strings.Contains(s, "Remove") {
+		t.Fatalf("user photo field: %s", s)
+	}
+	out.Reset()
+	team := &pb.Team{Id: "22222222-2222-4222-8222-222222222222", Name: "acme", DisplayName: "Acme"}
+	if err := r.Fragment(&out, "photo-field", struct {
+		ID, URL, Error, Status string
+		User                   *pb.User
+		Team                   *pb.Team
+	}{ID: "team-photo", URL: "/t/acme/photo", Team: team}); err != nil {
+		t.Fatal(err)
+	}
+	if s := out.String(); strings.Contains(s, "<img") || strings.Contains(s, "Remove") || !strings.Contains(s, `lg" aria-hidden="true">A</span>`) {
+		t.Fatalf("team without photo: %s", s)
+	}
+	out.Reset()
+	if err := r.Fragment(&out, "avatar", map[string]any{"User": (*pb.User)(nil), "Size": "sm"}); err != nil {
+		t.Fatalf("nil user: %v", err)
+	}
+}

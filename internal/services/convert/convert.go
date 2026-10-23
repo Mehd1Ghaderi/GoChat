@@ -91,6 +91,7 @@ func User(u *models.User) *pb.User {
 		TotpEnabled: u.TOTPEnabled,
 		CreatedAt:   Time(u.CreatedAt),
 		Deactivated: u.Deactivated,
+		Photo:       u.Photo,
 	}
 }
 
@@ -105,6 +106,7 @@ func PublicUser(u *models.User) *pb.User {
 		DisplayName: u.DisplayName,
 		Role:        SystemRole(u.Role),
 		Deactivated: u.Deactivated,
+		Photo:       u.Photo,
 	}
 }
 
@@ -116,6 +118,7 @@ func Team(t *models.Team, role models.TeamRole) *pb.Team {
 		Description: t.Description,
 		Role:        TeamRole(role),
 		CreatedAt:   Time(t.CreatedAt),
+		Photo:       t.Photo,
 	}
 }
 

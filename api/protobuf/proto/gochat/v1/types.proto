@@ -37,6 +37,8 @@ message User {
   bool totp_enabled = 5;
   google.protobuf.Timestamp created_at = 6;
   bool deactivated = 7;
+  // photo is the version of the profile photo, empty when there is none.
+  string photo = 8;
 }
 
 message Session {
@@ -53,6 +55,8 @@ message Team {
   // The caller's role in the team.
   TeamRole role = 5;
   google.protobuf.Timestamp created_at = 6;
+  // photo is the version of the team photo, empty when there is none.
+  string photo = 7;
 }
 
 message TeamMember {

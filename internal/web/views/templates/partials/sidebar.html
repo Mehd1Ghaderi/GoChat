@@ -1,18 +1,20 @@
 {{define "team-rail"}}
 <nav class="team-rail" id="team-rail" aria-label="Teams"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>
   {{range .Teams}}
-  <a href="/t/{{.Name}}" class="team-icon{{if and $.Team (eq .Id $.Team.Id)}} active{{end}}" title="{{.DisplayName}}" aria-label="{{.DisplayName}}">{{teamInitials .}}</a>
+  <a href="/t/{{.Name}}" class="team-icon{{if and $.Team (eq .Id $.Team.Id)}} active{{end}}" title="{{.DisplayName}}" aria-label="{{.DisplayName}}">{{template "team-mark" .}}</a>
   {{end}}
-  <a href="/teams/new" class="team-icon add" title="Create a team" aria-label="Create a team">+</a>
+  <a href="/teams/new" class="team-icon add" title="Create a team" aria-label="Create a team">{{icon "plus"}}</a>
 </nav>
 {{end}}
+
+{{define "team-mark"}}{{if .Photo}}<img src="/photos/t/{{.Id}}/{{.Photo}}" alt="" decoding="async">{{else}}{{teamInitials .}}{{end}}{{end}}
 
 {{define "channel-lists"}}
 <nav class="channel-lists" id="channel-lists" aria-label="Channels"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>
   <section>
     <h2><span>Channels</span>
-      <button class="icon-btn sm" hx-get="/t/{{.Team.Name}}/channels/browse" hx-target="#modal" aria-label="Browse channels" title="Browse channels">⌕</button>
-      <button class="icon-btn sm" hx-get="/t/{{.Team.Name}}/channels/new" hx-target="#modal" aria-label="Create a channel" title="Create a channel">+</button>
+      <button class="icon-btn sm" hx-get="/t/{{.Team.Name}}/channels/browse" hx-target="#modal" aria-label="Browse channels" title="Browse channels">{{icon "search"}}</button>
+      <button class="icon-btn sm" hx-get="/t/{{.Team.Name}}/channels/new" hx-target="#modal" aria-label="Create a channel" title="Create a channel">{{icon "plus"}}</button>
     </h2>
     <ul>
       {{range .Channels}}{{template "sidebar-item" (dict "Ch" . "Team" $.Team "Active" (eq .Id $.Active) "Online" $.Online)}}{{end}}
@@ -20,7 +22,7 @@
   </section>
   <section>
     <h2><span>Direct messages</span>
-      <button class="icon-btn sm" hx-get="/t/{{.Team.Name}}/people" hx-target="#modal" aria-label="Message someone" title="Message someone">+</button>
+      <button class="icon-btn sm" hx-get="/t/{{.Team.Name}}/people" hx-target="#modal" aria-label="Message someone" title="Message someone">{{icon "plus"}}</button>
     </h2>
     <ul>
       {{range .DMs}}{{template "sidebar-item" (dict "Ch" . "Team" $.Team "Active" (eq .Id $.Active) "Online" $.Online)}}{{end}}
@@ -34,8 +36,8 @@
   <a href="/t/{{.Team.Name}}/ch/{{.Ch.Id}}" hx-get="/t/{{.Team.Name}}/ch/{{.Ch.Id}}" hx-target="#main" hx-push-url="true"
      class="sb-link{{if .Active}} active{{end}}" data-channel="{{.Ch.Id}}"{{if .Active}} aria-current="page"{{end}}>
     {{if isDirect .Ch}}<span id="presence-{{.Ch.Peer.Id}}" class="presence{{if index .Online .Ch.Peer.Id}} on{{end}}" aria-hidden="true"></span>
-    {{else if isPrivate .Ch}}<span class="glyph" aria-hidden="true">◈</span>
-    {{else}}<span class="glyph" aria-hidden="true">#</span>{{end}}
+    {{else if isPrivate .Ch}}<span class="glyph" aria-hidden="true">{{icon "lock"}}</span>
+    {{else}}<span class="glyph" aria-hidden="true">{{icon "hash"}}</span>{{end}}
     <span class="label">{{channelName .Ch}}</span>
     <span id="unread-{{.Ch.Id}}" class="dot{{if and (unread .Ch) (not .Active)}} on{{end}}" aria-hidden="true"></span>
   </a>

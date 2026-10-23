@@ -222,14 +222,16 @@ func (ChannelType) EnumDescriptor() ([]byte, []int) {
 }
 
 type User struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
-	DisplayName   string                 `protobuf:"bytes,3,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
-	Role          SystemRole             `protobuf:"varint,4,opt,name=role,proto3,enum=gochat.v1.SystemRole" json:"role,omitempty"`
-	TotpEnabled   bool                   `protobuf:"varint,5,opt,name=totp_enabled,json=totpEnabled,proto3" json:"totp_enabled,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	Deactivated   bool                   `protobuf:"varint,7,opt,name=deactivated,proto3" json:"deactivated,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Id          string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Username    string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	DisplayName string                 `protobuf:"bytes,3,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	Role        SystemRole             `protobuf:"varint,4,opt,name=role,proto3,enum=gochat.v1.SystemRole" json:"role,omitempty"`
+	TotpEnabled bool                   `protobuf:"varint,5,opt,name=totp_enabled,json=totpEnabled,proto3" json:"totp_enabled,omitempty"`
+	CreatedAt   *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	Deactivated bool                   `protobuf:"varint,7,opt,name=deactivated,proto3" json:"deactivated,omitempty"`
+	// photo is the version of the profile photo, empty when there is none.
+	Photo         string `protobuf:"bytes,8,opt,name=photo,proto3" json:"photo,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -313,6 +315,13 @@ func (x *User) GetDeactivated() bool {
 	return false
 }
 
+func (x *User) GetPhoto() string {
+	if x != nil {
+		return x.Photo
+	}
+	return ""
+}
+
 type Session struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Token         string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
@@ -380,8 +389,10 @@ type Team struct {
 	DisplayName string                 `protobuf:"bytes,3,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
 	Description string                 `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
 	// The caller's role in the team.
-	Role          TeamRole               `protobuf:"varint,5,opt,name=role,proto3,enum=gochat.v1.TeamRole" json:"role,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	Role      TeamRole               `protobuf:"varint,5,opt,name=role,proto3,enum=gochat.v1.TeamRole" json:"role,omitempty"`
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// photo is the version of the team photo, empty when there is none.
+	Photo         string `protobuf:"bytes,7,opt,name=photo,proto3" json:"photo,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -456,6 +467,13 @@ func (x *Team) GetCreatedAt() *timestamppb.Timestamp {
 		return x.CreatedAt
 	}
 	return nil
+}
+
+func (x *Team) GetPhoto() string {
+	if x != nil {
+		return x.Photo
+	}
+	return ""
 }
 
 type TeamMember struct {
@@ -868,7 +886,7 @@ var File_gochat_v1_types_proto protoreflect.FileDescriptor
 
 const file_gochat_v1_types_proto_rawDesc = "" +
 	"\n" +
-	"\x15gochat/v1/types.proto\x12\tgochat.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x80\x02\n" +
+	"\x15gochat/v1/types.proto\x12\tgochat.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x96\x02\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12!\n" +
@@ -877,12 +895,13 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"\ftotp_enabled\x18\x05 \x01(\bR\vtotpEnabled\x129\n" +
 	"\n" +
 	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12 \n" +
-	"\vdeactivated\x18\a \x01(\bR\vdeactivated\"j\n" +
+	"\vdeactivated\x18\a \x01(\bR\vdeactivated\x12\x14\n" +
+	"\x05photo\x18\b \x01(\tR\x05photo\"j\n" +
 	"\aSession\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x129\n" +
 	"\n" +
-	"expires_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"\xd3\x01\n" +
+	"expires_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"\xe9\x01\n" +
 	"\x04Team\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12!\n" +
@@ -890,7 +909,8 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"\vdescription\x18\x04 \x01(\tR\vdescription\x12'\n" +
 	"\x04role\x18\x05 \x01(\x0e2\x13.gochat.v1.TeamRoleR\x04role\x129\n" +
 	"\n" +
-	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"\x93\x01\n" +
+	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\x14\n" +
+	"\x05photo\x18\a \x01(\tR\x05photo\"\x93\x01\n" +
 	"\n" +
 	"TeamMember\x12#\n" +
 	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user\x12'\n" +

@@ -108,6 +108,33 @@ type UpdateProfile struct {
 	DisplayName string
 }
 
+// SetPhoto replaces the caller's photo with a processed one, or removes it
+// when Image is nil.
+type SetPhoto struct {
+	P     *models.Principal
+	Image []byte
+}
+
+type SetTeamPhoto struct {
+	P      *models.Principal
+	TeamID string
+	Image  []byte
+}
+
+// GetPhoto names a user or a team, and the photo version the caller saw.
+type GetPhoto struct {
+	P       *models.Principal
+	UserID  string
+	TeamID  string
+	Version string
+}
+
+type Photo struct {
+	Data        []byte
+	ContentType string
+	Version     string
+}
+
 type Me struct{ P *models.Principal }
 
 type MeResult struct {

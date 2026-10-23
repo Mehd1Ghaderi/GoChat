@@ -13,7 +13,10 @@ import (
 	ierrors "github.com/ssenerg/gochat/internal/errors"
 )
 
-const teamColumns = "id, name, display_name, description, created_by, created_at"
+const (
+	teamWritten = "id, name, display_name, description, created_by, created_at"
+	teamColumns = teamWritten + ", photo"
+)
 
 // TeamMemberEntry is a team member with the profile fields kept beside it for
 // listing and search.
@@ -32,7 +35,7 @@ func (r *Repository) CreateTeam(ctx context.Context, t *models.Team) error {
 	if !ok {
 		return ierrors.AlreadyExists("team name is taken")
 	}
-	err = r.query(ctx, "INSERT INTO teams ("+teamColumns+") VALUES (?, ?, ?, ?, ?, ?)",
+	err = r.query(ctx, "INSERT INTO teams ("+teamWritten+") VALUES (?, ?, ?, ?, ?, ?)",
 		t.ID, t.Name, t.DisplayName, t.Description, t.CreatedBy, t.CreatedAt).ExecRelease()
 	if err != nil {
 		r.release(err, "DELETE FROM team_names WHERE name = ? IF team_id = ?", t.Name, t.ID)
@@ -47,6 +50,11 @@ func (r *Repository) GetTeam(ctx context.Context, id gocql.UUID) (*models.Team, 
 		return nil, wrap(err)
 	}
 	return &t, nil
+}
+
+// SetTeamPhoto records the version of the team's photo, empty for none.
+func (r *Repository) SetTeamPhoto(ctx context.Context, id gocql.UUID, version string) error {
+	return wrap(r.query(ctx, "UPDATE teams SET photo = ? WHERE id = ?", nullable(version), id).ExecRelease())
 }
 
 func (r *Repository) GetTeamIDByName(ctx context.Context, name string) (gocql.UUID, error) {

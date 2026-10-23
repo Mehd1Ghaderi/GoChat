@@ -41,6 +41,8 @@ type DRPCUserServiceClient interface {
 	GetUser(ctx context.Context, in *GetUserRequest) (*GetUserResponse, error)
 	UpdateProfile(ctx context.Context, in *UpdateProfileRequest) (*UpdateProfileResponse, error)
 	GetPresence(ctx context.Context, in *GetPresenceRequest) (*GetPresenceResponse, error)
+	SetPhoto(ctx context.Context, in *SetPhotoRequest) (*SetPhotoResponse, error)
+	RemovePhoto(ctx context.Context, in *RemovePhotoRequest) (*RemovePhotoResponse, error)
 }
 
 type drpcUserServiceClient struct {
@@ -80,10 +82,30 @@ func (c *drpcUserServiceClient) GetPresence(ctx context.Context, in *GetPresence
 	return out, nil
 }
 
+func (c *drpcUserServiceClient) SetPhoto(ctx context.Context, in *SetPhotoRequest) (*SetPhotoResponse, error) {
+	out := new(SetPhotoResponse)
+	err := c.cc.Invoke(ctx, "/gochat.v1.UserService/SetPhoto", drpcEncoding_File_gochat_v1_users_proto{}, in, out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *drpcUserServiceClient) RemovePhoto(ctx context.Context, in *RemovePhotoRequest) (*RemovePhotoResponse, error) {
+	out := new(RemovePhotoResponse)
+	err := c.cc.Invoke(ctx, "/gochat.v1.UserService/RemovePhoto", drpcEncoding_File_gochat_v1_users_proto{}, in, out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 type DRPCUserServiceServer interface {
 	GetUser(context.Context, *GetUserRequest) (*GetUserResponse, error)
 	UpdateProfile(context.Context, *UpdateProfileRequest) (*UpdateProfileResponse, error)
 	GetPresence(context.Context, *GetPresenceRequest) (*GetPresenceResponse, error)
+	SetPhoto(context.Context, *SetPhotoRequest) (*SetPhotoResponse, error)
+	RemovePhoto(context.Context, *RemovePhotoRequest) (*RemovePhotoResponse, error)
 }
 
 type DRPCUserServiceUnimplementedServer struct{}
@@ -100,9 +122,17 @@ func (s *DRPCUserServiceUnimplementedServer) GetPresence(context.Context, *GetPr
 	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
 }
 
+func (s *DRPCUserServiceUnimplementedServer) SetPhoto(context.Context, *SetPhotoRequest) (*SetPhotoResponse, error) {
+	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
+}
+
+func (s *DRPCUserServiceUnimplementedServer) RemovePhoto(context.Context, *RemovePhotoRequest) (*RemovePhotoResponse, error) {
+	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
+}
+
 type DRPCUserServiceDescription struct{}
 
-func (DRPCUserServiceDescription) NumMethods() int { return 3 }
+func (DRPCUserServiceDescription) NumMethods() int { return 5 }
 
 func (DRPCUserServiceDescription) Method(n int) (string, drpc.Encoding, drpc.Receiver, interface{}, bool) {
 	switch n {
@@ -133,6 +163,24 @@ func (DRPCUserServiceDescription) Method(n int) (string, drpc.Encoding, drpc.Rec
 						in1.(*GetPresenceRequest),
 					)
 			}, DRPCUserServiceServer.GetPresence, true
+	case 3:
+		return "/gochat.v1.UserService/SetPhoto", drpcEncoding_File_gochat_v1_users_proto{},
+			func(srv interface{}, ctx context.Context, in1, in2 interface{}) (drpc.Message, error) {
+				return srv.(DRPCUserServiceServer).
+					SetPhoto(
+						ctx,
+						in1.(*SetPhotoRequest),
+					)
+			}, DRPCUserServiceServer.SetPhoto, true
+	case 4:
+		return "/gochat.v1.UserService/RemovePhoto", drpcEncoding_File_gochat_v1_users_proto{},
+			func(srv interface{}, ctx context.Context, in1, in2 interface{}) (drpc.Message, error) {
+				return srv.(DRPCUserServiceServer).
+					RemovePhoto(
+						ctx,
+						in1.(*RemovePhotoRequest),
+					)
+			}, DRPCUserServiceServer.RemovePhoto, true
 	default:
 		return "", nil, nil, nil, false
 	}
@@ -196,6 +244,46 @@ func (x *drpcUserService_GetPresenceStream) GetStream() drpc.Stream {
 }
 
 func (x *drpcUserService_GetPresenceStream) SendAndClose(m *GetPresenceResponse) error {
+	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_users_proto{}); err != nil {
+		return err
+	}
+	return x.CloseSend()
+}
+
+type DRPCUserService_SetPhotoStream interface {
+	drpc.Stream
+	SendAndClose(*SetPhotoResponse) error
+}
+
+type drpcUserService_SetPhotoStream struct {
+	drpc.Stream
+}
+
+func (x *drpcUserService_SetPhotoStream) GetStream() drpc.Stream {
+	return x.Stream
+}
+
+func (x *drpcUserService_SetPhotoStream) SendAndClose(m *SetPhotoResponse) error {
+	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_users_proto{}); err != nil {
+		return err
+	}
+	return x.CloseSend()
+}
+
+type DRPCUserService_RemovePhotoStream interface {
+	drpc.Stream
+	SendAndClose(*RemovePhotoResponse) error
+}
+
+type drpcUserService_RemovePhotoStream struct {
+	drpc.Stream
+}
+
+func (x *drpcUserService_RemovePhotoStream) GetStream() drpc.Stream {
+	return x.Stream
+}
+
+func (x *drpcUserService_RemovePhotoStream) SendAndClose(m *RemovePhotoResponse) error {
 	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_users_proto{}); err != nil {
 		return err
 	}

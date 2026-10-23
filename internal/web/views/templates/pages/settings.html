@@ -1,12 +1,13 @@
 {{define "content"}}
 <main class="page">
   <header class="page-header">
-    <a class="btn" href="/">← Back</a>
+    <a class="btn" href="/">{{icon "back"}}Back</a>
     <h1>Account settings</h1>
   </header>
   <section class="card">
     <h2>Profile</h2>
     <p class="muted">@{{.User.Username}} · {{.Email}}</p>
+    {{template "photo-field" (dict "ID" "profile-photo" "URL" "/settings/photo" "User" .User)}}
     <form hx-post="/settings/profile" hx-target="#profile-status" class="stack">
       <label>Display name
         <input name="display_name" maxlength="64" required value="{{.User.DisplayName}}">

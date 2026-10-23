@@ -7,9 +7,10 @@
       <header class="team-header">
         <div class="team-name" title="{{.Team.DisplayName}}">{{.Team.DisplayName}}</div>
         <details class="menu">
-          <summary class="icon-btn" aria-label="Team menu">⋯</summary>
+          <summary class="icon-btn" aria-label="Team menu">{{icon "more"}}</summary>
           <div class="menu-items">
-            {{if isAdmin .Team}}<button hx-get="/t/{{.Team.Name}}/invite" hx-target="#modal">Invite people</button>{{end}}
+            {{if isAdmin .Team}}<button hx-get="/t/{{.Team.Name}}/invite" hx-target="#modal">Invite people</button>
+            <button hx-get="/t/{{.Team.Name}}/settings" hx-target="#modal">Team settings</button>{{end}}
             <button hx-get="/t/{{.Team.Name}}/members" hx-target="#modal">Team members</button>
             <button hx-get="/t/{{.Team.Name}}/channels/new" hx-target="#modal">Create a channel</button>
             <button hx-get="/t/{{.Team.Name}}/channels/browse" hx-target="#modal">Browse channels</button>
@@ -19,12 +20,12 @@
       </header>
       {{template "channel-lists" .Lists}}
       <footer class="me">
-        <span class="avatar sm {{avatar .User}}" aria-hidden="true">{{initials .User}}</span>
+        {{template "avatar" (dict "User" .User "Size" "sm")}}
         <span class="me-name"><strong>{{name .User}}</strong><small>@{{.User.Username}}</small></span>
-        <a class="icon-btn" href="/settings" aria-label="Settings" title="Settings">⚙</a>
+        <a class="icon-btn" href="/settings" aria-label="Settings" title="Settings">{{icon "settings"}}</a>
         <form method="post" action="/logout">
           <input type="hidden" name="_csrf" value="{{.CSRF}}">
-          <button class="icon-btn" type="submit" aria-label="Sign out" title="Sign out">⏻</button>
+          <button class="icon-btn" type="submit" aria-label="Sign out" title="Sign out">{{icon "sign-out"}}</button>
         </form>
       </footer>
     </div>

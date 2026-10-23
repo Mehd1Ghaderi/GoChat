@@ -50,6 +50,8 @@ type User struct {
 	Deactivated  bool       `db:"deactivated"`
 	CreatedAt    time.Time  `db:"created_at"`
 	UpdatedAt    time.Time  `db:"updated_at"`
+	// Photo is the version of the profile photo, empty when there is none.
+	Photo string `db:"photo"`
 }
 
 type Session struct {
@@ -77,6 +79,7 @@ type Team struct {
 	Description string     `db:"description"`
 	CreatedBy   gocql.UUID `db:"created_by"`
 	CreatedAt   time.Time  `db:"created_at"`
+	Photo       string     `db:"photo"`
 }
 
 type TeamMember struct {

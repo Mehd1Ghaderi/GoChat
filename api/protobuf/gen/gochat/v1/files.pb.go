@@ -325,6 +325,158 @@ func (*DownloadResponse_Header) isDownloadResponse_Part() {}
 
 func (*DownloadResponse_Chunk) isDownloadResponse_Part() {}
 
+type GetPhotoRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Owner:
+	//
+	//	*GetPhotoRequest_UserId
+	//	*GetPhotoRequest_TeamId
+	Owner         isGetPhotoRequest_Owner `protobuf_oneof:"owner"`
+	Version       string                  `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetPhotoRequest) Reset() {
+	*x = GetPhotoRequest{}
+	mi := &file_gochat_v1_files_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetPhotoRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetPhotoRequest) ProtoMessage() {}
+
+func (x *GetPhotoRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_files_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetPhotoRequest.ProtoReflect.Descriptor instead.
+func (*GetPhotoRequest) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_files_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *GetPhotoRequest) GetOwner() isGetPhotoRequest_Owner {
+	if x != nil {
+		return x.Owner
+	}
+	return nil
+}
+
+func (x *GetPhotoRequest) GetUserId() string {
+	if x != nil {
+		if x, ok := x.Owner.(*GetPhotoRequest_UserId); ok {
+			return x.UserId
+		}
+	}
+	return ""
+}
+
+func (x *GetPhotoRequest) GetTeamId() string {
+	if x != nil {
+		if x, ok := x.Owner.(*GetPhotoRequest_TeamId); ok {
+			return x.TeamId
+		}
+	}
+	return ""
+}
+
+func (x *GetPhotoRequest) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+type isGetPhotoRequest_Owner interface {
+	isGetPhotoRequest_Owner()
+}
+
+type GetPhotoRequest_UserId struct {
+	UserId string `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3,oneof"`
+}
+
+type GetPhotoRequest_TeamId struct {
+	TeamId string `protobuf:"bytes,2,opt,name=team_id,json=teamId,proto3,oneof"`
+}
+
+func (*GetPhotoRequest_UserId) isGetPhotoRequest_Owner() {}
+
+func (*GetPhotoRequest_TeamId) isGetPhotoRequest_Owner() {}
+
+type GetPhotoResponse struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Image       []byte                 `protobuf:"bytes,1,opt,name=image,proto3" json:"image,omitempty"`
+	ContentType string                 `protobuf:"bytes,2,opt,name=content_type,json=contentType,proto3" json:"content_type,omitempty"`
+	// The current version, which differs from the one asked for once the photo
+	// changed.
+	Version       string `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetPhotoResponse) Reset() {
+	*x = GetPhotoResponse{}
+	mi := &file_gochat_v1_files_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetPhotoResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetPhotoResponse) ProtoMessage() {}
+
+func (x *GetPhotoResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_files_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetPhotoResponse.ProtoReflect.Descriptor instead.
+func (*GetPhotoResponse) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_files_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *GetPhotoResponse) GetImage() []byte {
+	if x != nil {
+		return x.Image
+	}
+	return nil
+}
+
+func (x *GetPhotoResponse) GetContentType() string {
+	if x != nil {
+		return x.ContentType
+	}
+	return ""
+}
+
+func (x *GetPhotoResponse) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
 var File_gochat_v1_files_proto protoreflect.FileDescriptor
 
 const file_gochat_v1_files_proto_rawDesc = "" +
@@ -347,10 +499,20 @@ const file_gochat_v1_files_proto_rawDesc = "" +
 	"\x10DownloadResponse\x12/\n" +
 	"\x06header\x18\x01 \x01(\v2\x15.gochat.v1.AttachmentH\x00R\x06header\x12\x16\n" +
 	"\x05chunk\x18\x02 \x01(\fH\x00R\x05chunkB\x06\n" +
-	"\x04part2\x95\x01\n" +
+	"\x04part\"j\n" +
+	"\x0fGetPhotoRequest\x12\x19\n" +
+	"\auser_id\x18\x01 \x01(\tH\x00R\x06userId\x12\x19\n" +
+	"\ateam_id\x18\x02 \x01(\tH\x00R\x06teamId\x12\x18\n" +
+	"\aversion\x18\x03 \x01(\tR\aversionB\a\n" +
+	"\x05owner\"e\n" +
+	"\x10GetPhotoResponse\x12\x14\n" +
+	"\x05image\x18\x01 \x01(\fR\x05image\x12!\n" +
+	"\fcontent_type\x18\x02 \x01(\tR\vcontentType\x12\x18\n" +
+	"\aversion\x18\x03 \x01(\tR\aversion2\xda\x01\n" +
 	"\vFileService\x12?\n" +
 	"\x06Upload\x12\x18.gochat.v1.UploadRequest\x1a\x19.gochat.v1.UploadResponse(\x01\x12E\n" +
-	"\bDownload\x12\x1a.gochat.v1.DownloadRequest\x1a\x1b.gochat.v1.DownloadResponse0\x01B\x9f\x01\n" +
+	"\bDownload\x12\x1a.gochat.v1.DownloadRequest\x1a\x1b.gochat.v1.DownloadResponse0\x01\x12C\n" +
+	"\bGetPhoto\x12\x1a.gochat.v1.GetPhotoRequest\x1a\x1b.gochat.v1.GetPhotoResponseB\x9f\x01\n" +
 	"\rcom.gochat.v1B\n" +
 	"FilesProtoP\x01Z=github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1;gochatv1\xa2\x02\x03GXX\xaa\x02\tGochat.V1\xca\x02\tGochat\\V1\xe2\x02\x15Gochat\\V1\\GPBMetadata\xea\x02\n" +
 	"Gochat::V1b\x06proto3"
@@ -367,25 +529,29 @@ func file_gochat_v1_files_proto_rawDescGZIP() []byte {
 	return file_gochat_v1_files_proto_rawDescData
 }
 
-var file_gochat_v1_files_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_gochat_v1_files_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_gochat_v1_files_proto_goTypes = []any{
 	(*UploadHeader)(nil),     // 0: gochat.v1.UploadHeader
 	(*UploadRequest)(nil),    // 1: gochat.v1.UploadRequest
 	(*UploadResponse)(nil),   // 2: gochat.v1.UploadResponse
 	(*DownloadRequest)(nil),  // 3: gochat.v1.DownloadRequest
 	(*DownloadResponse)(nil), // 4: gochat.v1.DownloadResponse
-	(*Attachment)(nil),       // 5: gochat.v1.Attachment
+	(*GetPhotoRequest)(nil),  // 5: gochat.v1.GetPhotoRequest
+	(*GetPhotoResponse)(nil), // 6: gochat.v1.GetPhotoResponse
+	(*Attachment)(nil),       // 7: gochat.v1.Attachment
 }
 var file_gochat_v1_files_proto_depIdxs = []int32{
 	0, // 0: gochat.v1.UploadRequest.header:type_name -> gochat.v1.UploadHeader
-	5, // 1: gochat.v1.UploadResponse.attachment:type_name -> gochat.v1.Attachment
-	5, // 2: gochat.v1.DownloadResponse.header:type_name -> gochat.v1.Attachment
+	7, // 1: gochat.v1.UploadResponse.attachment:type_name -> gochat.v1.Attachment
+	7, // 2: gochat.v1.DownloadResponse.header:type_name -> gochat.v1.Attachment
 	1, // 3: gochat.v1.FileService.Upload:input_type -> gochat.v1.UploadRequest
 	3, // 4: gochat.v1.FileService.Download:input_type -> gochat.v1.DownloadRequest
-	2, // 5: gochat.v1.FileService.Upload:output_type -> gochat.v1.UploadResponse
-	4, // 6: gochat.v1.FileService.Download:output_type -> gochat.v1.DownloadResponse
-	5, // [5:7] is the sub-list for method output_type
-	3, // [3:5] is the sub-list for method input_type
+	5, // 5: gochat.v1.FileService.GetPhoto:input_type -> gochat.v1.GetPhotoRequest
+	2, // 6: gochat.v1.FileService.Upload:output_type -> gochat.v1.UploadResponse
+	4, // 7: gochat.v1.FileService.Download:output_type -> gochat.v1.DownloadResponse
+	6, // 8: gochat.v1.FileService.GetPhoto:output_type -> gochat.v1.GetPhotoResponse
+	6, // [6:9] is the sub-list for method output_type
+	3, // [3:6] is the sub-list for method input_type
 	3, // [3:3] is the sub-list for extension type_name
 	3, // [3:3] is the sub-list for extension extendee
 	0, // [0:3] is the sub-list for field type_name
@@ -405,13 +571,17 @@ func file_gochat_v1_files_proto_init() {
 		(*DownloadResponse_Header)(nil),
 		(*DownloadResponse_Chunk)(nil),
 	}
+	file_gochat_v1_files_proto_msgTypes[5].OneofWrappers = []any{
+		(*GetPhotoRequest_UserId)(nil),
+		(*GetPhotoRequest_TeamId)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gochat_v1_files_proto_rawDesc), len(file_gochat_v1_files_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

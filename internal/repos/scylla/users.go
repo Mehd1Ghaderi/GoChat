@@ -11,7 +11,10 @@ import (
 	ierrors "github.com/ssenerg/gochat/internal/errors"
 )
 
-const userColumns = "id, username, email, display_name, password_hash, system_role, totp_enabled, totp_secret, totp_pending, totp_last_step, deactivated, created_at, updated_at"
+const (
+	userWritten = "id, username, email, display_name, password_hash, system_role, totp_enabled, totp_secret, totp_pending, totp_last_step, deactivated, created_at, updated_at"
+	userColumns = userWritten + ", photo"
+)
 
 // CreateUser claims the username and the email, then writes the user. A claim
 // that fails releases the ones taken before it.
@@ -33,7 +36,7 @@ func (r *Repository) CreateUser(ctx context.Context, u *models.User) error {
 		}
 		return ierrors.AlreadyExists("email is already registered")
 	}
-	err = r.query(ctx, "INSERT INTO users ("+userColumns+") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+	err = r.query(ctx, "INSERT INTO users ("+userWritten+") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		u.ID, u.Username, u.Email, u.DisplayName, u.PasswordHash, string(u.Role), u.TOTPEnabled, u.TOTPSecret,
 		u.TOTPPending, u.TOTPLastStep, u.Deactivated, u.CreatedAt, u.UpdatedAt).ExecRelease()
 	if err != nil {
@@ -93,6 +96,19 @@ func (r *Repository) GetUserIDByEmail(ctx context.Context, email string) (gocql.
 
 func (r *Repository) UpdateDisplayName(ctx context.Context, id gocql.UUID, name string, now time.Time) error {
 	return wrap(r.query(ctx, "UPDATE users SET display_name = ?, updated_at = ? WHERE id = ?", name, now, id).ExecRelease())
+}
+
+// SetUserPhoto records the version of the user's photo, empty for none.
+func (r *Repository) SetUserPhoto(ctx context.Context, id gocql.UUID, version string, now time.Time) error {
+	return wrap(r.query(ctx, "UPDATE users SET photo = ?, updated_at = ? WHERE id = ?", nullable(version), now, id).ExecRelease())
+}
+
+// nullable keeps an empty string from being stored as one.
+func nullable(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 func (r *Repository) UpdatePassword(ctx context.Context, id gocql.UUID, hash string, now time.Time) error {

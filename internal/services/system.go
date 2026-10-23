@@ -59,7 +59,7 @@ func Start(logger *zap.Logger, cfg *Config, repo *scylla.Repository, storage *mi
 	s.Files = engine.Spawn(files.Pool(fileDeps), "files", actor.WithID("main"))
 	s.janitor = engine.Spawn(files.Janitor(fileDeps), "janitor", actor.WithID("main"), recovered)
 	s.Directory = engine.Spawn(directory.Pool(&directory.Deps{
-		Logger: logger.Named("directory"), Cfg: cfg.Directory, Repo: repo, Authz: az,
+		Logger: logger.Named("directory"), Cfg: cfg.Directory, Repo: repo, Storage: storage, Authz: az,
 		Users: userCache, Engine: engine, Hub: s.Hub, Channels: s.Channels,
 	}), "directory", actor.WithID("main"))
 	accountDeps, err := accounts.NewDeps(logger.Named("accounts"), cfg.Accounts, repo, userCache, az, engine, s.Hub)

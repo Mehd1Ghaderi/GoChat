@@ -3,7 +3,7 @@
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
     <header class="modal-header">
       <h2 id="modal-title">{{.}}</h2>
-      <button class="icon-btn" type="button" data-close-modal aria-label="Close">✕</button>
+      <button class="icon-btn" type="button" data-close-modal aria-label="Close">{{icon "close"}}</button>
     </header>
     <div class="modal-body">
 {{end}}
@@ -59,7 +59,7 @@
 <ul class="list">
   {{range .Members}}
   <li>
-    <div class="person"><span class="avatar sm {{avatar .User}}" aria-hidden="true">{{initials .User}}</span><span><strong>{{name .User}}</strong> <small class="muted">@{{.User.Username}}</small></span></div>
+    <div class="person">{{template "avatar" (dict "User" .User "Size" "sm")}}<span><strong>{{name .User}}</strong> <small class="muted">@{{.User.Username}}</small></span></div>
     {{if $.ActionURL}}<button class="btn sm" hx-post="{{$.ActionURL}}" hx-vals='{"user_id": "{{.User.Id}}"}'>{{$.ActionLabel}}</button>{{end}}
   </li>
   {{end}}
@@ -73,7 +73,7 @@
 <ul class="list">
   {{range .Members}}
   <li>
-    <div class="person"><span class="avatar sm {{avatar .User}}" aria-hidden="true">{{initials .User}}</span><span><strong>{{name .User}}</strong> <small class="muted">@{{.User.Username}}</small></span></div>
+    <div class="person">{{template "avatar" (dict "User" .User "Size" "sm")}}<span><strong>{{name .User}}</strong> <small class="muted">@{{.User.Username}}</small></span></div>
     {{if $.CanRemove}}<button class="btn sm danger" hx-post="/t/{{$.Team.Name}}/ch/{{$.ChannelID}}/members/{{.User.Id}}/remove" hx-confirm="Remove {{name .User}} from the channel?" hx-target="closest li" hx-swap="outerHTML">Remove</button>{{end}}
   </li>
   {{end}}
@@ -86,7 +86,7 @@
 <ul class="list">
   {{range .Members}}
   <li>
-    <div class="person"><span class="avatar sm {{avatar .User}}" aria-hidden="true">{{initials .User}}</span><span><strong>{{name .User}}</strong> <small class="muted">@{{.User.Username}}{{if eq .Role 2}} · admin{{end}}</small></span></div>
+    <div class="person">{{template "avatar" (dict "User" .User "Size" "sm")}}<span><strong>{{name .User}}</strong> <small class="muted">@{{.User.Username}}{{if eq .Role 2}} · admin{{end}}</small></span></div>
     {{if and $.Admin (ne .User.Id $.MeID)}}
     <div class="row">
       {{if eq .Role 2}}<button class="btn sm" hx-post="/t/{{$.Team.Name}}/members/{{.User.Id}}/role" hx-vals='{"role": "member"}' hx-target="#modal">Make member</button>
@@ -136,6 +136,36 @@
   <input type="text" readonly value="{{.URL}}" aria-label="Invite link" data-select-on-focus>
   <button class="btn sm" type="button" data-copy="{{.URL}}">Copy</button>
   <small class="muted">Expires {{date .ExpiresAt}}.</small>
+</div>
+{{end}}
+
+{{define "team-settings"}}
+{{template "modal-start" "Team settings"}}
+<p class="muted">{{.Team.DisplayName}} · /t/{{.Team.Name}}</p>
+{{template "photo-field" .}}
+{{template "modal-end"}}
+{{end}}
+
+{{define "photo-field"}}
+<div class="photo-field" id="{{.ID}}">
+  {{if .Team}}<span class="team-icon lg" aria-hidden="true">{{template "team-mark" .Team}}</span>
+  {{else}}{{template "avatar" (dict "User" .User "Size" "lg")}}{{end}}
+  <div class="photo-controls">
+    <div class="row">
+      <form hx-post="{{.URL}}" hx-encoding="multipart/form-data" hx-trigger="change" hx-target="#{{.ID}}" hx-swap="outerHTML" hx-indicator="#{{.ID}}-busy" hx-disabled-elt="find input">
+        <label class="btn sm">{{icon "photo"}}{{if or (and .Team .Team.Photo) (and .User .User.Photo)}}Change photo{{else}}Upload a photo{{end}}
+          <input class="visually-hidden" type="file" name="photo" accept="image/jpeg,image/png,image/gif,image/webp">
+        </label>
+      </form>
+      {{if or (and .Team .Team.Photo) (and .User .User.Photo)}}
+      <button class="btn sm" hx-post="{{.URL}}/remove" hx-target="#{{.ID}}" hx-swap="outerHTML">Remove</button>
+      {{end}}
+      <span class="status muted htmx-indicator" id="{{.ID}}-busy">Uploading…</span>
+      {{with .Status}}<span class="status ok">{{.}}</span>{{end}}
+    </div>
+    {{with .Error}}<p class="form-error" role="alert">{{.}}</p>
+    {{else}}<small class="muted">JPEG, PNG, GIF or WebP up to 10 MB, cropped to a square.</small>{{end}}
+  </div>
 </div>
 {{end}}
 
