@@ -306,6 +306,8 @@ fieldset.choice legend { font-weight: 600; font-size: .92rem; padding: 0 .3rem; 
 .msg header { display: flex; align-items: baseline; gap: .5rem; min-width: 0; }
 .msg .author { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .msg time, .msg .edited { color: var(--fg-muted); font-size: .76rem; flex: none; font-variant-numeric: tabular-nums; }
+/* Display names are free text: the handle says who it really is. */
+.msg .handle { color: var(--fg-muted); font-size: .8rem; min-width: 0; flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .msg .body { overflow-wrap: anywhere; }
 .msg .body > :first-child { margin-top: 0; }
 .msg .body > :last-child { margin-bottom: 0; }

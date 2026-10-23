@@ -2,9 +2,11 @@ package scylla
 
 import (
 	"context"
+	"time"
 
 	"github.com/gocql/gocql"
 
+	"github.com/ssenerg/gochat/internal/core/ids"
 	"github.com/ssenerg/gochat/internal/core/models"
 	ierrors "github.com/ssenerg/gochat/internal/errors"
 )
@@ -129,7 +131,8 @@ func (r *Repository) RemoveChannelMember(ctx context.Context, m *models.ChannelM
 	b := r.batch(ctx, true)
 	b.Query("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?", m.ChannelID, m.UserID)
 	b.Query("DELETE FROM user_channels WHERE user_id = ? AND team_id = ? AND channel_id = ?", m.UserID, m.TeamID, m.ChannelID)
-	b.Query("DELETE FROM channel_reads WHERE user_id = ? AND channel_id = ?", m.UserID, m.ChannelID)
+	// The read mark stays: a delete now would shadow every later mark,
+	// which is written at its message's time.
 	return r.execBatch(b)
 }
 
@@ -152,6 +155,17 @@ func (r *Repository) ListUserChannels(ctx context.Context, userID, teamID gocql.
 func (r *Repository) SetLastMessage(ctx context.Context, channelID, messageID gocql.UUID) error {
 	return wrap(r.query(ctx, "UPDATE channels USING TIMESTAMP ? SET last_message_id = ? WHERE id = ?",
 		messageID.Time().UnixMicro(), messageID, channelID).ExecRelease())
+}
+
+// ResetLastMessage moves the last message back, after the newest was
+// deleted; a zero id clears it. at outranks the write it replaces.
+func (r *Repository) ResetLastMessage(ctx context.Context, channelID, messageID gocql.UUID, at time.Time) error {
+	var id *gocql.UUID
+	if !ids.IsZero(messageID) {
+		id = &messageID
+	}
+	return wrap(r.query(ctx, "UPDATE channels USING TIMESTAMP ? SET last_message_id = ? WHERE id = ?",
+		at.UnixMicro(), id, channelID).ExecRelease())
 }
 
 func (r *Repository) SetLastRead(ctx context.Context, userID, channelID, messageID gocql.UUID) error {

@@ -279,7 +279,7 @@ func (s *gatewayService) attach(ctx context.Context, key string, a *pb.Attach) {
 	p, ok := s.sys.Sessions.Cached(a.SessionToken)
 	if !ok {
 		var err error
-		if p, err = actors.Ask[*models.Principal](ctx, s.sys.Engine, s.sys.Accounts, accounts.Authenticate{Token: a.SessionToken}); err != nil {
+		if p, err = actors.Ask[*models.Principal](ctx, s.sys.Engine, s.sys.Auth, accounts.Authenticate{Token: a.SessionToken}); err != nil {
 			reject(err)
 			return
 		}

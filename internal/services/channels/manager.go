@@ -32,6 +32,7 @@ type Repo interface {
 	ListMessages(ctx context.Context, channelID, before gocql.UUID, limit int) ([]*models.Message, bool, error)
 	LastMessageBucket(ctx context.Context, channelID gocql.UUID) (int32, bool, error)
 	SetLastMessage(ctx context.Context, channelID, messageID gocql.UUID) error
+	ResetLastMessage(ctx context.Context, channelID, messageID gocql.UUID, at time.Time) error
 	SetLastRead(ctx context.Context, userID, channelID, messageID gocql.UUID) error
 	ListLastReads(ctx context.Context, userID gocql.UUID) ([]*scylla.ChannelRead, error)
 	GetAttachments(ctx context.Context, ids []gocql.UUID) ([]*models.Attachment, error)

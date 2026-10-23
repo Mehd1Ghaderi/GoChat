@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/ssenerg/gochat/internal/config"
@@ -52,6 +53,17 @@ func (c *Config) Validate() error {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Path != "" && u.Path != "/" {
 		return errors.New("public_url must be an http(s) origin, such as https://chat.example.com")
 	}
+	// Browsers send the origin in this form; any other spelling would fail
+	// every same-origin check.
+	host := strings.ToLower(u.Hostname())
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	defaultPort := map[string]string{"http": "80", "https": "443"}[u.Scheme]
+	if port := u.Port(); port != "" && port != defaultPort {
+		host += ":" + port
+	}
+	c.PublicURL = u.Scheme + "://" + host
 	for _, cidr := range c.TrustedProxies {
 		if _, _, err := net.ParseCIDR(cidr); err != nil {
 			return fmt.Errorf("trusted_proxies: %q is not a CIDR", cidr)

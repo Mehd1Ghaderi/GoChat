@@ -37,12 +37,12 @@ func (h *Handler) startSession(w http.ResponseWriter, s *pb.Session) {
 	ttl := time.Until(s.GetExpiresAt().AsTime())
 	h.setCookie(w, "session", s.Token, ttl, http.SameSiteLaxMode)
 	// A new session gets a new CSRF token.
-	h.setCookie(w, "csrf", secure.Token(), 0, http.SameSiteStrictMode)
+	h.setCookie(w, "csrf", secure.Token(), 0, http.SameSiteLaxMode)
 }
 
 func (h *Handler) loginPage(w http.ResponseWriter, r *http.Request) {
 	next := nextParam(r)
-	if h.currentUser(r) != nil {
+	if u, _ := h.currentUser(r); u != nil {
 		http.Redirect(w, r, safeNext(next), http.StatusSeeOther) //nolint:gosec // safeNext keeps it on this site
 		return
 	}
@@ -147,7 +147,7 @@ func (h *Handler) signupInfo(r *http.Request, invite string) (*pb.GetSignupInfoR
 }
 
 func (h *Handler) signupPage(w http.ResponseWriter, r *http.Request) {
-	if h.currentUser(r) != nil {
+	if u, _ := h.currentUser(r); u != nil {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
@@ -242,7 +242,8 @@ type joinData struct {
 
 func (h *Handler) joinData(w http.ResponseWriter, r *http.Request) (joinData, error) {
 	token := r.PathValue("token")
-	data := joinData{Page: Page{Title: "Join", CSRF: h.csrfToken(w, r), User: h.currentUser(r)}}
+	u, _ := h.currentUser(r)
+	data := joinData{Page: Page{Title: "Join", CSRF: h.csrfToken(w, r), User: u}}
 	if !secure.ValidToken(token) {
 		return data, nil
 	}

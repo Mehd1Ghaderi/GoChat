@@ -17,6 +17,7 @@ import (
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
 	"github.com/ssenerg/gochat/internal/client/drpc"
 	"github.com/ssenerg/gochat/internal/core/cache"
+	ierrors "github.com/ssenerg/gochat/internal/errors"
 	"github.com/ssenerg/gochat/internal/web/gateway"
 	"github.com/ssenerg/gochat/internal/web/render"
 	"github.com/ssenerg/gochat/internal/web/views"
@@ -159,6 +160,11 @@ func (h *Handler) Routes() http.Handler {
 
 func (h *Handler) staticFiles(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Files only, never a listing of them.
+		if strings.HasSuffix(r.URL.Path, "/") {
+			http.NotFound(w, r)
+			return
+		}
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		next.ServeHTTP(w, r)
 	})
@@ -212,22 +218,27 @@ func (h *Handler) ctx(r *http.Request) (context.Context, context.CancelFunc) {
 }
 
 // currentUser returns the signed-in user, or nil.
-func (h *Handler) currentUser(r *http.Request) *pb.User {
+// currentUser returns the signed-in user, or nil. Only a failure to find
+// out, such as the server restarting, is an error.
+func (h *Handler) currentUser(r *http.Request) (*pb.User, error) {
 	token := h.sessionToken(r)
 	if token == "" {
-		return nil
+		return nil, nil
 	}
 	if u, ok := h.me.Get(token); ok {
-		return u
+		return u, nil
 	}
 	ctx, cancel := h.ctx(r)
 	defer cancel()
 	res, err := h.client.Auth.Me(ctx, &pb.MeRequest{})
 	if err != nil {
-		return nil
+		if drpc.Err(err).Code == ierrors.CodeUnauthenticated {
+			return nil, nil
+		}
+		return nil, err
 	}
 	h.me.Set(token, res.User)
-	return res.User
+	return res.User, nil
 }
 
 func isHTMX(r *http.Request) bool {

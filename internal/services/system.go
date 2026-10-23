@@ -21,11 +21,14 @@ import (
 )
 
 type System struct {
-	logger    *zap.Logger
-	Engine    *actor.Engine
-	Hub       *actor.PID
-	Channels  *actor.PID
-	Accounts  *actor.PID
+	logger   *zap.Logger
+	Engine   *actor.Engine
+	Hub      *actor.PID
+	Channels *actor.PID
+	Accounts *actor.PID
+	// Auth resolves session tokens apart from Accounts, so a flood of
+	// sign-ins, each hashing a password, cannot hold up signed-in requests.
+	Auth      *actor.PID
 	Directory *actor.PID
 	Files     *actor.PID
 	Sessions  *accounts.Deps
@@ -68,6 +71,7 @@ func Start(logger *zap.Logger, cfg *Config, repo *scylla.Repository, storage *mi
 	}
 	s.Sessions = accountDeps
 	s.Accounts = engine.Spawn(accounts.Pool(accountDeps), "accounts", actor.WithID("main"))
+	s.Auth = engine.Spawn(accounts.Pool(accountDeps), "accounts", actor.WithID("auth"))
 	logger.Info("actors started")
 	return s, nil
 }
@@ -79,7 +83,7 @@ func (s *System) Stop(timeout time.Duration) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	for _, pid := range []*actor.PID{s.Accounts, s.Directory, s.Files, s.janitor, s.Channels, s.Hub, s.events} {
+	for _, pid := range []*actor.PID{s.Accounts, s.Auth, s.Directory, s.Files, s.janitor, s.Channels, s.Hub, s.events} {
 		if pid == nil {
 			continue
 		}

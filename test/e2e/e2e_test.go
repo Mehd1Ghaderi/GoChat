@@ -450,6 +450,34 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
+	t.Run("a removed member cannot rejoin with their invite", func(t *testing.T) {
+		_, body := admin.hx("/t/"+teamName+"/invites", url.Values{})
+		link := inviteRe.FindStringSubmatch(body)
+		if link == nil {
+			t.Fatalf("no invite link in %s", body)
+		}
+		frank := newClient(t, "frank")
+		name, pass := "frank-"+random(4), "pw-"+random(8)
+		frank.get("/signup?invite=" + link[1])
+		res, body := frank.form("/signup", url.Values{
+			"username": {name}, "display_name": {"Frank"}, "email": {name + "@example.test"},
+			"password": {pass}, "confirm": {pass}, "invite": {link[1]},
+		})
+		if res.StatusCode != http.StatusSeeOther {
+			t.Fatalf("signup: %d %s", res.StatusCode, body)
+		}
+		_, list := admin.do(http.MethodGet, "/t/"+teamName+"/members", nil, "", true)
+		m := regexp.MustCompile(`@` + regexp.QuoteMeta(name) + `(?s:.*?)/members/([0-9a-f-]{36})/remove`).FindStringSubmatch(list)
+		if m == nil {
+			t.Fatalf("frank is not in the member list: %s", list)
+		}
+		admin.hx("/t/"+teamName+"/members/"+m[1]+"/remove", url.Values{})
+		frank.form("/join/"+link[1], url.Values{})
+		if res, _ := frank.get("/t/" + teamName); res.StatusCode == http.StatusOK {
+			t.Fatal("a removed member rejoined with the invite they used")
+		}
+	})
+
 	t.Run("revoked invites stop working", func(t *testing.T) {
 		_, body := admin.hx("/t/"+teamName+"/invites", url.Values{})
 		link := inviteRe.FindStringSubmatch(body)
@@ -469,8 +497,8 @@ func TestEndToEnd(t *testing.T) {
 		if res, _ := bob.hx(revoke, url.Values{}); res.StatusCode != http.StatusForbidden {
 			t.Fatalf("a member revoked an invite: %d", res.StatusCode)
 		}
-		_, list := admin.hx(revoke, url.Values{})
-		if strings.Contains(list, revoke) {
+		res, list := admin.hx(revoke, url.Values{})
+		if res.StatusCode != http.StatusOK || !strings.Contains(list, `id="invite-list"`) || strings.Contains(list, revoke) {
 			t.Fatalf("a revoked invite is still listed: %s", list)
 		}
 		if _, page := newClient(t, "dave").get("/join/" + link[1]); !strings.Contains(page, "Invite unavailable") {

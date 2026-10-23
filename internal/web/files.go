@@ -197,7 +197,13 @@ func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
 	hd.Set("Content-Disposition", cd)
 	hd.Set("Content-Length", strconv.FormatInt(att.Size, 10))
 	hd.Set("Content-Security-Policy", "default-src 'none'; sandbox")
-	hd.Set("Cache-Control", "private, max-age=3600")
+	// A download is kept out of the browser's cache, where it would outlive
+	// the access to it; a preview in a channel is kept briefly.
+	if inline {
+		hd.Set("Cache-Control", "private, max-age=300")
+	} else {
+		hd.Set("Cache-Control", "private, no-store")
+	}
 	w.WriteHeader(http.StatusOK)
 	for {
 		msg, err := stream.Recv()

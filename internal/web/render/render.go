@@ -29,6 +29,9 @@ type Renderer struct {
 	fragments *template.Template
 	md        goldmark.Markdown
 	bodies    *cache.Cache[string, template.HTML]
+	// events holds messages rendered for the sockets of this gateway, which
+	// each receive the same few variants of a new or edited message.
+	events *cache.Cache[string, []byte]
 	// StaticPrefix is where the embedded assets are served, versioned by
 	// their content so they can be cached forever.
 	StaticPrefix string
@@ -39,6 +42,7 @@ func New(cacheSize int) (*Renderer, error) {
 		pages:  make(map[string]*template.Template),
 		md:     newMarkdown(),
 		bodies: cache.New[string, template.HTML](cacheSize, time.Hour),
+		events: cache.New[string, []byte](512, time.Minute),
 	}
 	sum, err := staticHash()
 	if err != nil {
@@ -112,6 +116,21 @@ func (r *Renderer) Fragment(w io.Writer, name string, data any) error {
 	}
 	_, err := buf.WriteTo(w)
 	return err
+}
+
+// MessageBytes renders a message fragment once per message, edit and
+// variant, for every socket that shows it. The bytes are shared: read only.
+func (r *Renderer) MessageBytes(name string, m *Message) ([]byte, error) {
+	key := fmt.Sprintf("%s/%s/%s/%t/%t/%t", name, m.Id, m.GetEditedAt().AsTime().Format(time.RFC3339Nano), m.Mine, m.CanDelete, m.OOB)
+	if b, ok := r.events.Get(key); ok {
+		return b, nil
+	}
+	b, err := r.FragmentBytes(name, m)
+	if err != nil {
+		return nil, err
+	}
+	r.events.Set(key, b)
+	return b, nil
 }
 
 // FragmentBytes renders a partial into a new buffer.
@@ -247,6 +266,12 @@ func Unread(ch *pb.Channel) bool {
 		return true
 	}
 	return uuidTime(ch.LastMessageId) > uuidTime(ch.LastReadId)
+}
+
+// Newer reports whether time UUID a is later than b; anything is later than
+// an empty b.
+func Newer(a, b string) bool {
+	return uuidTime(a) > uuidTime(b)
 }
 
 // uuidTime extracts the 60-bit timestamp of a version 1 UUID string.

@@ -218,8 +218,10 @@ Secrets that should come from the environment:
 
 | Variable | Used by |
 | --- | --- |
-| `DATABASE_SCYLLA_USERNAME`, `DATABASE_SCYLLA_PASSWORD` | server, migrate |
-| `STORAGE_MINIO_ACCESS_KEY`, `STORAGE_MINIO_SECRET_KEY` | server |
+| `DATABASE_SCYLLA_USERNAME`, `DATABASE_SCYLLA_PASSWORD` | server (the app's role) |
+| `DATABASE_SCYLLA_ADMIN_USERNAME`, `DATABASE_SCYLLA_ADMIN_PASSWORD` | migrate, scylla-init |
+| `STORAGE_MINIO_ACCESS_KEY`, `STORAGE_MINIO_SECRET_KEY` | server (the app's account) |
+| `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` | minio, minio-init |
 | `SERVER_DRPC_GATEWAY_KEY` / `CLIENT_DRPC_GATEWAY_KEY` | server / web (same value) |
 | `SERVICES_ACCOUNTS_SECRET_KEY` | server |
 | `SERVICES_ACCOUNTS_SETUP_TOKEN` (optional) | server |

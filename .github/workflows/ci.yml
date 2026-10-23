@@ -73,8 +73,12 @@ jobs:
           sudo sysctl -w fs.aio-max-nr=1048576
           (umask 077 && cat > .env <<EOF
           DOCKER_REGISTRY=docker.io/
+          DATABASE_SCYLLA_ADMIN_USERNAME=gochat_admin
+          DATABASE_SCYLLA_ADMIN_PASSWORD=$(openssl rand -hex 24)
           DATABASE_SCYLLA_USERNAME=gochat
           DATABASE_SCYLLA_PASSWORD=$(openssl rand -hex 24)
+          MINIO_ROOT_USER=gochat-root
+          MINIO_ROOT_PASSWORD=$(openssl rand -hex 24)
           STORAGE_MINIO_ACCESS_KEY=gochat
           STORAGE_MINIO_SECRET_KEY=$(openssl rand -hex 24)
           GATEWAY_KEY=$(openssl rand -hex 32)
@@ -104,7 +108,7 @@ jobs:
   # README for the settings of the production environment.
   deploy:
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    needs: [test, e2e]
+    needs: [test, vulncheck, e2e]
     runs-on: ubuntu-latest
     environment:
       name: production

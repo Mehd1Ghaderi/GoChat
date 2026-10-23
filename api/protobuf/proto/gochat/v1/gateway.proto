@@ -106,6 +106,8 @@ message ChannelJoined {
 message ChannelLeft {
   string channel_id = 1;
   string team_id = 2;
+  // Set when the person left, rather than being removed.
+  bool own = 3;
 }
 
 message Presence {

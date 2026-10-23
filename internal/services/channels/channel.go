@@ -175,7 +175,7 @@ func (a *channel) handle(c *actor.Context, req Request) {
 	case Typing:
 		out, err = a.typingEvent(msg)
 	case MarkRead:
-		out, err = a.markRead(msg)
+		err = a.markRead(c, msg)
 	case Join:
 		out, err = a.join(msg)
 	case Leave:
@@ -317,6 +317,12 @@ func (a *channel) post(msg Post) (*pb.Message, error) {
 
 	ctx, cancel := a.ctx()
 	defer cancel()
+	// Fetched first: a failure after the write would report a saved
+	// message as lost, and a retry would post it twice.
+	author, err := a.Users.Get(ctx, msg.P.UserID)
+	if err != nil {
+		return nil, err
+	}
 	atts, err := a.ownAttachments(ctx, msg.P.UserID, attIDs)
 	if err != nil {
 		return nil, err
@@ -358,10 +364,6 @@ func (a *channel) post(msg Post) (*pb.Message, error) {
 	}
 	delete(a.typing, msg.P.UserID)
 
-	author, err := a.Users.Get(ctx, msg.P.UserID)
-	if err != nil {
-		return nil, err
-	}
 	out := convert.Message(m, convert.PublicUser(author), atts)
 	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessagePosted{MessagePosted: &pb.MessagePosted{Message: out}}})
 	return out, nil
@@ -443,19 +445,19 @@ func (a *channel) edit(msg Edit) (*pb.Message, error) {
 	if content == "" && len(m.Attachments) == 0 {
 		return nil, ierrors.InvalidArgument("message is empty")
 	}
+	author, err := a.Users.Get(ctx, m.UserID)
+	if err != nil {
+		return nil, err
+	}
+	atts, err := a.Repo.GetAttachments(ctx, m.Attachments)
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
 	if err := a.Repo.UpdateMessageContent(ctx, a.id, m.ID, content, now); err != nil {
 		return nil, err
 	}
 	m.Content, m.EditedAt = content, now
-	atts, err := a.Repo.GetAttachments(ctx, m.Attachments)
-	if err != nil {
-		return nil, err
-	}
-	author, err := a.Users.Get(ctx, m.UserID)
-	if err != nil {
-		return nil, err
-	}
 	out := convert.Message(m, convert.PublicUser(author), orderAttachments(m.Attachments, atts))
 	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessageEdited{MessageEdited: &pb.MessageEdited{Message: out}}})
 	return out, nil
@@ -488,11 +490,33 @@ func (a *channel) delete(msg Delete) (Done, error) {
 	if err := a.Repo.DeleteMessage(ctx, a.id, m.ID); err != nil {
 		return Done{}, err
 	}
+	if m.ID == a.ch.LastMessageID {
+		a.rewindLast(ctx)
+	}
 	a.dropAttachments(m.Attachments)
 	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessageDeleted{MessageDeleted: &pb.MessageDeleted{
 		ChannelId: a.id.String(), MessageId: m.ID.String(),
 	}}})
 	return Done{}, nil
+}
+
+// rewindLast makes the newest remaining message the channel's last, so the
+// channel does not stay unread for a message nobody can see.
+func (a *channel) rewindLast(ctx context.Context) {
+	list, _, err := a.Repo.ListMessages(ctx, a.id, gocql.UUID{}, 1)
+	if err != nil {
+		a.Logger.Warn("failed to find the last message", zap.String("channel", a.id.String()), zap.Error(err))
+		return
+	}
+	var last gocql.UUID
+	if len(list) > 0 {
+		last = list[0].ID
+	}
+	if err := a.Repo.ResetLastMessage(ctx, a.id, last, time.Now()); err != nil {
+		a.Logger.Warn("failed to record the last message", zap.String("channel", a.id.String()), zap.Error(err))
+		return
+	}
+	a.ch.LastMessageID = last
 }
 
 // dropAttachments deletes a deleted message's files in the background.
@@ -659,17 +683,20 @@ func (a *channel) typingEvent(msg Typing) (Done, error) {
 	return Done{}, nil
 }
 
-func (a *channel) markRead(msg MarkRead) (Done, error) {
+// markRead writes off the actor: every reader of a busy channel marks it.
+func (a *channel) markRead(c *actor.Context, msg MarkRead) error {
 	if _, err := a.member(msg.P); err != nil {
-		return Done{}, err
+		return err
 	}
 	id, ok := ids.ParseTime(msg.MessageID)
 	if !ok || id.Time().After(time.Now().Add(time.Minute)) {
-		return Done{}, ierrors.InvalidArgument("invalid message id")
+		return ierrors.InvalidArgument("invalid message id")
 	}
-	ctx, cancel := a.ctx()
-	defer cancel()
-	return Done{}, a.Repo.SetLastRead(ctx, msg.P.UserID, a.id, id)
+	userID := msg.P.UserID
+	a.async(c, func(ctx context.Context) (any, error) {
+		return Done{}, a.Repo.SetLastRead(ctx, userID, a.id, id)
+	})
+	return nil
 }
 
 func (a *channel) addLocal(ctx context.Context, userID gocql.UUID, role models.ChannelRole) error {
@@ -703,9 +730,9 @@ func (a *channel) joined(userID gocql.UUID, role models.ChannelRole) (*pb.Channe
 	return view, nil
 }
 
-func (a *channel) left(userID gocql.UUID) {
+func (a *channel) left(userID gocql.UUID, own bool) {
 	a.deliver([]string{userID.String()}, &pb.Event{Payload: &pb.Event_ChannelLeft{ChannelLeft: &pb.ChannelLeft{
-		ChannelId: a.id.String(), TeamId: convert.ID(a.ch.TeamID),
+		ChannelId: a.id.String(), TeamId: convert.ID(a.ch.TeamID), Own: own,
 	}}})
 }
 
@@ -749,7 +776,7 @@ func (a *channel) leave(msg Leave) (Done, error) {
 	if err := a.removeLocal(ctx, msg.P.UserID); err != nil {
 		return Done{}, err
 	}
-	a.left(msg.P.UserID)
+	a.left(msg.P.UserID, true)
 	return Done{}, nil
 }
 
@@ -817,7 +844,7 @@ func (a *channel) removeMember(msg RemoveMember) (Done, error) {
 	if err := a.removeLocal(ctx, msg.UserID); err != nil {
 		return Done{}, err
 	}
-	a.left(msg.UserID)
+	a.left(msg.UserID, false)
 	return Done{}, nil
 }
 

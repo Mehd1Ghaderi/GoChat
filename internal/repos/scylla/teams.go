@@ -240,6 +240,12 @@ func (r *Repository) ConsumeInvite(ctx context.Context, inv *models.Invite, user
 	return applied || row["used_by"] == userID, nil
 }
 
+// SpendInvite deletes an invite userID used to join.
+func (r *Repository) SpendInvite(ctx context.Context, hash []byte, userID gocql.UUID) error {
+	_, err := r.query(ctx, "DELETE FROM invites WHERE token_hash = ? IF used_by = ?", hash, userID).ExecCASRelease()
+	return wrap(err)
+}
+
 // ReleaseInvite undoes a consumption whose join could not complete.
 func (r *Repository) ReleaseInvite(ctx context.Context, inv *models.Invite, userID gocql.UUID, now time.Time) error {
 	applied, err := r.query(ctx, "UPDATE invites USING TTL ? SET used_by = null, used_at = null WHERE token_hash = ? IF used_by = ?",

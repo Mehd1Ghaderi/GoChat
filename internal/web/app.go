@@ -37,8 +37,11 @@ type appPage struct {
 
 // signedIn returns the user, or answers with a sign-in redirect.
 func (h *Handler) signedIn(w http.ResponseWriter, r *http.Request) *pb.User {
-	u := h.currentUser(r)
-	if u == nil {
+	u, err := h.currentUser(r)
+	switch {
+	case err != nil:
+		h.fail(w, r, err)
+	case u == nil:
 		h.fail(w, r, ierrors.Unauthenticated())
 	}
 	return u
@@ -611,10 +614,11 @@ func (h *Handler) revokeInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	defer cancel()
 	_, err := h.client.Teams.RevokeInvite(ctx, &pb.RevokeInviteRequest{TeamId: team.Id, InviteId: r.PathValue("invite")})
-	code := drpc.Err(err).Code
-	if err != nil && code != ierrors.CodeFailedPrecondition && code != ierrors.CodeNotFound {
-		h.fail(w, r, err)
-		return
+	if err != nil {
+		if code := drpc.Err(err).Code; code != ierrors.CodeFailedPrecondition && code != ierrors.CodeNotFound {
+			h.fail(w, r, err)
+			return
+		}
 	}
 	data, lerr := h.invites(ctx, team)
 	if lerr != nil {

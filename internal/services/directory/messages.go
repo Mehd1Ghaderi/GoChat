@@ -75,6 +75,9 @@ type AcceptInvite struct {
 // JoinTeam admits a user whose invite was already consumed.
 type JoinTeam struct {
 	UserID, TeamID gocql.UUID
+	// InviteHash names the invite UserID consumed to join, spent once the
+	// join completes.
+	InviteHash []byte
 }
 
 type ListChannels struct {

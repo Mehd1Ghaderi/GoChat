@@ -1041,9 +1041,11 @@ func (x *ChannelJoined) GetChannel() *Channel {
 }
 
 type ChannelLeft struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ChannelId     string                 `protobuf:"bytes,1,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
-	TeamId        string                 `protobuf:"bytes,2,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	ChannelId string                 `protobuf:"bytes,1,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	TeamId    string                 `protobuf:"bytes,2,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	// Set when the person left, rather than being removed.
+	Own           bool `protobuf:"varint,3,opt,name=own,proto3" json:"own,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1090,6 +1092,13 @@ func (x *ChannelLeft) GetTeamId() string {
 		return x.TeamId
 	}
 	return ""
+}
+
+func (x *ChannelLeft) GetOwn() bool {
+	if x != nil {
+		return x.Own
+	}
+	return false
 }
 
 type Presence struct {
@@ -1300,11 +1309,12 @@ const file_gochat_v1_gateway_proto_rawDesc = "" +
 	"channel_id\x18\x01 \x01(\tR\tchannelId\x12#\n" +
 	"\x04user\x18\x02 \x01(\v2\x0f.gochat.v1.UserR\x04user\"=\n" +
 	"\rChannelJoined\x12,\n" +
-	"\achannel\x18\x01 \x01(\v2\x12.gochat.v1.ChannelR\achannel\"E\n" +
+	"\achannel\x18\x01 \x01(\v2\x12.gochat.v1.ChannelR\achannel\"W\n" +
 	"\vChannelLeft\x12\x1d\n" +
 	"\n" +
 	"channel_id\x18\x01 \x01(\tR\tchannelId\x12\x17\n" +
-	"\ateam_id\x18\x02 \x01(\tR\x06teamId\";\n" +
+	"\ateam_id\x18\x02 \x01(\tR\x06teamId\x12\x10\n" +
+	"\x03own\x18\x03 \x01(\bR\x03own\";\n" +
 	"\bPresence\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x16\n" +
 	"\x06online\x18\x02 \x01(\bR\x06online\"1\n" +

@@ -174,8 +174,10 @@ func (h *Handler) csrfToken(w http.ResponseWriter, r *http.Request) string {
 	if c, err := r.Cookie(h.cookieName("csrf")); err == nil && secure.ValidToken(c.Value) {
 		return c.Value
 	}
+	// Lax: a visit from another site does not see a Strict cookie, and the
+	// new token it got would break every other open tab.
 	token := secure.Token()
-	h.setCookie(w, "csrf", token, 0, http.SameSiteStrictMode)
+	h.setCookie(w, "csrf", token, 0, http.SameSiteLaxMode)
 	return token
 }
 

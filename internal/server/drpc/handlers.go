@@ -57,7 +57,7 @@ func Resolve(sys *services.System) Resolver {
 		if p, ok := sys.Sessions.Cached(token); ok {
 			return p, nil
 		}
-		return actors.Ask[*models.Principal](ctx, sys.Engine, sys.Accounts, accounts.Authenticate{Token: token})
+		return actors.Ask[*models.Principal](ctx, sys.Engine, sys.Auth, accounts.Authenticate{Token: token})
 	}
 }
 
@@ -98,7 +98,7 @@ func (s *authService) SignUp(ctx context.Context, req *pb.SignUpRequest) (*pb.Si
 	// The account exists either way; a join that failed is finished by
 	// opening the invite again.
 	if !ids.IsZero(res.InviteTeamID) {
-		if team, err := actors.Ask[*pb.Team](ctx, s.sys.Engine, s.sys.Directory, directory.JoinTeam{UserID: res.User.ID, TeamID: res.InviteTeamID}); err == nil {
+		if team, err := actors.Ask[*pb.Team](ctx, s.sys.Engine, s.sys.Directory, directory.JoinTeam{UserID: res.User.ID, TeamID: res.InviteTeamID, InviteHash: res.InviteHash}); err == nil {
 			out.Team = team
 		}
 	}

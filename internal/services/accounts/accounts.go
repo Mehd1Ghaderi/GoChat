@@ -83,8 +83,10 @@ type SignUp struct {
 type SignUpResult struct {
 	Session *pb.Session
 	User    *models.User
-	// InviteTeamID is the team the consumed invite admits the user to.
+	// InviteTeamID is the team the consumed invite admits the user to, and
+	// InviteHash that invite's.
 	InviteTeamID gocql.UUID
+	InviteHash   []byte
 }
 
 type Login struct {
@@ -353,7 +355,7 @@ func (w *worker) signUp(ctx context.Context, msg SignUp) (*SignUpResult, error) 
 	w.Logger.Info("account created", zap.String("user", user.ID.String()), zap.String("role", string(user.Role)))
 	out := &SignUpResult{Session: sess, User: user}
 	if inv != nil {
-		out.InviteTeamID = inv.TeamID
+		out.InviteTeamID, out.InviteHash = inv.TeamID, inv.TokenHash
 	}
 	return out, nil
 }

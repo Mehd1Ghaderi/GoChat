@@ -56,6 +56,7 @@ type Repo interface {
 	GetInvite(ctx context.Context, hash []byte) (*models.Invite, error)
 	ConsumeInvite(ctx context.Context, inv *models.Invite, userID gocql.UUID, now time.Time) (bool, error)
 	ReleaseInvite(ctx context.Context, inv *models.Invite, userID gocql.UUID, now time.Time) error
+	SpendInvite(ctx context.Context, hash []byte, userID gocql.UUID) error
 
 	CreateChannel(ctx context.Context, ch *models.Channel, creator *models.ChannelMember) error
 	CreateDirectChannel(ctx context.Context, pair string, ch *models.Channel, members []*models.ChannelMember) (gocql.UUID, error)
@@ -125,6 +126,9 @@ func (w *worker) Receive(c *actor.Context) {
 		out, err = w.acceptInvite(ctx, msg)
 	case JoinTeam:
 		out, err = w.joinTeam(ctx, msg.UserID, msg.TeamID)
+		if err == nil && msg.InviteHash != nil {
+			w.spendInvite(ctx, msg.InviteHash, msg.UserID)
+		}
 	case ListChannels:
 		out, err = w.listChannels(ctx, msg)
 	case BrowseChannels:
@@ -593,7 +597,16 @@ func (w *worker) acceptInvite(ctx context.Context, msg AcceptInvite) (*pb.Team, 
 		}
 		return nil, err
 	}
+	w.spendInvite(ctx, inv.TokenHash, msg.P.UserID)
 	return team, nil
+}
+
+// spendInvite deletes an invite whose join completed. Until then its user
+// may finish the join with it; after, it must not readmit them once removed.
+func (w *worker) spendInvite(ctx context.Context, hash []byte, userID gocql.UUID) {
+	if err := w.Repo.SpendInvite(ctx, hash, userID); err != nil {
+		w.Logger.Warn("failed to spend a used invite", zap.Error(err))
+	}
 }
 
 // joinTeam makes userID a member of teamID and of its default channels.

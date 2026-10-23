@@ -4,6 +4,7 @@
   <div class="msg-main">
     <header>
       <strong class="author">{{name .Author}}</strong>
+      {{with .Author}}<span class="handle">@{{.Username}}</span>{{end}}
       <time datetime="{{iso .Time}}" title="{{date .Time}}">{{clock .Time}}</time>
       {{if .Edited}}<span class="edited">(edited)</span>{{end}}
     </header>

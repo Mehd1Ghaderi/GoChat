@@ -4,7 +4,7 @@ ARG DOCKER_REGISTRY=docker.io/
 
 # Go cross-compiles: images for other platforms (--platform) build without
 # emulation.
-FROM --platform=$BUILDPLATFORM ${DOCKER_REGISTRY}library/golang:1.27.3-alpine3.24 AS builder
+FROM --platform=$BUILDPLATFORM ${DOCKER_REGISTRY}library/golang:1.27.3-alpine3.24@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c AS builder
 ARG TARGETOS TARGETARCH
 
 WORKDIR /src
@@ -19,7 +19,7 @@ ARG LDFLAGS="-s -w -X 'github.com/ssenerg/gochat/internal.appName=gochat' -X 'gi
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "$LDFLAGS" -o /out/gochat ./cmd/gochat
 
-FROM ${DOCKER_REGISTRY}library/alpine:3.24
+FROM ${DOCKER_REGISTRY}library/alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
 
 WORKDIR /app
 

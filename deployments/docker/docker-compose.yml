@@ -3,7 +3,7 @@ name: gochat
 services:
 
   scylla:
-    image: ${DOCKER_REGISTRY:-docker.io/}scylladb/scylla:2026.1.15
+    image: ${DOCKER_REGISTRY:-docker.io/}scylladb/scylla:2026.1.15@sha256:e15660595e31d7391ad62930096f837010a68512bf238140b74b113b187191fb
     container_name: gochat-scylla
     restart: unless-stopped
     command:
@@ -16,7 +16,7 @@ services:
     volumes:
       - scylla_data:/var/lib/scylla
     healthcheck:
-      test: ["CMD-SHELL", "cqlsh -u cassandra -p cassandra -e 'SELECT now() FROM system.local' >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:10000/storage_service/native_transport | grep -q true"]
       interval: 10s
       timeout: 10s
       retries: 30
@@ -24,17 +24,55 @@ services:
     networks:
       - backend
 
+  # Gives the database an admin role for migrations and the app a role that
+  # can only read and write its keyspace, and retires the well-known default
+  # superuser. Safe to run on every deploy.
   scylla-init:
-    image: ${DOCKER_REGISTRY:-docker.io/}scylladb/scylla:2026.1.15
+    image: ${DOCKER_REGISTRY:-docker.io/}scylladb/scylla:2026.1.15@sha256:e15660595e31d7391ad62930096f837010a68512bf238140b74b113b187191fb
     container_name: gochat-scylla-init
     entrypoint: ["/bin/sh", "-c"]
     environment:
-      SCYLLA_USERNAME: ${DATABASE_SCYLLA_USERNAME}
-      SCYLLA_PASSWORD: ${DATABASE_SCYLLA_PASSWORD}
+      ADMIN_USERNAME: ${DATABASE_SCYLLA_ADMIN_USERNAME:?set DATABASE_SCYLLA_ADMIN_USERNAME in .env}
+      ADMIN_PASSWORD: ${DATABASE_SCYLLA_ADMIN_PASSWORD:?set DATABASE_SCYLLA_ADMIN_PASSWORD in .env}
+      APP_USERNAME: ${DATABASE_SCYLLA_USERNAME:?set DATABASE_SCYLLA_USERNAME in .env}
+      APP_PASSWORD: ${DATABASE_SCYLLA_PASSWORD:?set DATABASE_SCYLLA_PASSWORD in .env}
+      KEYSPACE: gochat
+      REPLICATION: "{'class': 'SimpleStrategy', 'replication_factor': 1}"
     command:
       - |
-        set -e
-        cqlsh scylla -u cassandra -p cassandra -e "CREATE ROLE IF NOT EXISTS $$SCYLLA_USERNAME WITH PASSWORD = '$$SCYLLA_PASSWORD' AND LOGIN = true AND SUPERUSER = true;"
+        set -eu
+        fail() { echo "scylla-init: $$*" >&2; exit 1; }
+        for r in "$$ADMIN_USERNAME" "$$APP_USERNAME"; do
+          case "$$r" in ""|cassandra|*[!a-z0-9_]*) fail "role names are lowercase letters, digits and _";; esac
+        done
+        [ "$$ADMIN_USERNAME" != "$$APP_USERNAME" ] || fail "the admin and app roles must differ"
+        for p in "$$ADMIN_PASSWORD" "$$APP_PASSWORD"; do
+          case "$$p" in ""|*"'"*) fail "passwords must be set and hold no quote";; esac
+        done
+        admin() { cqlsh scylla -u "$$ADMIN_USERNAME" -p "$$ADMIN_PASSWORD" "$$@"; }
+        default() { cqlsh scylla -u cassandra -p cassandra "$$@"; }
+        if ! admin -e "SELECT now() FROM system.local" >/dev/null 2>&1; then
+          default -e "CREATE ROLE IF NOT EXISTS $$ADMIN_USERNAME WITH PASSWORD = '$$ADMIN_PASSWORD' AND LOGIN = true AND SUPERUSER = true;" ||
+            fail "cannot sign in as $$ADMIN_USERNAME, nor create it"
+        fi
+        admin -e "CREATE KEYSPACE IF NOT EXISTS $$KEYSPACE WITH replication = $$REPLICATION;
+          CREATE ROLE IF NOT EXISTS $$APP_USERNAME WITH PASSWORD = '$$APP_PASSWORD' AND LOGIN = true;
+          ALTER ROLE $$APP_USERNAME WITH PASSWORD = '$$APP_PASSWORD' AND SUPERUSER = false AND LOGIN = true;"
+        # A role owns what it creates, so an app role that once made the
+        # schema could still drop it: take that back, table by table.
+        revoke="REVOKE ALL ON KEYSPACE $$KEYSPACE FROM $$APP_USERNAME;"
+        for t in $$(admin -e "SELECT table_name FROM system_schema.tables WHERE keyspace_name = '$$KEYSPACE'" |
+            sed -n 's/^ *\([a-z0-9_]*\) *$$/\1/p' | grep -vx 'table_name'); do
+          revoke="$$revoke REVOKE ALL ON TABLE $$KEYSPACE.$$t FROM $$APP_USERNAME;"
+        done
+        admin -e "$$revoke
+          GRANT SELECT ON KEYSPACE $$KEYSPACE TO $$APP_USERNAME;
+          GRANT MODIFY ON KEYSPACE $$KEYSPACE TO $$APP_USERNAME;"
+        retired=$$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')
+        admin -e "ALTER ROLE cassandra WITH PASSWORD = '$$retired' AND SUPERUSER = false AND LOGIN = false;" >/dev/null 2>&1 || true
+        if default -e "SELECT now() FROM system.local" >/dev/null 2>&1; then
+          fail "the default superuser still signs in"
+        fi
     depends_on:
       scylla:
         condition: service_healthy
@@ -42,13 +80,13 @@ services:
       - backend
 
   minio:
-    image: ${DOCKER_REGISTRY:-docker.io/}pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+    image: ${DOCKER_REGISTRY:-docker.io/}pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     container_name: gochat-minio
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
-      MINIO_ROOT_USER: ${STORAGE_MINIO_ACCESS_KEY}
-      MINIO_ROOT_PASSWORD: ${STORAGE_MINIO_SECRET_KEY}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
     volumes:
       - minio_data:/data
     healthcheck:
@@ -56,6 +94,40 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    networks:
+      - backend
+
+  # Creates the bucket and the app's user, which may only use that bucket.
+  minio-init:
+    image: ${DOCKER_REGISTRY:-docker.io/}pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
+    container_name: gochat-minio-init
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+      APP_ACCESS_KEY: ${STORAGE_MINIO_ACCESS_KEY:?set STORAGE_MINIO_ACCESS_KEY in .env}
+      APP_SECRET_KEY: ${STORAGE_MINIO_SECRET_KEY:?set STORAGE_MINIO_SECRET_KEY in .env}
+      BUCKET: gochat-attachments
+    command:
+      - |
+        set -eu
+        [ "$$APP_ACCESS_KEY" != "$$ROOT_USER" ] || { echo "minio-init: the app needs its own access key" >&2; exit 1; }
+        export MC_CONFIG_DIR=/tmp/mc
+        mc alias set store http://minio:9000 "$$ROOT_USER" "$$ROOT_PASSWORD" >/dev/null
+        mc mb --ignore-existing "store/$$BUCKET" >/dev/null
+        cat > /tmp/policy.json <<EOF
+        {"Version": "2012-10-17", "Statement": [
+          {"Effect": "Allow", "Action": ["s3:GetBucketLocation", "s3:ListBucket", "s3:ListBucketMultipartUploads"], "Resource": ["arn:aws:s3:::$$BUCKET"]},
+          {"Effect": "Allow", "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"], "Resource": ["arn:aws:s3:::$$BUCKET/*"]}
+        ]}
+        EOF
+        mc admin policy create store gochat-app /tmp/policy.json >/dev/null
+        mc admin user add store "$$APP_ACCESS_KEY" "$$APP_SECRET_KEY" >/dev/null
+        mc admin policy attach store gochat-app --user "$$APP_ACCESS_KEY" >/dev/null 2>&1 ||
+          mc admin user info store "$$APP_ACCESS_KEY" | grep -q gochat-app
+    depends_on:
+      minio:
+        condition: service_healthy
     networks:
       - backend
 
@@ -69,8 +141,11 @@ services:
     container_name: gochat-migrate
     command: ["migrate", "scylla", "up", "/app/migrations/scylla", "--config-path", "/app/config", "--config-name", "migrate"]
     environment:
-      DATABASE_SCYLLA_USERNAME: ${DATABASE_SCYLLA_USERNAME}
-      DATABASE_SCYLLA_PASSWORD: ${DATABASE_SCYLLA_PASSWORD}
+      DATABASE_SCYLLA_USERNAME: ${DATABASE_SCYLLA_ADMIN_USERNAME}
+      DATABASE_SCYLLA_PASSWORD: ${DATABASE_SCYLLA_ADMIN_PASSWORD}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     depends_on:
       scylla-init:
         condition: service_completed_successfully
@@ -90,6 +165,10 @@ services:
       SERVER_DRPC_GATEWAY_KEY: ${GATEWAY_KEY}
       SERVICES_ACCOUNTS_SECRET_KEY: ${SERVICES_ACCOUNTS_SECRET_KEY}
       SERVICES_ACCOUNTS_SETUP_TOKEN: ${SERVICES_ACCOUNTS_SETUP_TOKEN:-}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 1024
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9100/readyz"]
       interval: 10s
@@ -98,10 +177,11 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      minio:
-        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     networks:
       - backend
+      - gateway
 
   web:
     image: gochat:latest
@@ -116,6 +196,10 @@ services:
     # TLS-terminating proxy or tunnel there.
     ports:
       - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8080}:8080"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 1024
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 10s
@@ -124,8 +208,9 @@ services:
     depends_on:
       server:
         condition: service_healthy
+    # The gateway reaches the server and nothing else behind it.
     networks:
-      - backend
+      - gateway
       - frontend
 
 volumes:
@@ -134,5 +219,7 @@ volumes:
 
 networks:
   backend:
+    internal: true
+  gateway:
     internal: true
   frontend:

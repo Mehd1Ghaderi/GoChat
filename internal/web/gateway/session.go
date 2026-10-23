@@ -19,6 +19,11 @@ import (
 const (
 	typingLinger = 6 * time.Second
 	readDelay    = time.Second
+	// leaveGrace lets the tab that left a channel navigate on its own.
+	leaveGrace = 2 * time.Second
+	// earlyFrames and queuedPosts bound what a browser may send ahead.
+	earlyFrames = 32
+	queuedPosts = 32
 )
 
 var (
@@ -56,6 +61,9 @@ type (
 	railReady struct{ rail *render.Rail }
 	failed    struct{ text string }
 	expired   struct{}
+	// viewChecked carries the newest message of the channel a tab opened.
+	viewChecked struct{ channelID, last string }
+	leftChannel struct{ channelID string }
 )
 
 type session struct {
@@ -74,11 +82,17 @@ type session struct {
 	sidebar   map[string]bool
 	peers     map[string]bool
 	typingSeq uint64
-	reads     map[string]string
-	flushing  bool
-	closing   bool
-	stopPing  context.CancelFunc
-	expiry    *time.Timer
+	// typer is who the typing line names, and shown the newest message on
+	// the page.
+	typer    string
+	shown    string
+	resynced string
+	posts    chan *pb.PostMessageRequest
+	reads    map[string]string
+	flushing bool
+	closing  bool
+	stopPing context.CancelFunc
+	expiry   *time.Timer
 	// early holds what the browser sent before the server attached it.
 	early [][]byte
 }
@@ -95,6 +109,7 @@ func NewSession(d *Deps, connID uint64, call drpc.Call, ws *websocket.Conn) acto
 			sidebar: make(map[string]bool),
 			peers:   make(map[string]bool),
 			reads:   make(map[string]string),
+			posts:   make(chan *pb.PostMessageRequest, queuedPosts),
 		}
 	}
 }
@@ -103,11 +118,14 @@ func (s *session) Receive(c *actor.Context) {
 	switch msg := c.Message().(type) {
 	case actor.Started:
 		go s.write()
+		go s.post(c.PID(), c.Engine())
 		ctx, cancel := context.WithCancel(context.Background())
 		s.stopPing = cancel
 		go s.ping(ctx)
 		c.Send(s.Router, register{connID: s.connID, token: s.call.Session, pid: c.PID()})
 	case actor.Stopped:
+		s.flush(c)
+		close(s.posts)
 		c.Send(s.Router, unregister{connID: s.connID})
 		s.stopPing()
 		if s.expiry != nil {
@@ -155,12 +173,25 @@ func (s *session) Receive(c *actor.Context) {
 		}
 		if s.user != nil {
 			s.frame(c, msg.Data)
-		} else if len(s.early) < 8 {
+		} else if len(s.early) < earlyFrames {
 			s.early = append(s.early, msg.Data)
+		} else {
+			s.toast("error", "Some messages could not be sent: reload and try again.")
 		}
 	case clearTyping:
 		if msg.seq == s.typingSeq && msg.channelID == s.channelID {
-			s.fragment("typing", render.Typing{ChannelID: msg.channelID})
+			s.clearTyping()
+		}
+	case viewChecked:
+		// A message posted while the page loaded reached neither the page
+		// nor this socket: reload the channel, once.
+		if msg.channelID == s.channelID && msg.last != "" && render.Newer(msg.last, s.shown) && s.resynced != msg.channelID {
+			s.resynced = msg.channelID
+			s.fragment("resync", s.channelURL())
+		}
+	case leftChannel:
+		if msg.channelID == s.channelID {
+			s.fragment("ws-control", "/t/"+s.teamName)
 		}
 	case flushReads:
 		s.flushing = false
@@ -272,6 +303,15 @@ func (s *session) fragment(name string, data any) {
 	s.send(b)
 }
 
+func (s *session) message(name string, m *render.Message) {
+	b, err := s.Render.MessageBytes(name, m)
+	if err != nil {
+		s.Logger.Error("failed to render a message", zap.String("fragment", name), zap.Error(err))
+		return
+	}
+	s.send(b)
+}
+
 func (s *session) toast(kind, text string) {
 	s.fragment("toast", render.Toast{Kind: kind, Text: text})
 }
@@ -376,13 +416,11 @@ func (s *session) frame(c *actor.Context, data []byte) {
 		if !uuidRe.MatchString(f.ChannelID) {
 			return
 		}
-		req := &pb.PostMessageRequest{ChannelId: f.ChannelID, Content: f.Content, AttachmentIds: f.attachments()}
-		s.rpc(c, func(ctx context.Context) any {
-			if _, err := s.Client.Messages.PostMessage(ctx, req); err != nil {
-				return failed{text: drpc.Err(err).Message}
-			}
-			return nil
-		})
+		select {
+		case s.posts <- &pb.PostMessageRequest{ChannelId: f.ChannelID, Content: f.Content, AttachmentIds: f.attachments()}:
+		default:
+			s.toast("error", "You are sending too fast: a message was not sent.")
+		}
 	case "typing":
 		if f.ChannelID != s.channelID || !uuidRe.MatchString(f.ChannelID) {
 			return
@@ -395,22 +433,55 @@ func (s *session) frame(c *actor.Context, data []byte) {
 	}
 }
 
+// post sends a tab's messages one at a time, in the order it wrote them.
+func (s *session) post(self *actor.PID, engine *actor.Engine) {
+	for req := range s.posts {
+		ctx, cancel := s.Client.Context(context.Background(), s.call)
+		_, err := s.Client.Messages.PostMessage(ctx, req)
+		cancel()
+		if err != nil {
+			engine.Send(self, failed{text: drpc.Err(err).Message})
+		}
+	}
+}
+
 func (s *session) view(c *actor.Context, f *clientFrame) {
 	if !uuidRe.MatchString(f.TeamID) || !slugRe.MatchString(f.TeamName) || !uuidRe.MatchString(f.ChannelID) {
 		return
 	}
 	teamChanged := f.TeamID != s.teamID
+	if f.ChannelID != s.channelID {
+		s.resynced = ""
+	}
 	s.teamID, s.teamName, s.channelID = f.TeamID, f.TeamName, f.ChannelID
 	s.moderator = f.Moderator == "1"
 	s.typingSeq++
+	s.typer, s.shown = "", ""
 	if teamChanged {
 		s.loadSidebar(c, false)
 	}
 	if uuidRe.MatchString(f.LastID) {
+		s.shown = f.LastID
 		s.markRead(c, f.ChannelID, f.LastID)
 	}
 	if f.Resync == "1" {
 		s.resync(c)
+		return
+	}
+	chID := f.ChannelID
+	s.rpc(c, func(ctx context.Context) any {
+		res, err := s.Client.Channels.GetChannel(ctx, &pb.GetChannelRequest{ChannelId: chID})
+		if err != nil {
+			return nil
+		}
+		return viewChecked{channelID: chID, last: res.Channel.GetLastMessageId()}
+	})
+}
+
+func (s *session) clearTyping() {
+	if s.typer != "" {
+		s.typer = ""
+		s.fragment("typing", render.Typing{ChannelID: s.channelID})
 	}
 }
 
@@ -444,11 +515,17 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 		m := p.MessagePosted.Message
 		mine := m.GetAuthor().GetId() == me
 		if m.ChannelId == s.channelID {
-			s.fragment("message-new", s.Render.Message(m, me, s.moderator))
+			s.message("message-new", s.Render.Message(m, me, s.moderator))
+			if render.Newer(m.Id, s.shown) {
+				s.shown = m.Id
+			}
 			if !mine {
 				s.markRead(c, m.ChannelId, m.Id)
 			}
-			s.typingSeq++
+			if m.GetAuthor().GetId() == s.typer {
+				s.typingSeq++
+				s.clearTyping()
+			}
 		} else if !mine && s.sidebar[m.ChannelId] {
 			s.fragment("unread", m.ChannelId)
 		}
@@ -457,7 +534,7 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 		if m.ChannelId == s.channelID {
 			view := s.Render.Message(m, me, s.moderator)
 			view.OOB = true
-			s.fragment("message", view)
+			s.message("message", view)
 		}
 	case *pb.Event_MessageDeleted:
 		if p.MessageDeleted.ChannelId == s.channelID {
@@ -469,6 +546,7 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 			return
 		}
 		s.typingSeq++
+		s.typer = t.GetUser().GetId()
 		s.fragment("typing", render.Typing{ChannelID: t.ChannelId, Name: render.DisplayName(t.User)})
 		seq, ch, self, engine := s.typingSeq, t.ChannelId, c.PID(), c.Engine()
 		time.AfterFunc(typingLinger, func() { engine.Send(self, clearTyping{channelID: ch, seq: seq}) })
@@ -478,9 +556,15 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 		}
 	case *pb.Event_ChannelLeft:
 		if p.ChannelLeft.ChannelId == s.channelID {
-			s.toast("error", "You are no longer a member of this channel.")
-			s.fragment("ws-control", "/t/"+s.teamName)
-			return
+			if !p.ChannelLeft.Own {
+				s.toast("error", "You are no longer a member of this channel.")
+				s.fragment("ws-control", "/t/"+s.teamName)
+				return
+			}
+			// The tab that left moves on by itself; others showing the
+			// channel follow.
+			msg, self, engine := leftChannel{channelID: s.channelID}, c.PID(), c.Engine()
+			time.AfterFunc(leaveGrace, func() { engine.Send(self, msg) })
 		}
 		if s.teamID != "" {
 			s.loadSidebar(c, true)

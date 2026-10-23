@@ -34,17 +34,21 @@ web: _require_env build
     @CLIENT_DRPC_GATEWAY_KEY="$GATEWAY_KEY" {{bin_dir}}/{{app_name}} web
 
 # Apply the scylla migrations (dev stores).
+# Migrations run as the database's admin role; the app's role cannot change
+# the schema.
 migrate: _require_env build
-    @{{bin_dir}}/{{app_name}} migrate scylla up ./migrations/scylla
+    @DATABASE_SCYLLA_USERNAME="$DATABASE_SCYLLA_ADMIN_USERNAME" DATABASE_SCYLLA_PASSWORD="$DATABASE_SCYLLA_ADMIN_PASSWORD" \
+        {{bin_dir}}/{{app_name}} migrate scylla up ./migrations/scylla
 
 # Show the applied and pending scylla migrations.
 migrate-status: _require_env build
-    @{{bin_dir}}/{{app_name}} migrate scylla status ./migrations/scylla
+    @DATABASE_SCYLLA_USERNAME="$DATABASE_SCYLLA_ADMIN_USERNAME" DATABASE_SCYLLA_PASSWORD="$DATABASE_SCYLLA_ADMIN_PASSWORD" \
+        {{bin_dir}}/{{app_name}} migrate scylla status ./migrations/scylla
 
 # Start scylla and minio, published on the host for local runs.
 stores: _require_env
     @{{compose_devenv}} up -d scylla minio
-    @{{compose_devenv}} up scylla-init
+    @{{compose_devenv}} up scylla-init minio-init
 
 # Stop the dev stores.
 stores-down:

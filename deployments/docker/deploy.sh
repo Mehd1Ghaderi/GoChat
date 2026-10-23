@@ -18,17 +18,18 @@ if [ ! -f .env ]; then
 	exit 1
 fi
 
-# The running image stays at hand as gochat:previous.
-if docker image inspect gochat:latest >/dev/null 2>&1; then
-	docker image tag gochat:latest gochat:previous
+# The image the server runs now stays at hand as gochat:previous.
+running=$(docker inspect --format '{{.Image}}' "$(compose ps --all --quiet server 2>/dev/null)" 2>/dev/null || true)
+if [ -n "$running" ]; then
+	docker image tag "$running" gochat:previous
 fi
 docker load
 
-# The stores keep running across deploys; only the app is replaced.
-compose up --detach --no-build --wait --wait-timeout 300 scylla minio
-compose run --rm --no-deps scylla-init >/dev/null
-
 started() {
+	# The stores keep running across deploys; only the app is replaced.
+	compose up --detach --no-build --wait --wait-timeout 300 scylla minio || return 1
+	compose run --rm --no-deps scylla-init >/dev/null || return 1
+	compose run --rm --no-deps minio-init >/dev/null || return 1
 	compose run --rm --no-deps migrate || return 1
 	compose up --detach --no-build --no-deps --force-recreate --wait --wait-timeout 180 server || return 1
 	compose up --detach --no-build --no-deps --force-recreate --wait --wait-timeout 120 web
@@ -43,10 +44,12 @@ fi
 
 echo "deploy: gochat did not come up healthy. Its last logs:" >&2
 compose logs --no-color --tail 100 server web >&2 || true
-if docker image inspect gochat:previous >/dev/null 2>&1; then
+if [ -n "$running" ]; then
 	docker image tag gochat:previous gochat:latest
-	if compose up --detach --no-build --no-deps --force-recreate server web; then
+	if compose up --detach --no-build --no-deps --force-recreate --wait --wait-timeout 180 server web; then
 		echo "deploy: went back to the image that ran before" >&2
+	else
+		echo "deploy: the image that ran before did not come up either" >&2
 	fi
 fi
 exit 1
