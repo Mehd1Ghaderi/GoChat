@@ -223,7 +223,7 @@ func (r *router) dial(ctx context.Context, engine *actor.Engine, self *actor.PID
 			delay = r.cfg.ReconnectMin
 		}
 		r.logger.Warn("chat server stream ended", zap.Error(err), zap.Duration("retry_in", delay))
-		jitter := time.Duration(rand.Int64N(int64(delay)/2 + 1))
+		jitter := time.Duration(rand.Int64N(int64(delay)/2 + 1)) //nolint:gosec // jitter needs no secrecy
 		select {
 		case <-ctx.Done():
 			return

@@ -20,8 +20,8 @@ type window struct {
 	count int
 }
 
-func newLimiter(max int, w time.Duration) *limiter {
-	return &limiter{max: max, window: w, m: make(map[string]*window)}
+func newLimiter(limit int, w time.Duration) *limiter {
+	return &limiter{max: limit, window: w, m: make(map[string]*window)}
 }
 
 func (l *limiter) blocked(key string) bool {

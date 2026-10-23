@@ -14,7 +14,7 @@ const attachmentColumns = "id, channel_id, uploader_id, name, content_type, size
 
 // PendingDay is the partition of attachments uploaded but not yet posted.
 func PendingDay(t time.Time) int32 {
-	return int32(t.Unix() / 86400)
+	return int32(t.Unix() / 86400) //nolint:gosec // fits int32 for millions of years
 }
 
 func (r *Repository) InsertAttachment(ctx context.Context, a *models.Attachment) error {

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -19,7 +20,7 @@ func (h *Handler) recover(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if v := recover(); v != nil {
-				if v == http.ErrAbortHandler {
+				if err, ok := v.(error); ok && errors.Is(err, http.ErrAbortHandler) {
 					panic(v)
 				}
 				h.logger.Error("handler panicked", zap.String("path", r.URL.Path), zap.Any("panic", v), zap.Stack("stack"))
@@ -106,7 +107,7 @@ func (h *Handler) refuseCSRF(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the page expired, reload it", http.StatusForbidden)
 		return
 	}
-	http.Redirect(w, r, r.URL.Path, http.StatusSeeOther)
+	http.Redirect(w, r, safeNext(r.URL.Path), http.StatusSeeOther) //nolint:gosec // safeNext keeps it on this site
 }
 
 func (h *Handler) sameOrigin(r *http.Request) bool {
@@ -130,7 +131,7 @@ func (h *Handler) cookieName(name string) string {
 }
 
 func (h *Handler) setCookie(w http.ResponseWriter, name, value string, maxAge time.Duration, sameSite http.SameSite) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the public URL's scheme
 		Name:     h.cookieName(name),
 		Value:    value,
 		Path:     "/",
@@ -142,7 +143,7 @@ func (h *Handler) setCookie(w http.ResponseWriter, name, value string, maxAge ti
 }
 
 func (h *Handler) clearCookie(w http.ResponseWriter, name string) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the public URL's scheme
 		Name: h.cookieName(name), Value: "", Path: "/", MaxAge: -1,
 		HttpOnly: true, Secure: h.secure, SameSite: http.SameSiteLaxMode,
 	})

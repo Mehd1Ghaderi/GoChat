@@ -80,7 +80,7 @@ func ParseTime(s string) (gocql.UUID, bool) {
 }
 
 func Bucket(t time.Time) int32 {
-	return int32(t.Unix() / int64(BucketSpan/time.Second))
+	return int32(t.Unix() / int64(BucketSpan/time.Second)) //nolint:gosec // fits int32 for millions of years
 }
 
 func BucketOf(id gocql.UUID) int32 {

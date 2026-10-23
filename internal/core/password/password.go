@@ -75,10 +75,10 @@ func Verify(password, encoded string, p Params) (ok, rehash bool, err error) {
 		return false, false, errMalformed
 	}
 	key, err := base64.RawStdEncoding.DecodeString(parts[5])
-	if err != nil || len(key) == 0 {
+	if err != nil || len(key) == 0 || len(key) > 128 {
 		return false, false, errMalformed
 	}
-	got := argon2.IDKey([]byte(password), salt, stored.Time, stored.Memory, stored.Threads, uint32(len(key)))
+	got := argon2.IDKey([]byte(password), salt, stored.Time, stored.Memory, stored.Threads, uint32(len(key))) //nolint:gosec // bounded above
 	if subtle.ConstantTimeCompare(got, key) != 1 {
 		return false, false, nil
 	}

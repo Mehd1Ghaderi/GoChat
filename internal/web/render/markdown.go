@@ -70,8 +70,7 @@ func setLinkAttrs(l *ast.Link) {
 func (r *Renderer) markdown(src string) template.HTML {
 	var buf bytes.Buffer
 	if err := r.md.Convert([]byte(src), &buf); err != nil {
-		return template.HTML(template.HTMLEscapeString(src))
+		return template.HTML(template.HTMLEscapeString(src)) //nolint:gosec // escaped
 	}
-	// goldmark escapes text and drops raw HTML and unsafe URLs.
-	return template.HTML(buf.String()) //nolint:gosec
+	return template.HTML(buf.String()) //nolint:gosec // goldmark escapes text and drops raw HTML
 }

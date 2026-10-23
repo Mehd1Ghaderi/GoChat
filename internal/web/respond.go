@@ -56,7 +56,7 @@ func (h *Handler) text(w http.ResponseWriter, status int, kind, msg string) {
 // request follows a redirect.
 func (h *Handler) navigate(w http.ResponseWriter, r *http.Request, path string, closeModal bool) {
 	if !isHTMX(r) {
-		http.Redirect(w, r, path, http.StatusSeeOther)
+		http.Redirect(w, r, path, http.StatusSeeOther) //nolint:gosec // callers build path from validated parts
 		return
 	}
 	loc, _ := json.Marshal(map[string]string{"path": path, "target": "#main"})

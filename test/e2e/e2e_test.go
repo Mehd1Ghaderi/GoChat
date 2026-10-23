@@ -396,7 +396,7 @@ func TestEndToEnd(t *testing.T) {
 		if res.Header.Get("Location") != "/login/mfa" || fresh.cookie("gochat_session") != "" {
 			t.Fatalf("password alone signed in: %d %s", res.StatusCode, res.Header.Get("Location"))
 		}
-		res, _ = fresh.form("/login/mfa", url.Values{"code": {code}})
+		_, _ = fresh.form("/login/mfa", url.Values{"code": {code}})
 		if fresh.cookie("gochat_session") != "" {
 			t.Fatal("a used TOTP code was accepted again")
 		}

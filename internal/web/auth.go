@@ -43,7 +43,7 @@ func (h *Handler) startSession(w http.ResponseWriter, s *pb.Session) {
 func (h *Handler) loginPage(w http.ResponseWriter, r *http.Request) {
 	next := nextParam(r)
 	if h.currentUser(r) != nil {
-		http.Redirect(w, r, safeNext(next), http.StatusSeeOther)
+		http.Redirect(w, r, safeNext(next), http.StatusSeeOther) //nolint:gosec // safeNext keeps it on this site
 		return
 	}
 	h.page(w, r, http.StatusOK, "login", loginData{Page: Page{Title: "Sign in", CSRF: h.csrfToken(w, r)}, Next: next})
@@ -78,7 +78,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.startSession(w, res.GetSession())
-	http.Redirect(w, r, safeNext(next), http.StatusSeeOther)
+	http.Redirect(w, r, safeNext(next), http.StatusSeeOther) //nolint:gosec // safeNext keeps it on this site
 }
 
 func (h *Handler) mfaToken(r *http.Request) string {
@@ -119,7 +119,7 @@ func (h *Handler) mfa(w http.ResponseWriter, r *http.Request) {
 	}
 	h.clearCookie(w, "mfa")
 	h.startSession(w, res.Session)
-	http.Redirect(w, r, safeNext(next), http.StatusSeeOther)
+	http.Redirect(w, r, safeNext(next), http.StatusSeeOther) //nolint:gosec // safeNext keeps it on this site
 }
 
 type signupForm struct {

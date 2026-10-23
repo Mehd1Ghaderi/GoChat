@@ -1,5 +1,5 @@
 {{define "channel"}}
-<section class="channel" id="channel-view" data-team="{{.Team.Id}}" data-team-name="{{.Team.Name}}" data-channel="{{.Channel.Id}}" data-newest="{{.Newest}}"{{if .Moderator}} data-moderator="1"{{end}}>
+<section class="channel" id="channel-view" data-team="{{.Team.Id}}" data-team-name="{{.Team.Name}}" data-channel="{{.Channel.Id}}" data-title="{{.Title}}" data-newest="{{.Newest}}"{{if .Moderator}} data-moderator="1"{{end}}>
   <header class="channel-header">
     <label for="nav-toggle" class="icon-btn menu-btn" aria-label="Open navigation">☰</label>
     <div class="channel-title">

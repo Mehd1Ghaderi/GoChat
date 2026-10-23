@@ -33,6 +33,7 @@
   function markActive() {
     var v = view();
     if (!v) return;
+    if (v.dataset.title) document.title = v.dataset.title + " · GoChat";
     var id = v.dataset.channel;
     document.querySelectorAll(".sb-link").forEach(function (a) {
       var on = a.dataset.channel === id;
