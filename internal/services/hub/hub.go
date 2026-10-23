@@ -57,6 +57,7 @@ type Attach struct {
 type Reject struct {
 	GatewayID string
 	ConnID    uint64
+	Retry     bool
 }
 
 type Detach struct {
@@ -85,6 +86,10 @@ type Registered struct{}
 
 type checkOffline struct{ userID string }
 
+// revokedTTL is how long a revoked session stays refused, covering attaches
+// authenticated just before the revocation.
+const revokedTTL = time.Minute
+
 type conn struct {
 	userID    string
 	sessionID string
@@ -106,6 +111,8 @@ type hub struct {
 	online map[string]map[string]int
 	// announced holds the users last announced online.
 	announced map[string]bool
+	// revoked holds recently revoked session ids and when they were revoked.
+	revoked map[string]time.Time
 }
 
 func New(logger *zap.Logger, cfg *Config) actor.Producer {
@@ -116,6 +123,7 @@ func New(logger *zap.Logger, cfg *Config) actor.Producer {
 			gateways:  make(map[string]*gateway),
 			online:    make(map[string]map[string]int),
 			announced: make(map[string]bool),
+			revoked:   make(map[string]time.Time),
 		}
 	}
 }
@@ -130,7 +138,7 @@ func (h *hub) Receive(c *actor.Context) {
 		h.attach(c, msg)
 	case Reject:
 		if gw := h.gateways[msg.GatewayID]; gw != nil {
-			h.send(c, gw, &pb.ConnectResponse{Frame: &pb.ConnectResponse_AttachRejected{AttachRejected: &pb.AttachRejected{ConnId: msg.ConnID}}})
+			h.reject(c, gw, msg.ConnID, msg.Retry)
 		}
 	case Detach:
 		h.detach(c, msg)
@@ -161,9 +169,19 @@ func (h *hub) Receive(c *actor.Context) {
 		}
 	case actor.Stopped:
 		for _, gw := range h.gateways {
-			_ = gw.stream.Close()
+			closeStream(gw.stream)
 		}
 	}
+}
+
+// closeStream closes a stream off the actor's goroutine: closing waits for a
+// send in progress, which a stalled gateway can hold for long.
+func closeStream(s Stream) {
+	go func() { _ = s.Close() }()
+}
+
+func (h *hub) reject(c *actor.Context, gw *gateway, connID uint64, retry bool) {
+	h.send(c, gw, &pb.ConnectResponse{Frame: &pb.ConnectResponse_AttachRejected{AttachRejected: &pb.AttachRejected{ConnId: connID, Retry: retry}}})
 }
 
 func (h *hub) register(c *actor.Context, msg RegisterGateway) {
@@ -176,7 +194,8 @@ func (h *hub) register(c *actor.Context, msg RegisterGateway) {
 		pending: new(atomic.Int64),
 		conns:   make(map[uint64]conn),
 	}
-	gw.pid = c.SpawnChild(newWriter(h.logger, gw.id, msg.Stream, gw.pending), "gateway")
+	gw.pid = c.SpawnChild(newWriter(h.logger, gw.id, msg.Stream, gw.pending), "gateway",
+		actor.WithMiddleware(actors.Recover(h.logger)))
 	h.gateways[msg.ID] = gw
 	h.send(c, gw, &pb.ConnectResponse{Frame: &pb.ConnectResponse_Welcome{Welcome: &pb.Welcome{}}})
 	h.logger.Info("gateway registered", zap.String("gateway", msg.ID))
@@ -199,6 +218,10 @@ func (h *hub) unregister(c *actor.Context, id string) {
 func (h *hub) attach(c *actor.Context, msg Attach) {
 	gw := h.gateways[msg.GatewayID]
 	if gw == nil {
+		return
+	}
+	if _, ok := h.revoked[msg.SessionID]; ok {
+		h.reject(c, gw, msg.ConnID, false)
 		return
 	}
 	if _, dup := gw.conns[msg.ConnID]; dup {
@@ -297,10 +320,26 @@ func (h *hub) revoke(c *actor.Context, msg RevokeSessions) {
 	if len(msg.SessionIDs) == 0 {
 		return
 	}
+	now := time.Now()
+	for id, at := range h.revoked {
+		if now.Sub(at) > revokedTTL {
+			delete(h.revoked, id)
+		}
+	}
+	for _, id := range msg.SessionIDs {
+		h.revoked[id] = now
+	}
 	resp := &pb.ConnectResponse{Frame: &pb.ConnectResponse_SessionsRevoked{SessionsRevoked: &pb.SessionsRevoked{SessionIds: msg.SessionIDs}}}
 	for gwID := range h.online[msg.UserID] {
-		if gw := h.gateways[gwID]; gw != nil {
-			h.send(c, gw, resp)
+		gw := h.gateways[gwID]
+		if gw == nil {
+			continue
+		}
+		h.send(c, gw, resp)
+		for connID, cn := range gw.conns {
+			if _, ok := h.revoked[cn.sessionID]; ok && cn.userID == msg.UserID {
+				h.removeConn(c, gw, connID)
+			}
 		}
 	}
 }
@@ -318,7 +357,7 @@ func (h *hub) presence(c *actor.Context, userID string, online bool) {
 func (h *hub) send(c *actor.Context, gw *gateway, resp *pb.ConnectResponse) {
 	if gw.pending.Load() >= h.cfg.GatewayQueueLimit {
 		h.logger.Warn("gateway is too slow, dropping it", zap.String("gateway", gw.id))
-		_ = gw.stream.Close()
+		closeStream(gw.stream)
 		h.unregister(c, gw.id)
 		return
 	}

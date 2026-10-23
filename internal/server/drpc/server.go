@@ -18,6 +18,8 @@ import (
 	"storj.io/drpc/drpcmux"
 	"storj.io/drpc/drpcserver"
 	"storj.io/drpc/drpcwire"
+
+	"github.com/ssenerg/gochat/internal/utils"
 )
 
 type Server struct {
@@ -76,7 +78,7 @@ func (s *Server) Start() error {
 		}
 		lis = tls.NewListener(lis, tc)
 	}
-	lis = netutil.LimitListener(lis, s.cfg.MaxConnections)
+	lis = netutil.LimitListener(utils.WriteTimeoutListener(lis, s.cfg.WriteTimeout), s.cfg.MaxConnections)
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	go func() {

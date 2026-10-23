@@ -16,8 +16,10 @@ type Config struct {
 	MaxMessageSize    int           `mapstructure:"max_message_size"`
 	MaxConnections    int           `mapstructure:"max_connections"`
 	InactivityTimeout time.Duration `mapstructure:"inactivity_timeout"`
-	RequestTimeout    time.Duration `mapstructure:"request_timeout"`
-	ShutdownTimeout   time.Duration `mapstructure:"shutdown_timeout"`
+	// WriteTimeout bounds how long a write to a gateway may stall.
+	WriteTimeout    time.Duration `mapstructure:"write_timeout"`
+	RequestTimeout  time.Duration `mapstructure:"request_timeout"`
+	ShutdownTimeout time.Duration `mapstructure:"shutdown_timeout"`
 }
 
 type TLSConfig struct {
@@ -60,7 +62,7 @@ func (c *Config) Validate() error {
 	if c.MaxConnections < 1 {
 		return errors.New("max_connections must be at least 1")
 	}
-	if c.InactivityTimeout < 0 || c.RequestTimeout <= 0 || c.ShutdownTimeout <= 0 {
+	if c.InactivityTimeout < 0 || c.WriteTimeout <= 0 || c.RequestTimeout <= 0 || c.ShutdownTimeout <= 0 {
 		return errors.New("timeouts must be positive")
 	}
 	return nil

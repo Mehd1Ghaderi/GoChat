@@ -47,6 +47,7 @@ client:
       key_file: ""
       server_name: ""
     dial_timeout: 5s
+    write_timeout: 30s
     request_timeout: 15s
     pool_capacity: 64
     pool_expiration: 2m

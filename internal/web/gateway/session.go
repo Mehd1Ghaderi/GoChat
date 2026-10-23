@@ -122,6 +122,10 @@ func (s *session) Receive(c *actor.Context) {
 			s.resync(c)
 		}
 	case Rejected:
+		if msg.Retry {
+			s.close(websocket.StatusTryAgainLater)
+			return
+		}
 		if msg.TooMany {
 			s.toast("error", "Too many open tabs: close one and reload.")
 			s.close(websocket.StatusPolicyViolation)

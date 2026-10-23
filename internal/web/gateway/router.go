@@ -6,6 +6,7 @@ import (
 	"context"
 	"io"
 	"math/rand/v2"
+	"sync/atomic"
 	"time"
 
 	"github.com/anthdm/hollywood/actor"
@@ -23,8 +24,9 @@ type (
 		// Again is set when the stream reconnected: events may have been lost.
 		Again bool
 	}
-	// Rejected means the session is not valid, or TooMany sockets are open.
-	Rejected struct{ TooMany bool }
+	// Rejected means the session is not valid, TooMany sockets are open, or
+	// the attach failed for a passing reason and the page should Retry.
+	Rejected struct{ TooMany, Retry bool }
 	Revoked  struct{}
 	Event    struct{ Event *pb.Event }
 )
@@ -43,6 +45,10 @@ type streamUp struct {
 }
 
 type streamDown struct{ gen uint64 }
+
+// streamGen numbers streams across router restarts, so a stale stream's
+// messages never match the current one.
+var streamGen atomic.Uint64
 
 type inbound struct {
 	gen  uint64
@@ -175,7 +181,7 @@ func (r *router) handle(c *actor.Context, resp *pb.ConnectResponse) {
 		if cn := r.conns[f.AttachRejected.ConnId]; cn != nil {
 			delete(r.conns, f.AttachRejected.ConnId)
 			r.unindex(f.AttachRejected.ConnId, cn)
-			c.Send(cn.pid, Rejected{})
+			c.Send(cn.pid, Rejected{Retry: f.AttachRejected.Retry})
 		}
 	case *pb.ConnectResponse_Event:
 		ev := Event{Event: f.Event}
@@ -201,6 +207,7 @@ func (r *router) handle(c *actor.Context, resp *pb.ConnectResponse) {
 			if revoked[cn.sessionID] {
 				delete(r.conns, id)
 				r.unindex(id, cn)
+				r.write(&pb.ConnectRequest{Frame: &pb.ConnectRequest_Detach{Detach: &pb.Detach{ConnId: id}}})
 				c.Send(cn.pid, Revoked{})
 			}
 		}
@@ -209,10 +216,9 @@ func (r *router) handle(c *actor.Context, resp *pb.ConnectResponse) {
 
 // dial keeps one stream to the server open, backing off between attempts.
 func (r *router) dial(ctx context.Context, engine *actor.Engine, self *actor.PID) {
-	var gen uint64
 	delay := r.cfg.ReconnectMin
 	for ctx.Err() == nil {
-		gen++
+		gen := streamGen.Add(1)
 		started := time.Now()
 		err := r.session(ctx, engine, self, gen)
 		engine.Send(self, streamDown{gen: gen})

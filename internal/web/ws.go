@@ -11,6 +11,7 @@ import (
 	"github.com/coder/websocket"
 	"go.uber.org/zap"
 
+	"github.com/ssenerg/gochat/internal/actors"
 	"github.com/ssenerg/gochat/internal/web/gateway"
 )
 
@@ -38,7 +39,8 @@ func (h *Handler) websocket(w http.ResponseWriter, r *http.Request) {
 	ws.SetReadLimit(h.gw.Cfg.ReadLimit)
 	id := h.connSeq.Add(1)
 	call := h.call(r)
-	pid := h.engine.Spawn(gateway.NewSession(h.gw, id, call, ws), "session", actor.WithID(strconv.FormatUint(id, 36)))
+	pid := h.engine.Spawn(gateway.NewSession(h.gw, id, call, ws), "session", actor.WithID(strconv.FormatUint(id, 36)),
+		actor.WithMiddleware(actors.Recover(h.logger)))
 	defer h.engine.Poison(pid)
 	for {
 		typ, data, err := ws.Read(context.Background())

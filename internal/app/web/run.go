@@ -57,7 +57,8 @@ func Run(parent context.Context, cfg *Config) error {
 		return err
 	}
 	events := actors.LogEvents(engine, logger.Named("actors"))
-	router := engine.Spawn(gateway.NewRouter(logger.Named("router"), client, cfg.Gateway), "router", actor.WithID("main"))
+	router := engine.Spawn(gateway.NewRouter(logger.Named("router"), client, cfg.Gateway), "router", actor.WithID("main"),
+		actor.WithMiddleware(actors.Recover(logger)))
 	deps := &gateway.Deps{Logger: logger.Named("session"), Cfg: cfg.Gateway, Client: client, Render: renderer, Router: router}
 
 	handler := web.NewHandler(logger, cfg.Web, client, renderer, engine, deps)

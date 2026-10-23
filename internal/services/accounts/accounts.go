@@ -135,7 +135,10 @@ type Deps struct {
 	Hub      *actor.PID
 	sealer   *secure.Sealer
 	sessions *cache.Cache[string, *models.Principal]
-	failures *limiter
+	// revokedSessions keeps a revoked session's hash for a while, so a lookup
+	// that raced the revocation does not cache it again.
+	revokedSessions *cache.Cache[string, struct{}]
+	failures        *limiter
 }
 
 func NewDeps(logger *zap.Logger, cfg *Config, repo Repo, userCache *users.Cache, engine *actor.Engine, hubPID *actor.PID) (*Deps, error) {
@@ -148,15 +151,16 @@ func NewDeps(logger *zap.Logger, cfg *Config, repo Repo, userCache *users.Cache,
 		return nil, err
 	}
 	return &Deps{
-		Logger:   logger,
-		Cfg:      cfg,
-		Repo:     repo,
-		Users:    userCache,
-		Engine:   engine,
-		Hub:      hubPID,
-		sealer:   sealer,
-		sessions: cache.New[string, *models.Principal](cfg.SessionCacheSize, cfg.SessionCacheTTL),
-		failures: newLimiter(cfg.LoginFailures, cfg.LoginWindow),
+		Logger:          logger,
+		Cfg:             cfg,
+		Repo:            repo,
+		Users:           userCache,
+		Engine:          engine,
+		Hub:             hubPID,
+		sealer:          sealer,
+		sessions:        cache.New[string, *models.Principal](cfg.SessionCacheSize, cfg.SessionCacheTTL),
+		revokedSessions: cache.New[string, struct{}](cfg.SessionCacheSize, cfg.SessionCacheTTL+cfg.OpTimeout),
+		failures:        newLimiter(cfg.LoginFailures, cfg.LoginWindow),
 	}, nil
 }
 
@@ -549,6 +553,10 @@ func (w *worker) authenticate(ctx context.Context, token string) (*models.Princi
 		ExpiresAt:   s.ExpiresAt,
 	}
 	w.sessions.SetUntil(string(hash), p, s.ExpiresAt)
+	if _, ok := w.revokedSessions.Get(string(hash)); ok {
+		w.sessions.Delete(string(hash))
+		return nil, ierrors.Unauthenticated()
+	}
 	return p, nil
 }
 
@@ -568,6 +576,7 @@ func (w *worker) revoked(userID gocql.UUID, hashes [][]byte) {
 	}
 	idList := make([]string, len(hashes))
 	for i, h := range hashes {
+		w.revokedSessions.Set(string(h), struct{}{})
 		w.sessions.Delete(string(h))
 		idList[i] = secure.PublicID(h)
 	}

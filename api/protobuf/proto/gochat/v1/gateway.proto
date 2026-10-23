@@ -52,6 +52,9 @@ message Attached {
 
 message AttachRejected {
   uint64 conn_id = 1;
+  // retry is set when the session may be valid and the attach failed for
+  // another reason.
+  bool retry = 2;
 }
 
 message SessionsRevoked {

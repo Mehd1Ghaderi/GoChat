@@ -36,8 +36,10 @@ type channel struct {
 	typing    map[gocql.UUID]time.Time
 	posters   map[gocql.UUID]*rate.Limiter
 	active    time.Time
+	loaded    bool
 	loadErr   error
 	asked     bool
+	handled   uint64
 	repeater  *actor.SendRepeater
 }
 
@@ -54,7 +56,9 @@ func (a *channel) ctx() (context.Context, context.CancelFunc) {
 func (a *channel) Receive(c *actor.Context) {
 	switch msg := c.Message().(type) {
 	case actor.Started:
-		a.load()
+		// Loading waits for the first request: Started runs on the
+		// manager's goroutine.
+		a.active = time.Now()
 		r := c.SendRepeat(c.PID(), idleCheck{}, a.Cfg.IdleTimeout/2)
 		a.repeater = &r
 		return
@@ -72,6 +76,12 @@ func (a *channel) Receive(c *actor.Context) {
 		return
 	case Request:
 		a.active = time.Now()
+		a.handled++
+		a.asked = false
+		if !a.loaded {
+			a.loaded = true
+			a.load()
+		}
 		if a.loadErr != nil {
 			actors.Reply(c, a.loadErr)
 			a.passivate(c)
@@ -84,14 +94,13 @@ func (a *channel) Receive(c *actor.Context) {
 func (a *channel) passivate(c *actor.Context) {
 	if !a.asked {
 		a.asked = true
-		c.Send(c.Parent(), passivate{id: a.id, pid: c.PID()})
+		c.Send(c.Parent(), passivate{id: a.id, pid: c.PID(), handled: a.handled})
 	}
 }
 
 func (a *channel) load() {
 	ctx, cancel := a.ctx()
 	defer cancel()
-	a.active = time.Now()
 	a.typing = make(map[gocql.UUID]time.Time)
 	a.posters = make(map[gocql.UUID]*rate.Limiter)
 	ch, err := a.Repo.GetChannel(ctx, a.id)

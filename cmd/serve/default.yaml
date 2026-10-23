@@ -28,6 +28,7 @@ server:
     max_message_size: 4194304
     max_connections: 4096
     inactivity_timeout: 5m
+    write_timeout: 30s
     request_timeout: 15s
     shutdown_timeout: 15s
   admin:

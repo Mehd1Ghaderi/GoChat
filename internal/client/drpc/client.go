@@ -19,6 +19,7 @@ import (
 
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
 	ierrors "github.com/ssenerg/gochat/internal/errors"
+	"github.com/ssenerg/gochat/internal/utils"
 )
 
 // The metadata the server reads; see the server's drpc package.
@@ -104,7 +105,7 @@ func (c *Client) dial(ctx context.Context, addr string) (*drpcconn.Conn, error) 
 	if err != nil {
 		return nil, err
 	}
-	return drpcconn.NewWithOptions(raw, drpcconn.Options{
+	return drpcconn.NewWithOptions(utils.WriteTimeoutConn(raw, c.cfg.WriteTimeout), drpcconn.Options{
 		Manager: drpcmanager.Options{Reader: drpcwire.ReaderOptions{MaximumBufferSize: c.cfg.MaxMessageSize}},
 	}), nil
 }

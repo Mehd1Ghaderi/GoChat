@@ -78,13 +78,15 @@ func (s *fileService) Upload(stream pb.DRPCFileService_UploadStream) error {
 	contentType := http.DetectContentType(head.Bytes())
 
 	pr, pw := io.Pipe()
-	stored := make(chan error, 1)
-	var n int64
+	stored := make(chan struct{})
+	var (
+		n      int64
+		putErr error
+	)
 	go func() {
-		written, err := s.storage.Put(ctx, up.ObjectKey, pr, contentType)
-		n = written
-		_ = pr.CloseWithError(err)
-		stored <- err
+		defer close(stored)
+		n, putErr = s.storage.Put(ctx, up.ObjectKey, pr, contentType)
+		_ = pr.CloseWithError(putErr)
 	}()
 	abort := func(cause error) error {
 		_ = pw.CloseWithError(cause)
@@ -114,8 +116,9 @@ func (s *fileService) Upload(stream pb.DRPCFileService_UploadStream) error {
 		}
 	}
 	_ = pw.Close()
-	if err := <-stored; err != nil {
-		return abort(ierrors.Internal(err))
+	<-stored
+	if putErr != nil {
+		return abort(ierrors.Internal(putErr))
 	}
 	if n != size {
 		return abort(ierrors.Internal(errors.New("stored size differs from received size")))
@@ -199,10 +202,12 @@ func (s *gatewayService) Connect(stream pb.DRPCGatewayService_ConnectStream) err
 	// Each stream is its own hub entry, so a reconnecting gateway never
 	// races the teardown of its previous stream.
 	key := hello.GatewayId + "#" + strconv.FormatUint(streamSeq.Add(1), 36)
+	// Unregistering also covers a registration the hub handles after the Ask
+	// gave up on it.
+	defer s.sys.Engine.Send(s.sys.Hub, hub.UnregisterGateway{ID: key})
 	if _, err := actors.Ask[hub.Registered](ctx, s.sys.Engine, s.sys.Hub, hub.RegisterGateway{ID: key, Stream: stream}); err != nil {
 		return err
 	}
-	defer s.sys.Engine.Send(s.sys.Hub, hub.UnregisterGateway{ID: key})
 
 	for {
 		req, err := stream.Recv()
@@ -222,22 +227,27 @@ func (s *gatewayService) Connect(stream pb.DRPCGatewayService_ConnectStream) err
 }
 
 func (s *gatewayService) attach(ctx context.Context, key string, a *pb.Attach) {
-	reject := func() { s.sys.Engine.Send(s.sys.Hub, hub.Reject{GatewayID: key, ConnID: a.ConnId}) }
+	// A failure that is not about the session asks the browser to retry
+	// rather than to sign in again.
+	reject := func(err error) {
+		retry := err != nil && !ierrors.Is(err, ierrors.CodeUnauthenticated) && !ierrors.Is(err, ierrors.CodeNotFound)
+		s.sys.Engine.Send(s.sys.Hub, hub.Reject{GatewayID: key, ConnID: a.ConnId, Retry: retry})
+	}
 	if !secure.ValidToken(a.SessionToken) {
-		reject()
+		reject(nil)
 		return
 	}
 	p, ok := s.sys.Sessions.Cached(a.SessionToken)
 	if !ok {
 		var err error
 		if p, err = actors.Ask[*models.Principal](ctx, s.sys.Engine, s.sys.Accounts, accounts.Authenticate{Token: a.SessionToken}); err != nil {
-			reject()
+			reject(err)
 			return
 		}
 	}
 	u, err := s.sys.Users.Get(ctx, p.UserID)
 	if err != nil {
-		reject()
+		reject(err)
 		return
 	}
 	s.sys.Engine.Send(s.sys.Hub, hub.Attach{GatewayID: key, ConnID: a.ConnId, User: convert.User(u), SessionID: p.SessionID})

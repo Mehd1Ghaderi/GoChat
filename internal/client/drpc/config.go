@@ -9,10 +9,12 @@ import (
 )
 
 type Config struct {
-	Address        string        `mapstructure:"address"`
-	GatewayKey     string        `mapstructure:"gateway_key"`
-	TLS            *TLSConfig    `mapstructure:"tls"`
-	DialTimeout    time.Duration `mapstructure:"dial_timeout"`
+	Address     string        `mapstructure:"address"`
+	GatewayKey  string        `mapstructure:"gateway_key"`
+	TLS         *TLSConfig    `mapstructure:"tls"`
+	DialTimeout time.Duration `mapstructure:"dial_timeout"`
+	// WriteTimeout bounds how long a write to the server may stall.
+	WriteTimeout   time.Duration `mapstructure:"write_timeout"`
 	RequestTimeout time.Duration `mapstructure:"request_timeout"`
 	PoolCapacity   int           `mapstructure:"pool_capacity"`
 	// PoolExpiration must stay below the server's inactivity_timeout.
@@ -43,7 +45,7 @@ func (c *Config) Validate() error {
 	if c.TLS.Enabled && (c.TLS.CertFile == "") != (c.TLS.KeyFile == "") {
 		return errors.New("tls.cert_file and tls.key_file go together")
 	}
-	if c.DialTimeout <= 0 || c.RequestTimeout <= 0 || c.PoolExpiration <= 0 {
+	if c.DialTimeout <= 0 || c.WriteTimeout <= 0 || c.RequestTimeout <= 0 || c.PoolExpiration <= 0 {
 		return errors.New("timeouts must be positive")
 	}
 	if c.PoolCapacity < 1 {

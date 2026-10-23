@@ -12,6 +12,7 @@ import (
 	"github.com/gocql/gocql"
 	"go.uber.org/zap"
 
+	"github.com/ssenerg/gochat/internal/actors"
 	"github.com/ssenerg/gochat/internal/authz"
 	"github.com/ssenerg/gochat/internal/core/models"
 	"github.com/ssenerg/gochat/internal/repos/scylla"
@@ -53,41 +54,52 @@ type Deps struct {
 	Hub     *actor.PID
 }
 
+// passivate asks to stop an idle channel actor that has handled requests.
 type passivate struct {
-	id  gocql.UUID
-	pid *actor.PID
+	id      gocql.UUID
+	pid     *actor.PID
+	handled uint64
+}
+
+type child struct {
+	pid    *actor.PID
+	routed uint64
 }
 
 type manager struct {
 	*Deps
-	children map[gocql.UUID]*actor.PID
+	children map[gocql.UUID]*child
 	gen      uint64
 }
 
 func New(d *Deps) actor.Producer {
 	return func() actor.Receiver {
-		return &manager{Deps: d, children: make(map[gocql.UUID]*actor.PID)}
+		return &manager{Deps: d, children: make(map[gocql.UUID]*child)}
 	}
 }
 
 func (m *manager) Receive(c *actor.Context) {
 	switch msg := c.Message().(type) {
 	case passivate:
-		if pid, ok := m.children[msg.id]; ok && pid.Equals(msg.pid) {
+		// A child stops only once it has handled every request routed to it;
+		// a successor must never run beside it.
+		if ch, ok := m.children[msg.id]; ok && ch.pid.Equals(msg.pid) && ch.routed == msg.handled {
 			delete(m.children, msg.id)
-			c.Engine().Poison(pid)
+			c.Engine().Poison(ch.pid)
 		}
 	case Request:
 		id := msg.channel()
-		pid, ok := m.children[id]
+		ch, ok := m.children[id]
 		// A child that exhausted its restarts is gone from the context.
-		if !ok || c.Child(pid.ID) == nil {
+		if !ok || c.Child(ch.pid.ID) == nil {
 			m.gen++
-			pid = c.SpawnChild(newChannel(m.Deps, id), "channel",
+			ch = &child{pid: c.SpawnChild(newChannel(m.Deps, id), "channel",
 				actor.WithID(id.String()+"."+strconv.FormatUint(m.gen, 36)),
-				actor.WithInboxSize(256))
-			m.children[id] = pid
+				actor.WithInboxSize(256),
+				actor.WithMiddleware(actors.Recover(m.Logger)))}
+			m.children[id] = ch
 		}
-		c.Engine().SendWithSender(pid, msg, c.Sender())
+		ch.routed++
+		c.Engine().SendWithSender(ch.pid, msg, c.Sender())
 	}
 }

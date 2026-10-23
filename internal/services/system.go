@@ -44,17 +44,20 @@ func Start(logger *zap.Logger, cfg *Config, repo *scylla.Repository, storage *mi
 	userCache := s.Users
 	s.events = actors.LogEvents(engine, logger.Named("actors"))
 
-	s.Hub = engine.Spawn(hub.New(logger.Named("hub"), cfg.Hub), "hub", actor.WithID("main"))
+	// Stateful actors survive a panic in one message instead of restarting
+	// with their state lost.
+	recovered := actor.WithMiddleware(actors.Recover(logger))
+	s.Hub = engine.Spawn(hub.New(logger.Named("hub"), cfg.Hub), "hub", actor.WithID("main"), recovered)
 	s.Channels = engine.Spawn(channels.New(&channels.Deps{
 		Logger: logger.Named("channels"), Cfg: cfg.Channels, Repo: repo, Storage: storage,
 		Authz: az, Users: userCache, Engine: engine, Hub: s.Hub,
-	}), "channels", actor.WithID("main"))
+	}), "channels", actor.WithID("main"), recovered)
 	fileDeps := &files.Deps{
 		Logger: logger.Named("files"), Cfg: cfg.Files, Repo: repo, Storage: storage,
 		Authz: az, Engine: engine, Channels: s.Channels,
 	}
 	s.Files = engine.Spawn(files.Pool(fileDeps), "files", actor.WithID("main"))
-	s.janitor = engine.Spawn(files.Janitor(fileDeps), "janitor", actor.WithID("main"))
+	s.janitor = engine.Spawn(files.Janitor(fileDeps), "janitor", actor.WithID("main"), recovered)
 	s.Directory = engine.Spawn(directory.Pool(&directory.Deps{
 		Logger: logger.Named("directory"), Cfg: cfg.Directory, Repo: repo, Authz: az,
 		Users: userCache, Engine: engine, Hub: s.Hub, Channels: s.Channels,

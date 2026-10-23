@@ -486,8 +486,11 @@ func (x *Attached) GetSessionId() string {
 }
 
 type AttachRejected struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ConnId        uint64                 `protobuf:"varint,1,opt,name=conn_id,json=connId,proto3" json:"conn_id,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	ConnId uint64                 `protobuf:"varint,1,opt,name=conn_id,json=connId,proto3" json:"conn_id,omitempty"`
+	// retry is set when the session may be valid and the attach failed for
+	// another reason.
+	Retry         bool `protobuf:"varint,2,opt,name=retry,proto3" json:"retry,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -527,6 +530,13 @@ func (x *AttachRejected) GetConnId() uint64 {
 		return x.ConnId
 	}
 	return 0
+}
+
+func (x *AttachRejected) GetRetry() bool {
+	if x != nil {
+		return x.Retry
+	}
+	return false
 }
 
 type SessionsRevoked struct {
@@ -1242,9 +1252,10 @@ const file_gochat_v1_gateway_proto_rawDesc = "" +
 	"\aconn_id\x18\x01 \x01(\x04R\x06connId\x12#\n" +
 	"\x04user\x18\x02 \x01(\v2\x0f.gochat.v1.UserR\x04user\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x03 \x01(\tR\tsessionId\")\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\"?\n" +
 	"\x0eAttachRejected\x12\x17\n" +
-	"\aconn_id\x18\x01 \x01(\x04R\x06connId\"2\n" +
+	"\aconn_id\x18\x01 \x01(\x04R\x06connId\x12\x14\n" +
+	"\x05retry\x18\x02 \x01(\bR\x05retry\"2\n" +
 	"\x0fSessionsRevoked\x12\x1f\n" +
 	"\vsession_ids\x18\x01 \x03(\tR\n" +
 	"sessionIds\"\xe5\x04\n" +
