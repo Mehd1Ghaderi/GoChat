@@ -1,0 +1,113 @@
+logging:
+  console:
+    enabled: true
+    level: info
+    format: json
+  file:
+    enabled: false
+    name: server
+    level: debug
+    format: json
+    folder: .logs
+    max_size: 10
+    max_age: 7
+    max_backups: 10
+    compress: false
+  version: false
+
+server:
+  drpc:
+    address: "0.0.0.0:7070"
+    # Shared with every web gateway; at least 32 characters.
+    gateway_key: ""
+    tls:
+      enabled: false
+      cert_file: ""
+      key_file: ""
+      client_ca_file: ""
+    max_message_size: 4194304
+    max_connections: 4096
+    inactivity_timeout: 5m
+    request_timeout: 15s
+    shutdown_timeout: 15s
+  admin:
+    enabled: true
+    address: "0.0.0.0:9100"
+    shutdown_timeout: 5s
+
+database:
+  scylla:
+    hosts:
+      - localhost:9042
+    keyspace: gochat
+    username: ""
+    password: ""
+    local_dc: ""
+    consistency: local_quorum
+    serial_consistency: local_serial
+    timeout: 5s
+    connect_timeout: 10s
+    num_conns: 2
+    replication: "{'class': 'NetworkTopologyStrategy', 'replication_factor': 3}"
+    tls:
+      enabled: false
+      ca_file: ""
+      cert_file: ""
+      key_file: ""
+
+storage:
+  minio:
+    endpoint: localhost:9000
+    access_key: ""
+    secret_key: ""
+    bucket: gochat-attachments
+    region: us-east-1
+    use_ssl: false
+    part_size: 8388608
+
+services:
+  accounts:
+    workers: 8
+    op_timeout: 10s
+    password:
+      time: 2
+      memory_kib: 19456
+      threads: 1
+    min_password_length: 10
+    session_ttl: 720h
+    session_cache_ttl: 1m
+    session_cache_size: 100000
+    mfa_ttl: 5m
+    mfa_max_attempts: 5
+    totp_issuer: GoChat
+    # Seals TOTP secrets at rest: 32 random bytes, base64.
+    secret_key: ""
+    open_signup: false
+    login_failures: 10
+    login_window: 15m
+  directory:
+    workers: 16
+    op_timeout: 10s
+    invite_ttl: 168h
+  channels:
+    idle_timeout: 10m
+    op_timeout: 10s
+    max_message_length: 16000
+    max_attachments: 10
+    history_limit: 100
+    typing_interval: 3s
+    post_rate: 5
+    post_burst: 20
+  files:
+    workers: 8
+    op_timeout: 30s
+    max_size: 52428800
+    max_uploads: 64
+    orphan_after: 24h
+    janitor_interval: 1h
+  hub:
+    gateway_queue_limit: 65536
+    presence_grace: 10s
+  users:
+    cache_size: 100000
+    cache_ttl: 1m

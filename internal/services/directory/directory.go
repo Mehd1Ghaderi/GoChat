@@ -1,0 +1,841 @@
+// Package directory answers who belongs where: teams and their one-time
+// invites, the channels a person sees, direct conversations and profiles.
+// It runs as a pool of workers; membership changes of an existing channel go
+// through that channel's actor.
+package directory
+
+import (
+	"cmp"
+	"context"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/anthdm/hollywood/actor"
+	"github.com/gocql/gocql"
+	"go.uber.org/zap"
+
+	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
+	"github.com/ssenerg/gochat/internal/actors"
+	"github.com/ssenerg/gochat/internal/authz"
+	"github.com/ssenerg/gochat/internal/core/ids"
+	"github.com/ssenerg/gochat/internal/core/models"
+	"github.com/ssenerg/gochat/internal/core/secure"
+	"github.com/ssenerg/gochat/internal/core/validate"
+	ierrors "github.com/ssenerg/gochat/internal/errors"
+	"github.com/ssenerg/gochat/internal/repos/scylla"
+	"github.com/ssenerg/gochat/internal/services/channels"
+	"github.com/ssenerg/gochat/internal/services/convert"
+	"github.com/ssenerg/gochat/internal/services/hub"
+	"github.com/ssenerg/gochat/internal/services/users"
+)
+
+type Repo interface {
+	GetUser(ctx context.Context, id gocql.UUID) (*models.User, error)
+	UpdateDisplayName(ctx context.Context, id gocql.UUID, name string, now time.Time) error
+	UpdateMemberDisplayName(ctx context.Context, userID gocql.UUID, name string) error
+
+	CreateTeam(ctx context.Context, t *models.Team) error
+	GetTeam(ctx context.Context, id gocql.UUID) (*models.Team, error)
+	GetTeamIDByName(ctx context.Context, name string) (gocql.UUID, error)
+	GetTeams(ctx context.Context, ids []gocql.UUID) ([]*models.Team, error)
+	AddTeamMember(ctx context.Context, m *models.TeamMember, username, displayName string) error
+	GetTeamMember(ctx context.Context, teamID, userID gocql.UUID) (*models.TeamMember, error)
+	ListTeamMembers(ctx context.Context, teamID gocql.UUID) ([]*scylla.TeamMemberEntry, error)
+	ListUserTeams(ctx context.Context, userID gocql.UUID) ([]*models.TeamMember, error)
+	RemoveTeamMember(ctx context.Context, teamID, userID gocql.UUID) error
+	UpdateTeamMemberRole(ctx context.Context, teamID, userID gocql.UUID, role models.TeamRole) error
+	CreateInvite(ctx context.Context, inv *models.Invite) error
+	GetInvite(ctx context.Context, hash []byte) (*models.Invite, error)
+	ConsumeInvite(ctx context.Context, inv *models.Invite, userID gocql.UUID, now time.Time) (bool, error)
+	ReleaseInvite(ctx context.Context, inv *models.Invite, userID gocql.UUID, now time.Time) error
+
+	CreateChannel(ctx context.Context, ch *models.Channel, creator *models.ChannelMember) error
+	CreateDirectChannel(ctx context.Context, pair string, ch *models.Channel, members []*models.ChannelMember) (gocql.UUID, error)
+	GetChannels(ctx context.Context, ids []gocql.UUID) ([]*models.Channel, error)
+	GetChannelIDByName(ctx context.Context, teamID gocql.UUID, name string) (gocql.UUID, error)
+	ListTeamChannels(ctx context.Context, teamID gocql.UUID) ([]*scylla.TeamChannel, error)
+	ListUserChannels(ctx context.Context, userID, teamID gocql.UUID) ([]*models.ChannelMember, error)
+	ListLastReads(ctx context.Context, userID gocql.UUID) ([]*scylla.ChannelRead, error)
+}
+
+type Deps struct {
+	Logger   *zap.Logger
+	Cfg      *Config
+	Repo     Repo
+	Authz    *authz.Authorizer
+	Users    *users.Cache
+	Engine   *actor.Engine
+	Hub      *actor.PID
+	Channels *actor.PID
+}
+
+// The channels every team starts with and every member joins.
+var defaultChannels = []struct{ name, display, purpose string }{
+	{channels.DefaultChannel, "Town Square", "Everyone in the team"},
+	{"off-topic", "Off-Topic", "Anything that is not work"},
+}
+
+func Pool(d *Deps) actor.Producer {
+	return actors.NewPool(d.Cfg.Workers, func() actor.Receiver { return &worker{Deps: d} },
+		actor.WithMiddleware(actors.Recover(d.Logger)))
+}
+
+type worker struct{ *Deps }
+
+func (w *worker) Receive(c *actor.Context) {
+	ctx, cancel := context.WithTimeout(context.Background(), w.Cfg.OpTimeout)
+	defer cancel()
+	var (
+		out any
+		err error
+	)
+	switch msg := c.Message().(type) {
+	case CreateTeam:
+		out, err = w.createTeam(ctx, msg)
+	case ListTeams:
+		out, err = w.listTeams(ctx, msg.P)
+	case GetTeam:
+		out, err = w.getTeam(ctx, msg)
+	case ListTeamMembers:
+		out, err = w.listTeamMembers(ctx, msg)
+	case RemoveTeamMember:
+		out, err = w.removeTeamMember(ctx, msg)
+	case UpdateTeamMemberRole:
+		out, err = w.updateTeamMemberRole(ctx, msg)
+	case CreateInvite:
+		out, err = w.createInvite(ctx, msg)
+	case GetInvite:
+		out, err = w.getInvite(ctx, msg.Token)
+	case AcceptInvite:
+		out, err = w.acceptInvite(ctx, msg)
+	case JoinTeam:
+		out, err = w.joinTeam(ctx, msg.UserID, msg.TeamID)
+	case ListChannels:
+		out, err = w.listChannels(ctx, msg)
+	case BrowseChannels:
+		out, err = w.browseChannels(ctx, msg)
+	case CreateChannel:
+		out, err = w.createChannel(ctx, msg)
+	case OpenDirect:
+		out, err = w.openDirect(ctx, msg)
+	case GetUser:
+		out, err = w.getUser(ctx, msg)
+	case UpdateProfile:
+		out, err = w.updateProfile(ctx, msg)
+	case Me:
+		out, err = w.me(ctx, msg.P)
+	case Presence:
+		out, err = w.presence(ctx, msg)
+	default:
+		return
+	}
+	if err != nil {
+		if e := ierrors.As(err); e.Code == ierrors.CodeInternal {
+			w.Logger.Error("directory request failed", e.Fields()...)
+		}
+		actors.Reply(c, err)
+		return
+	}
+	actors.Reply(c, out)
+}
+
+func parseID(s, what string) (gocql.UUID, error) {
+	id, ok := ids.Parse(s)
+	if !ok {
+		return gocql.UUID{}, ierrors.InvalidArgument("invalid " + what + " id")
+	}
+	return id, nil
+}
+
+var errNoTeam = ierrors.NotFound("team not found")
+
+// membership returns the caller's membership of teamID, hiding teams the
+// caller does not belong to.
+func (w *worker) membership(ctx context.Context, teamID, userID gocql.UUID) (*models.TeamMember, error) {
+	m, err := w.Repo.GetTeamMember(ctx, teamID, userID)
+	if err != nil {
+		if ierrors.Is(err, ierrors.CodeNotFound) {
+			return nil, errNoTeam
+		}
+		return nil, err
+	}
+	return m, nil
+}
+
+func (w *worker) deliver(userID gocql.UUID, ev *pb.Event) {
+	w.Engine.Send(w.Hub, hub.Deliver{UserIDs: []string{userID.String()}, Event: ev})
+}
+
+func (w *worker) createTeam(ctx context.Context, msg CreateTeam) (*pb.Team, error) {
+	if !w.Authz.Can(authz.ObjTeam, authz.ActCreate, string(msg.P.Role)) {
+		return nil, ierrors.PermissionDenied()
+	}
+	name, err := validate.Slug(msg.Name)
+	if err != nil {
+		return nil, err
+	}
+	display, err := validate.Line("display name", msg.DisplayName, 1, 64)
+	if err != nil {
+		return nil, err
+	}
+	desc, err := validate.Line("description", msg.Description, 0, 250)
+	if err != nil {
+		return nil, err
+	}
+	creator, err := w.Users.Get(ctx, msg.P.UserID)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	team := &models.Team{ID: ids.New(), Name: name, DisplayName: display, Description: desc, CreatedBy: creator.ID, CreatedAt: now}
+	if err := w.Repo.CreateTeam(ctx, team); err != nil {
+		return nil, err
+	}
+	member := &models.TeamMember{TeamID: team.ID, UserID: creator.ID, Role: models.TeamRoleAdmin, JoinedAt: now}
+	if err := w.Repo.AddTeamMember(ctx, member, creator.Username, creator.DisplayName); err != nil {
+		return nil, err
+	}
+	for _, dc := range defaultChannels {
+		ch := &models.Channel{
+			ID: ids.New(), TeamID: team.ID, Name: dc.name, DisplayName: dc.display, Purpose: dc.purpose,
+			Kind: models.ChannelPublic, CreatedBy: creator.ID, CreatedAt: now,
+		}
+		cm := &models.ChannelMember{ChannelID: ch.ID, UserID: creator.ID, TeamID: team.ID, Role: models.ChannelRoleAdmin, JoinedAt: now}
+		if err := w.Repo.CreateChannel(ctx, ch, cm); err != nil {
+			return nil, err
+		}
+	}
+	out := convert.Team(team, models.TeamRoleAdmin)
+	w.deliver(creator.ID, &pb.Event{Payload: &pb.Event_TeamJoined{TeamJoined: &pb.TeamJoined{Team: out}}})
+	w.Logger.Info("team created", zap.String("team", team.ID.String()), zap.String("by", creator.ID.String()))
+	return out, nil
+}
+
+func (w *worker) teams(ctx context.Context, memberships []*models.TeamMember) ([]*pb.Team, error) {
+	roles := make(map[gocql.UUID]models.TeamRole, len(memberships))
+	teamIDs := make([]gocql.UUID, 0, len(memberships))
+	for _, m := range memberships {
+		roles[m.TeamID] = m.Role
+		teamIDs = append(teamIDs, m.TeamID)
+	}
+	out := make([]*pb.Team, 0, len(teamIDs))
+	for start := 0; start < len(teamIDs); start += 100 {
+		found, err := w.Repo.GetTeams(ctx, teamIDs[start:min(start+100, len(teamIDs))])
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range found {
+			out = append(out, convert.Team(t, roles[t.ID]))
+		}
+	}
+	slices.SortFunc(out, func(a, b *pb.Team) int {
+		return cmp.Compare(strings.ToLower(a.DisplayName), strings.ToLower(b.DisplayName))
+	})
+	return out, nil
+}
+
+func (w *worker) listTeams(ctx context.Context, p *models.Principal) ([]*pb.Team, error) {
+	memberships, err := w.Repo.ListUserTeams(ctx, p.UserID)
+	if err != nil {
+		return nil, err
+	}
+	return w.teams(ctx, memberships)
+}
+
+func (w *worker) getTeam(ctx context.Context, msg GetTeam) (*pb.Team, error) {
+	var (
+		teamID gocql.UUID
+		err    error
+	)
+	if msg.Name != "" {
+		name, verr := validate.Slug(msg.Name)
+		if verr != nil {
+			return nil, errNoTeam
+		}
+		if teamID, err = w.Repo.GetTeamIDByName(ctx, name); err != nil {
+			if ierrors.Is(err, ierrors.CodeNotFound) {
+				return nil, errNoTeam
+			}
+			return nil, err
+		}
+	} else if teamID, err = parseID(msg.ID, "team"); err != nil {
+		return nil, err
+	}
+	m, err := w.membership(ctx, teamID, msg.P.UserID)
+	if err != nil {
+		return nil, err
+	}
+	team, err := w.Repo.GetTeam(ctx, teamID)
+	if err != nil {
+		return nil, err
+	}
+	return convert.Team(team, m.Role), nil
+}
+
+func (w *worker) listTeamMembers(ctx context.Context, msg ListTeamMembers) ([]*pb.TeamMember, error) {
+	teamID, err := parseID(msg.TeamID, "team")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := w.membership(ctx, teamID, msg.P.UserID); err != nil {
+		return nil, err
+	}
+	entries, err := w.Repo.ListTeamMembers(ctx, teamID)
+	if err != nil {
+		return nil, err
+	}
+	query := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(msg.Query, "@")))
+	limit := msg.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	slices.SortFunc(entries, func(a, b *scylla.TeamMemberEntry) int { return cmp.Compare(a.Username, b.Username) })
+	out := make([]*pb.TeamMember, 0, min(limit, len(entries)))
+	for _, e := range entries {
+		if query != "" && !strings.HasPrefix(e.Username, query) && !strings.HasPrefix(strings.ToLower(e.DisplayName), query) {
+			continue
+		}
+		out = append(out, &pb.TeamMember{
+			User:     &pb.User{Id: e.UserID.String(), Username: e.Username, DisplayName: e.DisplayName},
+			Role:     convert.TeamRole(e.Role),
+			JoinedAt: convert.Time(e.JoinedAt),
+		})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+// manage checks the caller may act on another member of teamID.
+func (w *worker) manage(ctx context.Context, p *models.Principal, teamID gocql.UUID, act authz.Action) error {
+	m, err := w.membership(ctx, teamID, p.UserID)
+	if err != nil && p.Role != models.SystemRoleAdmin {
+		return err
+	}
+	var role string
+	if m != nil {
+		role = string(m.Role)
+	}
+	if !w.Authz.Can(authz.ObjTeamMember, act, role, string(p.Role)) {
+		return ierrors.PermissionDenied()
+	}
+	return nil
+}
+
+func (w *worker) removeTeamMember(ctx context.Context, msg RemoveTeamMember) (Done, error) {
+	teamID, err := parseID(msg.TeamID, "team")
+	if err != nil {
+		return Done{}, err
+	}
+	target, err := parseID(msg.UserID, "user")
+	if err != nil {
+		return Done{}, err
+	}
+	if target == msg.P.UserID {
+		return Done{}, ierrors.FailedPrecondition("you cannot remove yourself")
+	}
+	if err := w.manage(ctx, msg.P, teamID, authz.ActRemove); err != nil {
+		return Done{}, err
+	}
+	if _, err := w.membership(ctx, teamID, target); err != nil {
+		return Done{}, ierrors.NotFound("not a member")
+	}
+	memberships, err := w.Repo.ListUserChannels(ctx, target, teamID)
+	if err != nil {
+		return Done{}, err
+	}
+	for _, cm := range memberships {
+		req := channels.RemoveMember{Target: channels.Target{P: msg.P, ChannelID: cm.ChannelID}, UserID: target, System: true}
+		if _, err := actors.Ask[channels.Done](ctx, w.Engine, w.Channels, req); err != nil {
+			return Done{}, err
+		}
+	}
+	if err := w.Repo.RemoveTeamMember(ctx, teamID, target); err != nil {
+		return Done{}, err
+	}
+	w.deliver(target, &pb.Event{Payload: &pb.Event_TeamLeft{TeamLeft: &pb.TeamLeft{TeamId: teamID.String()}}})
+	return Done{}, nil
+}
+
+func (w *worker) updateTeamMemberRole(ctx context.Context, msg UpdateTeamMemberRole) (Done, error) {
+	teamID, err := parseID(msg.TeamID, "team")
+	if err != nil {
+		return Done{}, err
+	}
+	target, err := parseID(msg.UserID, "user")
+	if err != nil {
+		return Done{}, err
+	}
+	if err := w.manage(ctx, msg.P, teamID, authz.ActUpdateRole); err != nil {
+		return Done{}, err
+	}
+	current, err := w.membership(ctx, teamID, target)
+	if err != nil {
+		return Done{}, ierrors.NotFound("not a member")
+	}
+	if current.Role == msg.Role {
+		return Done{}, nil
+	}
+	if current.Role == models.TeamRoleAdmin {
+		entries, err := w.Repo.ListTeamMembers(ctx, teamID)
+		if err != nil {
+			return Done{}, err
+		}
+		admins := 0
+		for _, e := range entries {
+			if e.Role == models.TeamRoleAdmin {
+				admins++
+			}
+		}
+		if admins <= 1 {
+			return Done{}, ierrors.FailedPrecondition("a team needs at least one admin")
+		}
+	}
+	return Done{}, w.Repo.UpdateTeamMemberRole(ctx, teamID, target, msg.Role)
+}
+
+func (w *worker) createInvite(ctx context.Context, msg CreateInvite) (*Invite, error) {
+	teamID, err := parseID(msg.TeamID, "team")
+	if err != nil {
+		return nil, err
+	}
+	m, err := w.membership(ctx, teamID, msg.P.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if !w.Authz.Can(authz.ObjInvite, authz.ActCreate, string(m.Role), string(msg.P.Role)) {
+		return nil, ierrors.PermissionDenied()
+	}
+	token := secure.Token()
+	now := time.Now().UTC()
+	inv := &models.Invite{
+		TokenHash: secure.Hash(token),
+		TeamID:    teamID,
+		CreatedBy: msg.P.UserID,
+		CreatedAt: now,
+		ExpiresAt: now.Add(w.Cfg.InviteTTL),
+	}
+	if err := w.Repo.CreateInvite(ctx, inv); err != nil {
+		return nil, err
+	}
+	return &Invite{Token: token, ExpiresAt: inv.ExpiresAt}, nil
+}
+
+var errBadInvite = ierrors.NotFound("invite is invalid or expired")
+
+func (w *worker) validInvite(ctx context.Context, token string) (*models.Invite, error) {
+	if !secure.ValidToken(token) {
+		return nil, errBadInvite
+	}
+	inv, err := w.Repo.GetInvite(ctx, secure.Hash(token))
+	if err != nil {
+		if ierrors.Is(err, ierrors.CodeNotFound) {
+			return nil, errBadInvite
+		}
+		return nil, err
+	}
+	if !ids.IsZero(inv.UsedBy) || !time.Now().Before(inv.ExpiresAt) {
+		return nil, errBadInvite
+	}
+	return inv, nil
+}
+
+func (w *worker) getInvite(ctx context.Context, token string) (*InviteInfo, error) {
+	inv, err := w.validInvite(ctx, token)
+	if err != nil {
+		if ierrors.Is(err, ierrors.CodeNotFound) {
+			return &InviteInfo{}, nil
+		}
+		return nil, err
+	}
+	team, err := w.Repo.GetTeam(ctx, inv.TeamID)
+	if err != nil {
+		if ierrors.Is(err, ierrors.CodeNotFound) {
+			return &InviteInfo{}, nil
+		}
+		return nil, err
+	}
+	return &InviteInfo{Valid: true, TeamDisplayName: team.DisplayName}, nil
+}
+
+func (w *worker) acceptInvite(ctx context.Context, msg AcceptInvite) (*pb.Team, error) {
+	inv, err := w.validInvite(ctx, msg.Token)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := w.Repo.GetTeamMember(ctx, inv.TeamID, msg.P.UserID); err == nil {
+		// Already a member: the invite stays unused for someone else.
+		return w.joinTeam(ctx, msg.P.UserID, inv.TeamID)
+	}
+	now := time.Now().UTC()
+	ok, err := w.Repo.ConsumeInvite(ctx, inv, msg.P.UserID, now)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errBadInvite
+	}
+	team, err := w.joinTeam(ctx, msg.P.UserID, inv.TeamID)
+	if err != nil {
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = w.Repo.ReleaseInvite(c, inv, msg.P.UserID, time.Now())
+		return nil, err
+	}
+	return team, nil
+}
+
+// joinTeam makes userID a member of teamID and of its default channels.
+func (w *worker) joinTeam(ctx context.Context, userID, teamID gocql.UUID) (*pb.Team, error) {
+	team, err := w.Repo.GetTeam(ctx, teamID)
+	if err != nil {
+		return nil, err
+	}
+	if m, err := w.Repo.GetTeamMember(ctx, teamID, userID); err == nil {
+		return convert.Team(team, m.Role), nil
+	}
+	user, err := w.Users.Get(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	member := &models.TeamMember{TeamID: teamID, UserID: userID, Role: models.TeamRoleMember, JoinedAt: time.Now().UTC()}
+	if err := w.Repo.AddTeamMember(ctx, member, user.Username, user.DisplayName); err != nil {
+		return nil, err
+	}
+	p := &models.Principal{UserID: userID, Role: user.Role}
+	for _, dc := range defaultChannels {
+		chID, err := w.Repo.GetChannelIDByName(ctx, teamID, dc.name)
+		if err != nil {
+			if ierrors.Is(err, ierrors.CodeNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		join := channels.Join{Target: channels.Target{P: p, ChannelID: chID}, System: true}
+		if _, err := actors.Ask[*pb.Channel](ctx, w.Engine, w.Channels, join); err != nil {
+			return nil, err
+		}
+	}
+	out := convert.Team(team, models.TeamRoleMember)
+	w.deliver(userID, &pb.Event{Payload: &pb.Event_TeamJoined{TeamJoined: &pb.TeamJoined{Team: out}}})
+	return out, nil
+}
+
+func directPair(a, b gocql.UUID) string {
+	x, y := a.String(), b.String()
+	if x > y {
+		x, y = y, x
+	}
+	return x + ":" + y
+}
+
+// peerOf returns the other side of a direct channel, whose name is its pair.
+func peerOf(ch *models.Channel, self gocql.UUID) (gocql.UUID, bool) {
+	left, right, ok := strings.Cut(ch.Name, ":")
+	if !ok {
+		return gocql.UUID{}, false
+	}
+	other := left
+	if left == self.String() {
+		other = right
+	}
+	return ids.Parse(other)
+}
+
+func (w *worker) listChannels(ctx context.Context, msg ListChannels) ([]*pb.Channel, error) {
+	var memberships []*models.ChannelMember
+	if msg.TeamID != "" {
+		teamID, err := parseID(msg.TeamID, "team")
+		if err != nil {
+			return nil, err
+		}
+		if _, err := w.membership(ctx, teamID, msg.P.UserID); err != nil {
+			return nil, err
+		}
+		if memberships, err = w.Repo.ListUserChannels(ctx, msg.P.UserID, teamID); err != nil {
+			return nil, err
+		}
+	}
+	direct, err := w.Repo.ListUserChannels(ctx, msg.P.UserID, scylla.NoTeam)
+	if err != nil {
+		return nil, err
+	}
+	memberships = append(memberships, direct...)
+	roles := make(map[gocql.UUID]models.ChannelRole, len(memberships))
+	chIDs := make([]gocql.UUID, 0, len(memberships))
+	for _, m := range memberships {
+		roles[m.ChannelID] = m.Role
+		chIDs = append(chIDs, m.ChannelID)
+	}
+	reads, err := w.Repo.ListLastReads(ctx, msg.P.UserID)
+	if err != nil {
+		return nil, err
+	}
+	lastRead := make(map[gocql.UUID]gocql.UUID, len(reads))
+	for _, r := range reads {
+		lastRead[r.ChannelID] = r.LastReadID
+	}
+	var all []*models.Channel
+	for start := 0; start < len(chIDs); start += 100 {
+		found, err := w.Repo.GetChannels(ctx, chIDs[start:min(start+100, len(chIDs))])
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, found...)
+	}
+	var peerIDs []gocql.UUID
+	for _, ch := range all {
+		if ch.Kind == models.ChannelDirect {
+			if id, ok := peerOf(ch, msg.P.UserID); ok {
+				peerIDs = append(peerIDs, id)
+			}
+		}
+	}
+	peers, err := w.Users.GetMany(ctx, peerIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*pb.Channel, 0, len(all))
+	for _, ch := range all {
+		var peer *pb.User
+		if ch.Kind == models.ChannelDirect {
+			id, _ := peerOf(ch, msg.P.UserID)
+			if peer = convert.PublicUser(peers[id]); peer == nil {
+				continue
+			}
+		}
+		out = append(out, convert.Channel(ch, roles[ch.ID], lastRead[ch.ID], peer))
+	}
+	slices.SortFunc(out, func(a, b *pb.Channel) int { return cmp.Compare(sortKey(a), sortKey(b)) })
+	return out, nil
+}
+
+func sortKey(ch *pb.Channel) string {
+	if ch.Peer != nil {
+		return strings.ToLower(ch.Peer.DisplayName)
+	}
+	return strings.ToLower(ch.DisplayName)
+}
+
+func (w *worker) browseChannels(ctx context.Context, msg BrowseChannels) ([]*pb.Channel, error) {
+	teamID, err := parseID(msg.TeamID, "team")
+	if err != nil {
+		return nil, err
+	}
+	m, err := w.membership(ctx, teamID, msg.P.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if !w.Authz.Can(authz.ObjChannel, authz.ActBrowse, string(m.Role), string(msg.P.Role)) {
+		return nil, ierrors.PermissionDenied()
+	}
+	listed, err := w.Repo.ListTeamChannels(ctx, teamID)
+	if err != nil {
+		return nil, err
+	}
+	mine, err := w.Repo.ListUserChannels(ctx, msg.P.UserID, teamID)
+	if err != nil {
+		return nil, err
+	}
+	joined := make(map[gocql.UUID]bool, len(mine))
+	for _, cm := range mine {
+		joined[cm.ChannelID] = true
+	}
+	var open []gocql.UUID
+	for _, tc := range listed {
+		if tc.Kind == models.ChannelPublic && !joined[tc.ChannelID] {
+			open = append(open, tc.ChannelID)
+		}
+	}
+	out := make([]*pb.Channel, 0, len(open))
+	for start := 0; start < len(open); start += 100 {
+		found, err := w.Repo.GetChannels(ctx, open[start:min(start+100, len(open))])
+		if err != nil {
+			return nil, err
+		}
+		for _, ch := range found {
+			out = append(out, convert.Channel(ch, "", gocql.UUID{}, nil))
+		}
+	}
+	slices.SortFunc(out, func(a, b *pb.Channel) int { return cmp.Compare(sortKey(a), sortKey(b)) })
+	return out, nil
+}
+
+func (w *worker) createChannel(ctx context.Context, msg CreateChannel) (*pb.Channel, error) {
+	teamID, err := parseID(msg.TeamID, "team")
+	if err != nil {
+		return nil, err
+	}
+	m, err := w.membership(ctx, teamID, msg.P.UserID)
+	if err != nil {
+		return nil, err
+	}
+	act := authz.ActCreatePublic
+	switch msg.Kind {
+	case models.ChannelPublic:
+	case models.ChannelPrivate:
+		act = authz.ActCreatePrivate
+	default:
+		return nil, ierrors.InvalidArgument("channel type must be public or private")
+	}
+	if !w.Authz.Can(authz.ObjChannel, act, string(m.Role), string(msg.P.Role)) {
+		return nil, ierrors.PermissionDenied()
+	}
+	name, err := validate.Slug(msg.Name)
+	if err != nil {
+		return nil, err
+	}
+	display, err := validate.Line("display name", msg.DisplayName, 1, 64)
+	if err != nil {
+		return nil, err
+	}
+	purpose, err := validate.Line("purpose", msg.Purpose, 0, 250)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	ch := &models.Channel{
+		ID: ids.New(), TeamID: teamID, Name: name, DisplayName: display, Purpose: purpose,
+		Kind: msg.Kind, CreatedBy: msg.P.UserID, CreatedAt: now,
+	}
+	cm := &models.ChannelMember{ChannelID: ch.ID, UserID: msg.P.UserID, TeamID: teamID, Role: models.ChannelRoleAdmin, JoinedAt: now}
+	if err := w.Repo.CreateChannel(ctx, ch, cm); err != nil {
+		return nil, err
+	}
+	out := convert.Channel(ch, models.ChannelRoleAdmin, gocql.UUID{}, nil)
+	w.deliver(msg.P.UserID, &pb.Event{Payload: &pb.Event_ChannelJoined{ChannelJoined: &pb.ChannelJoined{Channel: out}}})
+	return out, nil
+}
+
+func (w *worker) shareTeam(ctx context.Context, a, b gocql.UUID) (bool, error) {
+	ta, err := w.Repo.ListUserTeams(ctx, a)
+	if err != nil {
+		return false, err
+	}
+	tb, err := w.Repo.ListUserTeams(ctx, b)
+	if err != nil {
+		return false, err
+	}
+	set := make(map[gocql.UUID]bool, len(ta))
+	for _, t := range ta {
+		set[t.TeamID] = true
+	}
+	for _, t := range tb {
+		if set[t.TeamID] {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (w *worker) openDirect(ctx context.Context, msg OpenDirect) (*pb.Channel, error) {
+	if !w.Authz.Can(authz.ObjDirect, authz.ActCreate, string(msg.P.Role)) {
+		return nil, ierrors.PermissionDenied()
+	}
+	target, err := parseID(msg.UserID, "user")
+	if err != nil {
+		return nil, err
+	}
+	if target == msg.P.UserID {
+		return nil, ierrors.InvalidArgument("pick someone else")
+	}
+	peer, err := w.Users.Get(ctx, target)
+	if err != nil || peer.Deactivated {
+		return nil, ierrors.NotFound("user not found")
+	}
+	if msg.P.Role != models.SystemRoleAdmin {
+		ok, err := w.shareTeam(ctx, msg.P.UserID, target)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, ierrors.NotFound("user not found")
+		}
+	}
+	now := time.Now().UTC()
+	pair := directPair(msg.P.UserID, target)
+	ch := &models.Channel{
+		ID: ids.New(), TeamID: scylla.NoTeam, Name: pair, DisplayName: "Direct", Kind: models.ChannelDirect,
+		CreatedBy: msg.P.UserID, CreatedAt: now,
+	}
+	members := []*models.ChannelMember{
+		{ChannelID: ch.ID, UserID: msg.P.UserID, TeamID: scylla.NoTeam, Role: models.ChannelRoleMember, JoinedAt: now},
+		{ChannelID: ch.ID, UserID: target, TeamID: scylla.NoTeam, Role: models.ChannelRoleMember, JoinedAt: now},
+	}
+	chID, err := w.Repo.CreateDirectChannel(ctx, pair, ch, members)
+	if err != nil {
+		return nil, err
+	}
+	view, err := actors.Ask[*pb.Channel](ctx, w.Engine, w.Channels, channels.View{Target: channels.Target{P: msg.P, ChannelID: chID}})
+	if err != nil {
+		return nil, err
+	}
+	if chID == ch.ID {
+		self, err := w.Users.Get(ctx, msg.P.UserID)
+		if err == nil {
+			peerView := convert.Channel(ch, models.ChannelRoleMember, gocql.UUID{}, convert.PublicUser(self))
+			w.deliver(target, &pb.Event{Payload: &pb.Event_ChannelJoined{ChannelJoined: &pb.ChannelJoined{Channel: peerView}}})
+		}
+		w.deliver(msg.P.UserID, &pb.Event{Payload: &pb.Event_ChannelJoined{ChannelJoined: &pb.ChannelJoined{Channel: view}}})
+	}
+	return view, nil
+}
+
+func (w *worker) getUser(ctx context.Context, msg GetUser) (*pb.User, error) {
+	id, err := parseID(msg.UserID, "user")
+	if err != nil {
+		return nil, err
+	}
+	u, err := w.Users.Get(ctx, id)
+	if err != nil {
+		if ierrors.Is(err, ierrors.CodeNotFound) {
+			return nil, ierrors.NotFound("user not found")
+		}
+		return nil, err
+	}
+	if id == msg.P.UserID {
+		return convert.User(u), nil
+	}
+	return convert.PublicUser(u), nil
+}
+
+func (w *worker) updateProfile(ctx context.Context, msg UpdateProfile) (*pb.User, error) {
+	name, err := validate.Line("display name", msg.DisplayName, 1, 64)
+	if err != nil {
+		return nil, err
+	}
+	if err := w.Repo.UpdateDisplayName(ctx, msg.P.UserID, name, time.Now().UTC()); err != nil {
+		return nil, err
+	}
+	if err := w.Repo.UpdateMemberDisplayName(ctx, msg.P.UserID, name); err != nil {
+		w.Logger.Warn("failed to update member display names", zap.Error(err))
+	}
+	w.Users.Invalidate(msg.P.UserID)
+	u, err := w.Repo.GetUser(ctx, msg.P.UserID)
+	if err != nil {
+		return nil, err
+	}
+	return convert.User(u), nil
+}
+
+func (w *worker) me(ctx context.Context, p *models.Principal) (*MeResult, error) {
+	u, err := w.Repo.GetUser(ctx, p.UserID)
+	if err != nil {
+		return nil, err
+	}
+	return &MeResult{User: convert.User(u), Email: u.Email}, nil
+}
+
+func (w *worker) presence(ctx context.Context, msg Presence) ([]string, error) {
+	if len(msg.UserIDs) > 200 {
+		return nil, ierrors.InvalidArgument("too many users")
+	}
+	for _, id := range msg.UserIDs {
+		if _, ok := ids.Parse(id); !ok {
+			return nil, ierrors.InvalidArgument("invalid user id")
+		}
+	}
+	return actors.Ask[[]string](ctx, w.Engine, w.Hub, hub.Online{UserIDs: msg.UserIDs})
+}

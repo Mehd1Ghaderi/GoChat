@@ -156,3 +156,11 @@ func (r *Repository) ListLastReads(ctx context.Context, userID gocql.UUID) ([]*C
 	err := r.query(ctx, "SELECT channel_id, last_read_id FROM channel_reads WHERE user_id = ?", userID).SelectRelease(&out)
 	return out, wrap(err)
 }
+
+func (r *Repository) GetChannelIDByName(ctx context.Context, teamID gocql.UUID, name string) (gocql.UUID, error) {
+	var id gocql.UUID
+	if err := r.query(ctx, "SELECT channel_id FROM channel_names WHERE team_id = ? AND name = ?", teamID, name).Scan(&id); err != nil {
+		return gocql.UUID{}, wrap(err)
+	}
+	return id, nil
+}

@@ -1,0 +1,565 @@
+package drpc
+
+import (
+	"context"
+
+	"storj.io/drpc/drpcmux"
+
+	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
+	"github.com/ssenerg/gochat/internal/actors"
+	"github.com/ssenerg/gochat/internal/core/ids"
+	"github.com/ssenerg/gochat/internal/core/models"
+	ierrors "github.com/ssenerg/gochat/internal/errors"
+	"github.com/ssenerg/gochat/internal/repos/minio"
+	"github.com/ssenerg/gochat/internal/services"
+	"github.com/ssenerg/gochat/internal/services/accounts"
+	"github.com/ssenerg/gochat/internal/services/channels"
+	"github.com/ssenerg/gochat/internal/services/convert"
+	"github.com/ssenerg/gochat/internal/services/directory"
+)
+
+type base struct {
+	sys     *services.System
+	storage *minio.Storage
+	cfg     *services.Config
+	uploads chan struct{}
+}
+
+// Mux registers every service on a new mux.
+func Mux(sys *services.System, storage *minio.Storage, cfg *services.Config) (*drpcmux.Mux, error) {
+	b := &base{sys: sys, storage: storage, cfg: cfg, uploads: make(chan struct{}, cfg.Files.MaxUploads)}
+	mux := drpcmux.New()
+	for _, reg := range []func() error{
+		func() error { return pb.DRPCRegisterAuthService(mux, &authService{b}) },
+		func() error { return pb.DRPCRegisterTeamService(mux, &teamService{b}) },
+		func() error { return pb.DRPCRegisterChannelService(mux, &channelService{b}) },
+		func() error { return pb.DRPCRegisterMessageService(mux, &messageService{b}) },
+		func() error { return pb.DRPCRegisterFileService(mux, &fileService{b}) },
+		func() error { return pb.DRPCRegisterUserService(mux, &userService{b}) },
+		func() error { return pb.DRPCRegisterGatewayService(mux, &gatewayService{b}) },
+	} {
+		if err := reg(); err != nil {
+			return nil, err
+		}
+	}
+	return mux, nil
+}
+
+// Resolve authenticates a session token, from the cache when it can.
+func Resolve(sys *services.System) Resolver {
+	return func(ctx context.Context, token string) (*models.Principal, error) {
+		if p, ok := sys.Sessions.Cached(token); ok {
+			return p, nil
+		}
+		return actors.Ask[*models.Principal](ctx, sys.Engine, sys.Accounts, accounts.Authenticate{Token: token})
+	}
+}
+
+func channelTarget(ctx context.Context, raw string) (channels.Target, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return channels.Target{}, err
+	}
+	id, ok := ids.Parse(raw)
+	if !ok {
+		return channels.Target{}, ierrors.InvalidArgument("invalid channel id")
+	}
+	return channels.Target{P: p, ChannelID: id}, nil
+}
+
+type authService struct{ *base }
+
+func (s *authService) GetSignupInfo(ctx context.Context, req *pb.GetSignupInfoRequest) (*pb.GetSignupInfoResponse, error) {
+	info, err := actors.Ask[*accounts.SignupInfoResult](ctx, s.sys.Engine, s.sys.Accounts, accounts.SignupInfo{InviteToken: req.InviteToken})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.GetSignupInfoResponse{
+		Bootstrap: info.Bootstrap, Open: info.Open, InviteValid: info.InviteValid, TeamDisplayName: info.TeamDisplayName,
+	}, nil
+}
+
+func (s *authService) SignUp(ctx context.Context, req *pb.SignUpRequest) (*pb.SignUpResponse, error) {
+	cl := ClientOf(ctx)
+	res, err := actors.Ask[*accounts.SignUpResult](ctx, s.sys.Engine, s.sys.Accounts, accounts.SignUp{
+		Username: req.Username, Email: req.Email, DisplayName: req.DisplayName, Password: req.Password,
+		InviteToken: req.InviteToken, IP: cl.IP, UserAgent: cl.UserAgent,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := &pb.SignUpResponse{Session: res.Session}
+	if !ids.IsZero(res.InviteTeamID) {
+		team, err := actors.Ask[*pb.Team](ctx, s.sys.Engine, s.sys.Directory, directory.JoinTeam{UserID: res.User.ID, TeamID: res.InviteTeamID})
+		if err != nil {
+			return nil, err
+		}
+		out.Team = team
+	}
+	return out, nil
+}
+
+func (s *authService) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginResponse, error) {
+	cl := ClientOf(ctx)
+	res, err := actors.Ask[*accounts.LoginResult](ctx, s.sys.Engine, s.sys.Accounts, accounts.Login{
+		Login: req.Login, Password: req.Password, IP: cl.IP, UserAgent: cl.UserAgent,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if res.MFAToken != "" {
+		return &pb.LoginResponse{Result: &pb.LoginResponse_MfaToken{MfaToken: res.MFAToken}}, nil
+	}
+	return &pb.LoginResponse{Result: &pb.LoginResponse_Session{Session: res.Session}}, nil
+}
+
+func (s *authService) VerifyMFA(ctx context.Context, req *pb.VerifyMFARequest) (*pb.VerifyMFAResponse, error) {
+	cl := ClientOf(ctx)
+	res, err := actors.Ask[*accounts.LoginResult](ctx, s.sys.Engine, s.sys.Accounts, accounts.VerifyMFA{
+		Token: req.MfaToken, Code: req.Code, IP: cl.IP, UserAgent: cl.UserAgent,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.VerifyMFAResponse{Session: res.Session}, nil
+}
+
+func (s *authService) Logout(ctx context.Context, _ *pb.LogoutRequest) (*pb.LogoutResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := actors.Ask[accounts.Done](ctx, s.sys.Engine, s.sys.Accounts, accounts.Logout{P: p}); err != nil {
+		return nil, err
+	}
+	return &pb.LogoutResponse{}, nil
+}
+
+func (s *authService) Me(ctx context.Context, _ *pb.MeRequest) (*pb.MeResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	me, err := actors.Ask[*directory.MeResult](ctx, s.sys.Engine, s.sys.Directory, directory.Me{P: p})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.MeResponse{User: me.User, Email: me.Email, SessionId: p.SessionID}, nil
+}
+
+func (s *authService) ChangePassword(ctx context.Context, req *pb.ChangePasswordRequest) (*pb.ChangePasswordResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := actors.Ask[accounts.Done](ctx, s.sys.Engine, s.sys.Accounts, accounts.ChangePassword{
+		P: p, Current: req.CurrentPassword, NewPassword: req.NewPassword,
+	}); err != nil {
+		return nil, err
+	}
+	return &pb.ChangePasswordResponse{}, nil
+}
+
+func (s *authService) BeginTOTPSetup(ctx context.Context, req *pb.BeginTOTPSetupRequest) (*pb.BeginTOTPSetupResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	setup, err := actors.Ask[*accounts.TOTPSetup](ctx, s.sys.Engine, s.sys.Accounts, accounts.BeginTOTP{P: p, Password: req.Password})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.BeginTOTPSetupResponse{Secret: setup.Secret, Url: setup.URL}, nil
+}
+
+func (s *authService) ConfirmTOTPSetup(ctx context.Context, req *pb.ConfirmTOTPSetupRequest) (*pb.ConfirmTOTPSetupResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	codes, err := actors.Ask[accounts.RecoveryCodes](ctx, s.sys.Engine, s.sys.Accounts, accounts.ConfirmTOTP{P: p, Code: req.Code})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ConfirmTOTPSetupResponse{RecoveryCodes: codes}, nil
+}
+
+func (s *authService) DisableTOTP(ctx context.Context, req *pb.DisableTOTPRequest) (*pb.DisableTOTPResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := actors.Ask[accounts.Done](ctx, s.sys.Engine, s.sys.Accounts, accounts.DisableTOTP{P: p, Password: req.Password, Code: req.Code}); err != nil {
+		return nil, err
+	}
+	return &pb.DisableTOTPResponse{}, nil
+}
+
+type teamService struct{ *base }
+
+func (s *teamService) CreateTeam(ctx context.Context, req *pb.CreateTeamRequest) (*pb.CreateTeamResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	team, err := actors.Ask[*pb.Team](ctx, s.sys.Engine, s.sys.Directory, directory.CreateTeam{
+		P: p, Name: req.Name, DisplayName: req.DisplayName, Description: req.Description,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.CreateTeamResponse{Team: team}, nil
+}
+
+func (s *teamService) ListTeams(ctx context.Context, _ *pb.ListTeamsRequest) (*pb.ListTeamsResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	teams, err := actors.Ask[[]*pb.Team](ctx, s.sys.Engine, s.sys.Directory, directory.ListTeams{P: p})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ListTeamsResponse{Teams: teams}, nil
+}
+
+func (s *teamService) GetTeam(ctx context.Context, req *pb.GetTeamRequest) (*pb.GetTeamResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	team, err := actors.Ask[*pb.Team](ctx, s.sys.Engine, s.sys.Directory, directory.GetTeam{P: p, ID: req.GetId(), Name: req.GetName()})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.GetTeamResponse{Team: team}, nil
+}
+
+func (s *teamService) ListTeamMembers(ctx context.Context, req *pb.ListTeamMembersRequest) (*pb.ListTeamMembersResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	members, err := actors.Ask[[]*pb.TeamMember](ctx, s.sys.Engine, s.sys.Directory, directory.ListTeamMembers{
+		P: p, TeamID: req.TeamId, Query: req.Query, Limit: int(req.Limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ListTeamMembersResponse{Members: members}, nil
+}
+
+func (s *teamService) RemoveTeamMember(ctx context.Context, req *pb.RemoveTeamMemberRequest) (*pb.RemoveTeamMemberResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := actors.Ask[directory.Done](ctx, s.sys.Engine, s.sys.Directory, directory.RemoveTeamMember{P: p, TeamID: req.TeamId, UserID: req.UserId}); err != nil {
+		return nil, err
+	}
+	return &pb.RemoveTeamMemberResponse{}, nil
+}
+
+func (s *teamService) UpdateTeamMemberRole(ctx context.Context, req *pb.UpdateTeamMemberRoleRequest) (*pb.UpdateTeamMemberRoleResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	role, ok := convert.TeamRoleFrom(req.Role)
+	if !ok {
+		return nil, ierrors.InvalidArgument("invalid role")
+	}
+	if _, err := actors.Ask[directory.Done](ctx, s.sys.Engine, s.sys.Directory, directory.UpdateTeamMemberRole{
+		P: p, TeamID: req.TeamId, UserID: req.UserId, Role: role,
+	}); err != nil {
+		return nil, err
+	}
+	return &pb.UpdateTeamMemberRoleResponse{}, nil
+}
+
+func (s *teamService) CreateInvite(ctx context.Context, req *pb.CreateInviteRequest) (*pb.CreateInviteResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	inv, err := actors.Ask[*directory.Invite](ctx, s.sys.Engine, s.sys.Directory, directory.CreateInvite{P: p, TeamID: req.TeamId})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.CreateInviteResponse{Token: inv.Token, ExpiresAt: convert.Time(inv.ExpiresAt)}, nil
+}
+
+func (s *teamService) GetInvite(ctx context.Context, req *pb.GetInviteRequest) (*pb.GetInviteResponse, error) {
+	info, err := actors.Ask[*directory.InviteInfo](ctx, s.sys.Engine, s.sys.Directory, directory.GetInvite{Token: req.Token})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.GetInviteResponse{Valid: info.Valid, TeamDisplayName: info.TeamDisplayName}, nil
+}
+
+func (s *teamService) AcceptInvite(ctx context.Context, req *pb.AcceptInviteRequest) (*pb.AcceptInviteResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	team, err := actors.Ask[*pb.Team](ctx, s.sys.Engine, s.sys.Directory, directory.AcceptInvite{P: p, Token: req.Token})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.AcceptInviteResponse{Team: team}, nil
+}
+
+type channelService struct{ *base }
+
+func (s *channelService) ListChannels(ctx context.Context, req *pb.ListChannelsRequest) (*pb.ListChannelsResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	list, err := actors.Ask[[]*pb.Channel](ctx, s.sys.Engine, s.sys.Directory, directory.ListChannels{P: p, TeamID: req.TeamId})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ListChannelsResponse{Channels: list}, nil
+}
+
+func (s *channelService) BrowseChannels(ctx context.Context, req *pb.BrowseChannelsRequest) (*pb.BrowseChannelsResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	list, err := actors.Ask[[]*pb.Channel](ctx, s.sys.Engine, s.sys.Directory, directory.BrowseChannels{P: p, TeamID: req.TeamId})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.BrowseChannelsResponse{Channels: list}, nil
+}
+
+func (s *channelService) CreateChannel(ctx context.Context, req *pb.CreateChannelRequest) (*pb.CreateChannelResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var kind models.ChannelKind
+	switch req.Type {
+	case pb.ChannelType_CHANNEL_TYPE_PUBLIC:
+		kind = models.ChannelPublic
+	case pb.ChannelType_CHANNEL_TYPE_PRIVATE:
+		kind = models.ChannelPrivate
+	default:
+		return nil, ierrors.InvalidArgument("channel type must be public or private")
+	}
+	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Directory, directory.CreateChannel{
+		P: p, TeamID: req.TeamId, Name: req.Name, DisplayName: req.DisplayName, Purpose: req.Purpose, Kind: kind,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.CreateChannelResponse{Channel: ch}, nil
+}
+
+func (s *channelService) GetChannel(ctx context.Context, req *pb.GetChannelRequest) (*pb.GetChannelResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Channels, channels.View{Target: t})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.GetChannelResponse{Channel: ch}, nil
+}
+
+func (s *channelService) JoinChannel(ctx context.Context, req *pb.JoinChannelRequest) (*pb.JoinChannelResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Channels, channels.Join{Target: t})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.JoinChannelResponse{Channel: ch}, nil
+}
+
+func (s *channelService) LeaveChannel(ctx context.Context, req *pb.LeaveChannelRequest) (*pb.LeaveChannelResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := actors.Ask[channels.Done](ctx, s.sys.Engine, s.sys.Channels, channels.Leave{Target: t}); err != nil {
+		return nil, err
+	}
+	return &pb.LeaveChannelResponse{}, nil
+}
+
+func (s *channelService) AddChannelMember(ctx context.Context, req *pb.AddChannelMemberRequest) (*pb.AddChannelMemberResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := actors.Ask[channels.Done](ctx, s.sys.Engine, s.sys.Channels, channels.AddMember{Target: t, UserID: req.UserId}); err != nil {
+		return nil, err
+	}
+	return &pb.AddChannelMemberResponse{}, nil
+}
+
+func (s *channelService) RemoveChannelMember(ctx context.Context, req *pb.RemoveChannelMemberRequest) (*pb.RemoveChannelMemberResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	userID, ok := ids.Parse(req.UserId)
+	if !ok {
+		return nil, ierrors.InvalidArgument("invalid user id")
+	}
+	if _, err := actors.Ask[channels.Done](ctx, s.sys.Engine, s.sys.Channels, channels.RemoveMember{Target: t, UserID: userID}); err != nil {
+		return nil, err
+	}
+	return &pb.RemoveChannelMemberResponse{}, nil
+}
+
+func (s *channelService) ListChannelMembers(ctx context.Context, req *pb.ListChannelMembersRequest) (*pb.ListChannelMembersResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	members, err := actors.Ask[[]*pb.ChannelMember](ctx, s.sys.Engine, s.sys.Channels, channels.Members{Target: t})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ListChannelMembersResponse{Members: members}, nil
+}
+
+func (s *channelService) OpenDirectChannel(ctx context.Context, req *pb.OpenDirectChannelRequest) (*pb.OpenDirectChannelResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Directory, directory.OpenDirect{P: p, UserID: req.UserId})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.OpenDirectChannelResponse{Channel: ch}, nil
+}
+
+func (s *channelService) MarkChannelRead(ctx context.Context, req *pb.MarkChannelReadRequest) (*pb.MarkChannelReadResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := actors.Ask[channels.Done](ctx, s.sys.Engine, s.sys.Channels, channels.MarkRead{Target: t, MessageID: req.MessageId}); err != nil {
+		return nil, err
+	}
+	return &pb.MarkChannelReadResponse{}, nil
+}
+
+type messageService struct{ *base }
+
+func (s *messageService) PostMessage(ctx context.Context, req *pb.PostMessageRequest) (*pb.PostMessageResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	m, err := actors.Ask[*pb.Message](ctx, s.sys.Engine, s.sys.Channels, channels.Post{Target: t, Content: req.Content, AttachmentIDs: req.AttachmentIds})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.PostMessageResponse{Message: m}, nil
+}
+
+func (s *messageService) EditMessage(ctx context.Context, req *pb.EditMessageRequest) (*pb.EditMessageResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	m, err := actors.Ask[*pb.Message](ctx, s.sys.Engine, s.sys.Channels, channels.Edit{Target: t, MessageID: req.MessageId, Content: req.Content})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.EditMessageResponse{Message: m}, nil
+}
+
+func (s *messageService) DeleteMessage(ctx context.Context, req *pb.DeleteMessageRequest) (*pb.DeleteMessageResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := actors.Ask[channels.Done](ctx, s.sys.Engine, s.sys.Channels, channels.Delete{Target: t, MessageID: req.MessageId}); err != nil {
+		return nil, err
+	}
+	return &pb.DeleteMessageResponse{}, nil
+}
+
+func (s *messageService) ListMessages(ctx context.Context, req *pb.ListMessagesRequest) (*pb.ListMessagesResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	res, err := actors.Ask[*channels.HistoryResult](ctx, s.sys.Engine, s.sys.Channels, channels.History{Target: t, BeforeID: req.BeforeId, Limit: int(req.Limit)})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ListMessagesResponse{Messages: res.Messages, HasMore: res.HasMore}, nil
+}
+
+func (s *messageService) GetMessage(ctx context.Context, req *pb.GetMessageRequest) (*pb.GetMessageResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	m, err := actors.Ask[*pb.Message](ctx, s.sys.Engine, s.sys.Channels, channels.GetMessage{Target: t, MessageID: req.MessageId})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.GetMessageResponse{Message: m}, nil
+}
+
+func (s *messageService) SendTyping(ctx context.Context, req *pb.SendTypingRequest) (*pb.SendTypingResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := actors.Ask[channels.Done](ctx, s.sys.Engine, s.sys.Channels, channels.Typing{Target: t}); err != nil {
+		return nil, err
+	}
+	return &pb.SendTypingResponse{}, nil
+}
+
+type userService struct{ *base }
+
+func (s *userService) GetUser(ctx context.Context, req *pb.GetUserRequest) (*pb.GetUserResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	u, err := actors.Ask[*pb.User](ctx, s.sys.Engine, s.sys.Directory, directory.GetUser{P: p, UserID: req.UserId})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.GetUserResponse{User: u}, nil
+}
+
+func (s *userService) UpdateProfile(ctx context.Context, req *pb.UpdateProfileRequest) (*pb.UpdateProfileResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	u, err := actors.Ask[*pb.User](ctx, s.sys.Engine, s.sys.Directory, directory.UpdateProfile{P: p, DisplayName: req.DisplayName})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.UpdateProfileResponse{User: u}, nil
+}
+
+func (s *userService) GetPresence(ctx context.Context, req *pb.GetPresenceRequest) (*pb.GetPresenceResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	online, err := actors.Ask[[]string](ctx, s.sys.Engine, s.sys.Directory, directory.Presence{P: p, UserIDs: req.UserIds})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.GetPresenceResponse{OnlineUserIds: online}, nil
+}

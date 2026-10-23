@@ -137,3 +137,12 @@ type Invite struct {
 	UsedBy    gocql.UUID `db:"used_by"`
 	UsedAt    time.Time  `db:"used_at"`
 }
+
+// Principal is the authenticated caller of a request.
+type Principal struct {
+	UserID      gocql.UUID
+	Role        SystemRole
+	SessionHash []byte
+	SessionID   string
+	ExpiresAt   time.Time
+}

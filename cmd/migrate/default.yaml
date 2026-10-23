@@ -1,0 +1,36 @@
+logging:
+  console:
+    enabled: true
+    level: info
+    format: text
+  file:
+    enabled: false
+    name: migrate
+    level: debug
+    format: json
+    folder: .logs
+    max_size: 10
+    max_age: 7
+    max_backups: 10
+    compress: false
+  version: false
+
+database:
+  scylla:
+    hosts:
+      - localhost:9042
+    keyspace: gochat
+    username: ""
+    password: ""
+    local_dc: ""
+    consistency: local_quorum
+    serial_consistency: local_serial
+    timeout: 30s
+    connect_timeout: 10s
+    num_conns: 1
+    replication: "{'class': 'NetworkTopologyStrategy', 'replication_factor': 3}"
+    tls:
+      enabled: false
+      ca_file: ""
+      cert_file: ""
+      key_file: ""

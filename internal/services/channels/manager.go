@@ -1,0 +1,93 @@
+// Package channels runs one actor per active channel. A channel's actor owns
+// its member list and serializes the writes to it, so messages get their
+// order and every permission check sees the membership it acts on.
+package channels
+
+import (
+	"context"
+	"strconv"
+	"time"
+
+	"github.com/anthdm/hollywood/actor"
+	"github.com/gocql/gocql"
+	"go.uber.org/zap"
+
+	"github.com/ssenerg/gochat/internal/authz"
+	"github.com/ssenerg/gochat/internal/core/models"
+	"github.com/ssenerg/gochat/internal/repos/scylla"
+	"github.com/ssenerg/gochat/internal/services/users"
+)
+
+type Repo interface {
+	GetChannel(ctx context.Context, id gocql.UUID) (*models.Channel, error)
+	ListChannelMembers(ctx context.Context, channelID gocql.UUID) ([]*models.ChannelMember, error)
+	AddChannelMember(ctx context.Context, m *models.ChannelMember) error
+	RemoveChannelMember(ctx context.Context, m *models.ChannelMember) error
+	GetTeamMember(ctx context.Context, teamID, userID gocql.UUID) (*models.TeamMember, error)
+	InsertMessage(ctx context.Context, m *models.Message, newBucket bool) error
+	GetMessage(ctx context.Context, channelID, id gocql.UUID) (*models.Message, error)
+	UpdateMessageContent(ctx context.Context, channelID, id gocql.UUID, content string, at time.Time) error
+	DeleteMessage(ctx context.Context, channelID, id gocql.UUID) error
+	ListMessages(ctx context.Context, channelID, before gocql.UUID, limit int) ([]*models.Message, bool, error)
+	LastMessageBucket(ctx context.Context, channelID gocql.UUID) (int32, bool, error)
+	SetLastMessage(ctx context.Context, channelID, messageID gocql.UUID) error
+	SetLastRead(ctx context.Context, userID, channelID, messageID gocql.UUID) error
+	ListLastReads(ctx context.Context, userID gocql.UUID) ([]*scylla.ChannelRead, error)
+	GetAttachments(ctx context.Context, ids []gocql.UUID) ([]*models.Attachment, error)
+	ClaimAttachment(ctx context.Context, a *models.Attachment, messageID gocql.UUID) error
+	DeleteAttachment(ctx context.Context, a *models.Attachment) error
+}
+
+type Storage interface {
+	Delete(ctx context.Context, key string) error
+}
+
+type Deps struct {
+	Logger  *zap.Logger
+	Cfg     *Config
+	Repo    Repo
+	Storage Storage
+	Authz   *authz.Authorizer
+	Users   *users.Cache
+	Engine  *actor.Engine
+	Hub     *actor.PID
+}
+
+type passivate struct {
+	id  gocql.UUID
+	pid *actor.PID
+}
+
+type manager struct {
+	*Deps
+	children map[gocql.UUID]*actor.PID
+	gen      uint64
+}
+
+func New(d *Deps) actor.Producer {
+	return func() actor.Receiver {
+		return &manager{Deps: d, children: make(map[gocql.UUID]*actor.PID)}
+	}
+}
+
+func (m *manager) Receive(c *actor.Context) {
+	switch msg := c.Message().(type) {
+	case passivate:
+		if pid, ok := m.children[msg.id]; ok && pid.Equals(msg.pid) {
+			delete(m.children, msg.id)
+			c.Engine().Poison(pid)
+		}
+	case Request:
+		id := msg.channel()
+		pid, ok := m.children[id]
+		// A child that exhausted its restarts is gone from the context.
+		if !ok || c.Child(pid.ID) == nil {
+			m.gen++
+			pid = c.SpawnChild(newChannel(m.Deps, id), "channel",
+				actor.WithID(id.String()+"."+strconv.FormatUint(m.gen, 36)),
+				actor.WithInboxSize(256))
+			m.children[id] = pid
+		}
+		c.Engine().SendWithSender(pid, msg, c.Sender())
+	}
+}
