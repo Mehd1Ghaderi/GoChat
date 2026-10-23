@@ -10,6 +10,12 @@
     <form method="post" action="/signup" class="stack">
       <input type="hidden" name="_csrf" value="{{.CSRF}}">
       <input type="hidden" name="invite" value="{{.Invite}}">
+      {{if .SetupToken}}
+      <label>Setup token
+        <input name="setup_token" type="password" autocomplete="off" required maxlength="256">
+        <small>Set by whoever deployed this server.</small>
+      </label>
+      {{end}}
       <label>Username
         <input name="username" autocomplete="username" required minlength="3" maxlength="32" pattern="[a-z0-9][a-z0-9._\-]{2,31}" value="{{.Form.Username}}" autofocus>
         <small>Lowercase letters, digits, '.', '_' or '-'.</small>

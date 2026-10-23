@@ -269,6 +269,8 @@ func uuidTime(s string) uint64 {
 	return t
 }
 
+const maxCachedBody = 16 << 10
+
 // Body renders a message's content, cached by message and edit.
 func (r *Renderer) Body(m *pb.Message) template.HTML {
 	key := m.Id + "/" + m.GetEditedAt().AsTime().Format(time.RFC3339Nano)
@@ -276,6 +278,9 @@ func (r *Renderer) Body(m *pb.Message) template.HTML {
 		return h
 	}
 	h := r.markdown(m.Content)
-	r.bodies.Set(key, h)
+	// The cache counts entries, so large bodies are rendered each time.
+	if len(h) <= maxCachedBody {
+		r.bodies.Set(key, h)
+	}
 	return h
 }

@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -79,13 +80,28 @@ func (c *client) do(method, path string, body io.Reader, contentType string, htm
 			req.Header.Set("X-CSRF-Token", tok)
 		}
 	}
-	res, err := c.http.Do(req)
-	if err != nil {
-		c.t.Fatalf("%s %s: %v", method, path, err)
+	var buf []byte
+	if body != nil {
+		buf, _ = io.ReadAll(body)
 	}
-	b, _ := io.ReadAll(res.Body)
-	_ = res.Body.Close()
-	return res, string(b)
+	// The sign-in endpoints are rate limited per address, which every client
+	// here shares: wait for the limiter rather than fail.
+	for attempt := 0; ; attempt++ {
+		if buf != nil {
+			req.Body = io.NopCloser(bytes.NewReader(buf))
+		}
+		res, err := c.http.Do(req)
+		if err != nil {
+			c.t.Fatalf("%s %s: %v", method, path, err)
+		}
+		b, _ := io.ReadAll(res.Body)
+		_ = res.Body.Close()
+		wait, _ := strconv.Atoi(res.Header.Get("Retry-After"))
+		if res.StatusCode != http.StatusTooManyRequests || attempt == 5 || wait > 15 {
+			return res, string(b)
+		}
+		time.Sleep(time.Duration(wait) * time.Second)
+	}
 }
 
 func (c *client) get(path string) (*http.Response, string) {
@@ -376,6 +392,39 @@ func TestEndToEnd(t *testing.T) {
 		res, _ := bob.hx("/t/"+teamName+"/invites", url.Values{})
 		if res.StatusCode != http.StatusForbidden {
 			t.Fatalf("a member created an invite: %d", res.StatusCode)
+		}
+	})
+
+	t.Run("invites die with their creator's rights", func(t *testing.T) {
+		_, list := admin.do(http.MethodGet, "/t/"+teamName+"/members", nil, "", true)
+		m := regexp.MustCompile(`@` + regexp.QuoteMeta(bobName) + `(?s:.*?)/members/([0-9a-f-]{36})/role`).FindStringSubmatch(list)
+		if m == nil {
+			t.Fatalf("bob is not in the member list: %s", list)
+		}
+		bobID := m[1]
+		admin.hx("/t/"+teamName+"/members/"+bobID+"/role", url.Values{"role": {"admin"}})
+		_, body := bob.hx("/t/"+teamName+"/invites", url.Values{})
+		link := inviteRe.FindStringSubmatch(body)
+		if link == nil {
+			t.Fatalf("a team admin could not invite: %s", body)
+		}
+		if _, page := newClient(t, "carol").get("/join/" + link[1]); !strings.Contains(page, "Create an account") {
+			t.Fatalf("a fresh invite is not usable: %s", page)
+		}
+		admin.hx("/t/"+teamName+"/members/"+bobID+"/role", url.Values{"role": {"member"}})
+		if _, page := newClient(t, "carol").get("/join/" + link[1]); !strings.Contains(page, "Invite unavailable") {
+			t.Fatalf("an invite outlived its creator's admin role: %s", page)
+		}
+	})
+
+	t.Run("forms refuse multipart bodies and open redirects", func(t *testing.T) {
+		res, _ := admin.do(http.MethodPost, "/t/"+teamName+"/invites", strings.NewReader("--x--"), "multipart/form-data; boundary=x", true)
+		if res.StatusCode != http.StatusUnsupportedMediaType {
+			t.Fatalf("a multipart form body was accepted: %d", res.StatusCode)
+		}
+		res, _ = admin.get("/login?next=" + url.QueryEscape("/\t/evil.example"))
+		if loc := res.Header.Get("Location"); loc != "/" {
+			t.Fatalf("redirected to %q", loc)
 		}
 	})
 

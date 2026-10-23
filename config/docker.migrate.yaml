@@ -2,4 +2,5 @@ database:
   scylla:
     hosts:
       - scylla:9042
+    local_dc: datacenter1
     replication: "{'class': 'SimpleStrategy', 'replication_factor': 1}"

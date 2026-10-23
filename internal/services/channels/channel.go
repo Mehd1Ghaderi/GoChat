@@ -16,6 +16,7 @@ import (
 	"github.com/ssenerg/gochat/internal/core/models"
 	"github.com/ssenerg/gochat/internal/core/validate"
 	ierrors "github.com/ssenerg/gochat/internal/errors"
+	"github.com/ssenerg/gochat/internal/repos/scylla"
 	"github.com/ssenerg/gochat/internal/services/convert"
 	"github.com/ssenerg/gochat/internal/services/hub"
 )
@@ -329,13 +330,22 @@ func (a *channel) post(msg Post) (*pb.Message, error) {
 		Content:     content,
 		Attachments: attIDs,
 	}
-	for _, att := range atts {
-		if err := a.Repo.ClaimAttachment(ctx, att, id); err != nil {
+	for i, att := range atts {
+		ok, err := a.Repo.ClaimAttachment(ctx, att, id)
+		if err == nil && !ok {
+			err = ierrors.InvalidArgument("an attachment is no longer available")
+		}
+		if err != nil {
+			a.unclaim(atts[:i], id)
 			return nil, err
 		}
 	}
 	newBucket := !a.hasBucket || m.Bucket != a.bucket
 	if err := a.Repo.InsertMessage(ctx, m, newBucket); err != nil {
+		// A message that may still land keeps its attachments.
+		if !scylla.Uncertain(err) {
+			a.unclaim(atts, id)
+		}
 		return nil, err
 	}
 	a.bucket, a.hasBucket = m.Bucket, true
@@ -355,6 +365,18 @@ func (a *channel) post(msg Post) (*pb.Message, error) {
 	out := convert.Message(m, convert.PublicUser(author), atts)
 	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessagePosted{MessagePosted: &pb.MessagePosted{Message: out}}})
 	return out, nil
+}
+
+// unclaim returns attachments claimed for a message that was not written to
+// the uploads awaiting a post.
+func (a *channel) unclaim(atts []*models.Attachment, messageID gocql.UUID) {
+	ctx, cancel := a.ctx()
+	defer cancel()
+	for _, att := range atts {
+		if err := a.Repo.UnclaimAttachment(ctx, att, messageID); err != nil {
+			a.Logger.Warn("failed to release an attachment", zap.String("attachment", att.ID.String()), zap.Error(err))
+		}
+	}
 }
 
 // ownAttachments returns the attachments of attIDs, in order, refusing any

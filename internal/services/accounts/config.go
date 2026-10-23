@@ -22,8 +22,10 @@ type Config struct {
 	MFAMaxAttempts    int             `mapstructure:"mfa_max_attempts"`
 	TOTPIssuer        string          `mapstructure:"totp_issuer"`
 	// SecretKey seals TOTP secrets at rest: 32 bytes, base64.
-	SecretKey     string        `mapstructure:"secret_key"`
-	OpenSignup    bool          `mapstructure:"open_signup"`
+	SecretKey  string `mapstructure:"secret_key"`
+	OpenSignup bool   `mapstructure:"open_signup"`
+	// SetupToken, when set, must be given to create the first account.
+	SetupToken    string        `mapstructure:"setup_token"`
 	LoginFailures int           `mapstructure:"login_failures"`
 	LoginWindow   time.Duration `mapstructure:"login_window"`
 }

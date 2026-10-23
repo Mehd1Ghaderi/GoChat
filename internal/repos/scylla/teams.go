@@ -21,19 +21,18 @@ type TeamMemberEntry struct {
 }
 
 func (r *Repository) CreateTeam(ctx context.Context, t *models.Team) error {
-	applied, err := r.query(ctx, "INSERT INTO team_names (name, team_id) VALUES (?, ?) IF NOT EXISTS", t.Name, t.ID).ExecCASRelease()
+	ok, err := r.claim(ctx, "INSERT INTO team_names (name, team_id) VALUES (?, ?) IF NOT EXISTS",
+		"SELECT team_id FROM team_names WHERE name = ?", "team_id", t.ID, t.Name)
 	if err != nil {
-		return wrap(err)
+		return err
 	}
-	if !applied {
+	if !ok {
 		return ierrors.AlreadyExists("team name is taken")
 	}
 	err = r.query(ctx, "INSERT INTO teams ("+teamColumns+") VALUES (?, ?, ?, ?, ?, ?)",
 		t.ID, t.Name, t.DisplayName, t.Description, t.CreatedBy, t.CreatedAt).ExecRelease()
 	if err != nil {
-		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_, _ = r.query(c, "DELETE FROM team_names WHERE name = ? IF team_id = ?", t.Name, t.ID).ExecCASRelease()
+		r.release(err, "DELETE FROM team_names WHERE name = ? IF team_id = ?", t.Name, t.ID)
 		return wrap(err)
 	}
 	return nil
@@ -64,13 +63,20 @@ func (r *Repository) GetTeams(ctx context.Context, ids []gocql.UUID) ([]*models.
 	return out, wrap(err)
 }
 
+// Team memberships are only written conditionally, so concurrent role
+// changes and removals are ordered by the cluster: a role update can never
+// bring back a removed member. user_teams decides access and is written last
+// on joining and first on leaving.
+
 func (r *Repository) AddTeamMember(ctx context.Context, m *models.TeamMember, username, displayName string) error {
-	b := r.batch(ctx, true)
-	b.Query("INSERT INTO team_members (team_id, user_id, role, username, display_name, joined_at) VALUES (?, ?, ?, ?, ?, ?)",
-		m.TeamID, m.UserID, string(m.Role), username, displayName, m.JoinedAt)
-	b.Query("INSERT INTO user_teams (user_id, team_id, role, joined_at) VALUES (?, ?, ?, ?)",
-		m.UserID, m.TeamID, string(m.Role), m.JoinedAt)
-	return r.execBatch(b)
+	_, err := r.query(ctx, "INSERT INTO team_members (team_id, user_id, role, username, display_name, joined_at) VALUES (?, ?, ?, ?, ?, ?) IF NOT EXISTS",
+		m.TeamID, m.UserID, string(m.Role), username, displayName, m.JoinedAt).ExecCASRelease()
+	if err != nil {
+		return wrap(err)
+	}
+	_, err = r.query(ctx, "INSERT INTO user_teams (user_id, team_id, role, joined_at) VALUES (?, ?, ?, ?) IF NOT EXISTS",
+		m.UserID, m.TeamID, string(m.Role), m.JoinedAt).ExecCASRelease()
+	return wrap(err)
 }
 
 func (r *Repository) GetTeamMember(ctx context.Context, teamID, userID gocql.UUID) (*models.TeamMember, error) {
@@ -95,17 +101,25 @@ func (r *Repository) ListUserTeams(ctx context.Context, userID gocql.UUID) ([]*m
 }
 
 func (r *Repository) RemoveTeamMember(ctx context.Context, teamID, userID gocql.UUID) error {
-	b := r.batch(ctx, true)
-	b.Query("DELETE FROM team_members WHERE team_id = ? AND user_id = ?", teamID, userID)
-	b.Query("DELETE FROM user_teams WHERE user_id = ? AND team_id = ?", userID, teamID)
-	return r.execBatch(b)
+	if _, err := r.query(ctx, "DELETE FROM user_teams WHERE user_id = ? AND team_id = ? IF EXISTS", userID, teamID).ExecCASRelease(); err != nil {
+		return wrap(err)
+	}
+	_, err := r.query(ctx, "DELETE FROM team_members WHERE team_id = ? AND user_id = ? IF EXISTS", teamID, userID).ExecCASRelease()
+	return wrap(err)
 }
 
+// UpdateTeamMemberRole changes the role of a member, NotFound when the user is
+// not one.
 func (r *Repository) UpdateTeamMemberRole(ctx context.Context, teamID, userID gocql.UUID, role models.TeamRole) error {
-	b := r.batch(ctx, true)
-	b.Query("UPDATE team_members SET role = ? WHERE team_id = ? AND user_id = ?", string(role), teamID, userID)
-	b.Query("UPDATE user_teams SET role = ? WHERE user_id = ? AND team_id = ?", string(role), userID, teamID)
-	return r.execBatch(b)
+	applied, err := r.query(ctx, "UPDATE user_teams SET role = ? WHERE user_id = ? AND team_id = ? IF EXISTS", string(role), userID, teamID).ExecCASRelease()
+	if err != nil {
+		return wrap(err)
+	}
+	if !applied {
+		return ierrors.NotFound("not a member of the team")
+	}
+	_, err = r.query(ctx, "UPDATE team_members SET role = ? WHERE team_id = ? AND user_id = ? IF EXISTS", string(role), teamID, userID).ExecCASRelease()
+	return wrap(err)
 }
 
 // UpdateMemberDisplayName refreshes the copy of a display name kept with each
@@ -138,16 +152,22 @@ func (r *Repository) GetInvite(ctx context.Context, hash []byte) (*models.Invite
 	return &inv, nil
 }
 
-// ConsumeInvite marks the invite used by userID, reporting false when it was
-// used already or has expired. The team_id condition keeps an expired, absent
-// row from being recreated by the update.
+// ConsumeInvite marks the invite used by userID, reporting false when someone
+// else used it or it has expired. The team_id condition keeps an expired,
+// absent row from being recreated by the update.
 func (r *Repository) ConsumeInvite(ctx context.Context, inv *models.Invite, userID gocql.UUID, now time.Time) (bool, error) {
 	if !now.Before(inv.ExpiresAt) {
 		return false, nil
 	}
-	applied, err := r.query(ctx, "UPDATE invites USING TTL ? SET used_by = ?, used_at = ? WHERE token_hash = ? IF used_by = null AND team_id = ?",
-		ttlSeconds(inv.ExpiresAt, now), userID, now, inv.TokenHash, inv.TeamID).ExecCASRelease()
-	return applied, wrap(err)
+	row := make(map[string]any)
+	q := r.query(ctx, "UPDATE invites USING TTL ? SET used_by = ?, used_at = ? WHERE token_hash = ? IF used_by = null AND team_id = ?",
+		ttlSeconds(inv.ExpiresAt, now), userID, now, inv.TokenHash, inv.TeamID)
+	applied, err := q.MapScanCAS(row)
+	q.Release()
+	if err != nil {
+		return false, wrap(err)
+	}
+	return applied || row["used_by"] == userID, nil
 }
 
 // ReleaseInvite undoes a consumption whose join could not complete.

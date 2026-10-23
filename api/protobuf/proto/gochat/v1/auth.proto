@@ -29,6 +29,8 @@ message GetSignupInfoResponse {
   bool open = 2;
   bool invite_valid = 3;
   string team_display_name = 4;
+  // The first account needs the setup token from the server's configuration.
+  bool setup_token_required = 5;
 }
 
 message SignUpRequest {
@@ -37,6 +39,7 @@ message SignUpRequest {
   string display_name = 3;
   string password = 4;
   string invite_token = 5;
+  string setup_token = 6;
 }
 
 message SignUpResponse {

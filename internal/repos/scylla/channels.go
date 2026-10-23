@@ -2,7 +2,6 @@ package scylla
 
 import (
 	"context"
-	"time"
 
 	"github.com/gocql/gocql"
 
@@ -29,54 +28,58 @@ type ChannelRead struct {
 // CreateChannel claims the channel's name in its team and writes the channel
 // with its first member.
 func (r *Repository) CreateChannel(ctx context.Context, ch *models.Channel, creator *models.ChannelMember) error {
-	applied, err := r.query(ctx, "INSERT INTO channel_names (team_id, name, channel_id) VALUES (?, ?, ?) IF NOT EXISTS",
-		ch.TeamID, ch.Name, ch.ID).ExecCASRelease()
+	ok, err := r.claim(ctx, "INSERT INTO channel_names (team_id, name, channel_id) VALUES (?, ?, ?) IF NOT EXISTS",
+		"SELECT channel_id FROM channel_names WHERE team_id = ? AND name = ?", "channel_id", ch.ID, ch.TeamID, ch.Name)
 	if err != nil {
-		return wrap(err)
+		return err
 	}
-	if !applied {
+	if !ok {
 		return ierrors.AlreadyExists("a channel with this name exists")
 	}
 	b := r.batch(ctx, true)
-	b.Query("INSERT INTO channels ("+channelColumns+") VALUES (?, ?, ?, ?, ?, ?, ?, ?, null)",
+	b.Query("INSERT INTO channels (id, team_id, name, display_name, purpose, kind, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 		ch.ID, ch.TeamID, ch.Name, ch.DisplayName, ch.Purpose, string(ch.Kind), ch.CreatedBy, ch.CreatedAt)
 	b.Query("INSERT INTO team_channels (team_id, channel_id, kind) VALUES (?, ?, ?)", ch.TeamID, ch.ID, string(ch.Kind))
 	if creator != nil {
 		addMemberQueries(b, creator)
 	}
+	// A logged batch that timed out is replayed from the batch log, so its
+	// claim stays.
 	if err := r.execBatch(b); err != nil {
-		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_, _ = r.query(c, "DELETE FROM channel_names WHERE team_id = ? AND name = ? IF channel_id = ?", ch.TeamID, ch.Name, ch.ID).ExecCASRelease()
+		r.release(err, "DELETE FROM channel_names WHERE team_id = ? AND name = ? IF channel_id = ?", ch.TeamID, ch.Name, ch.ID)
 		return err
 	}
 	return nil
 }
 
 // CreateDirectChannel returns the direct channel of pair, creating it with
-// members when it does not exist yet.
+// members when it does not exist yet. A pair claimed by a creation that never
+// completed is completed with the claimed id.
 func (r *Repository) CreateDirectChannel(ctx context.Context, pair string, ch *models.Channel, members []*models.ChannelMember) (gocql.UUID, error) {
-	var existing struct {
-		Pair      string     `db:"pair"`
-		ChannelID gocql.UUID `db:"channel_id"`
-	}
-	applied, err := r.query(ctx, "INSERT INTO direct_channels (pair, channel_id) VALUES (?, ?) IF NOT EXISTS", pair, ch.ID).GetCASRelease(&existing)
+	row := make(map[string]any)
+	q := r.query(ctx, "INSERT INTO direct_channels (pair, channel_id) VALUES (?, ?) IF NOT EXISTS", pair, ch.ID)
+	applied, err := q.MapScanCAS(row)
+	q.Release()
 	if err != nil {
 		return gocql.UUID{}, wrap(err)
 	}
 	if !applied {
-		return existing.ChannelID, nil
+		id, _ := row["channel_id"].(gocql.UUID)
+		if _, err := r.GetChannel(ctx, id); !ierrors.Is(err, ierrors.CodeNotFound) {
+			return id, err
+		}
+		ch.ID = id
+		for _, m := range members {
+			m.ChannelID = id
+		}
 	}
 	b := r.batch(ctx, true)
-	b.Query("INSERT INTO channels ("+channelColumns+") VALUES (?, ?, ?, ?, ?, ?, ?, ?, null)",
+	b.Query("INSERT INTO channels (id, team_id, name, display_name, purpose, kind, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 		ch.ID, ch.TeamID, ch.Name, ch.DisplayName, ch.Purpose, string(ch.Kind), ch.CreatedBy, ch.CreatedAt)
 	for _, m := range members {
 		addMemberQueries(b, m)
 	}
 	if err := r.execBatch(b); err != nil {
-		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_, _ = r.query(c, "DELETE FROM direct_channels WHERE pair = ? IF channel_id = ?", pair, ch.ID).ExecCASRelease()
 		return gocql.UUID{}, err
 	}
 	return ch.ID, nil
@@ -143,12 +146,17 @@ func (r *Repository) ListUserChannels(ctx context.Context, userID, teamID gocql.
 	return out, wrap(err)
 }
 
+// The last message and last read are written at their message's time, so the
+// newest one wins whatever order the writes arrive in.
+
 func (r *Repository) SetLastMessage(ctx context.Context, channelID, messageID gocql.UUID) error {
-	return wrap(r.query(ctx, "UPDATE channels SET last_message_id = ? WHERE id = ?", messageID, channelID).ExecRelease())
+	return wrap(r.query(ctx, "UPDATE channels USING TIMESTAMP ? SET last_message_id = ? WHERE id = ?",
+		messageID.Time().UnixMicro(), messageID, channelID).ExecRelease())
 }
 
 func (r *Repository) SetLastRead(ctx context.Context, userID, channelID, messageID gocql.UUID) error {
-	return wrap(r.query(ctx, "INSERT INTO channel_reads (user_id, channel_id, last_read_id) VALUES (?, ?, ?)", userID, channelID, messageID).ExecRelease())
+	return wrap(r.query(ctx, "UPDATE channel_reads USING TIMESTAMP ? SET last_read_id = ? WHERE user_id = ? AND channel_id = ?",
+		messageID.Time().UnixMicro(), messageID, userID, channelID).ExecRelease())
 }
 
 func (r *Repository) ListLastReads(ctx context.Context, userID gocql.UUID) ([]*ChannelRead, error) {

@@ -222,7 +222,18 @@ func isHTMX(r *http.Request) bool {
 
 // safeNext keeps a post-login redirect on this site.
 func safeNext(next string) string {
-	if next == "" || !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") || strings.ContainsAny(next, "\\\r\n") {
+	if next == "" || len(next) > 2048 || !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") {
+		return "/"
+	}
+	// Browsers drop tabs and newlines from URLs and read a backslash as a
+	// slash, either of which can turn a path into another host.
+	for i := range len(next) {
+		if c := next[i]; c < 0x20 || c == 0x7f || c == '\\' {
+			return "/"
+		}
+	}
+	u, err := url.Parse(next)
+	if err != nil || u.Scheme != "" || u.Host != "" || u.Opaque != "" {
 		return "/"
 	}
 	return next

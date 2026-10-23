@@ -128,12 +128,13 @@ type signupForm struct {
 
 type signupData struct {
 	Page
-	Allowed   bool
-	Bootstrap bool
-	Invite    string
-	TeamName  string
-	Next      string
-	Form      signupForm
+	Allowed    bool
+	Bootstrap  bool
+	SetupToken bool
+	Invite     string
+	TeamName   string
+	Next       string
+	Form       signupForm
 }
 
 func (h *Handler) signupInfo(r *http.Request, invite string) (*pb.GetSignupInfoResponse, error) {
@@ -157,11 +158,12 @@ func (h *Handler) signupPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := signupData{
-		Page:      Page{Title: "Sign up", CSRF: h.csrfToken(w, r)},
-		Allowed:   info.Bootstrap || info.Open || info.InviteValid,
-		Bootstrap: info.Bootstrap,
-		TeamName:  info.TeamDisplayName,
-		Next:      nextParam(r),
+		Page:       Page{Title: "Sign up", CSRF: h.csrfToken(w, r)},
+		Allowed:    info.Bootstrap || info.Open || info.InviteValid,
+		Bootstrap:  info.Bootstrap,
+		SetupToken: info.SetupTokenRequired,
+		TeamName:   info.TeamDisplayName,
+		Next:       nextParam(r),
 	}
 	if info.InviteValid {
 		data.Invite = invite
@@ -182,11 +184,12 @@ func (h *Handler) signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := signupData{
-		Page:      Page{Title: "Sign up", CSRF: h.csrfToken(w, r)},
-		Allowed:   info.Bootstrap || info.Open || info.InviteValid,
-		Bootstrap: info.Bootstrap,
-		TeamName:  info.TeamDisplayName,
-		Form:      form,
+		Page:       Page{Title: "Sign up", CSRF: h.csrfToken(w, r)},
+		Allowed:    info.Bootstrap || info.Open || info.InviteValid,
+		Bootstrap:  info.Bootstrap,
+		SetupToken: info.SetupTokenRequired,
+		TeamName:   info.TeamDisplayName,
+		Form:       form,
 	}
 	if info.InviteValid {
 		data.Invite = invite
@@ -201,6 +204,7 @@ func (h *Handler) signup(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	res, err := h.client.Auth.SignUp(ctx, &pb.SignUpRequest{
 		Username: form.Username, Email: form.Email, DisplayName: form.DisplayName, Password: pass, InviteToken: data.Invite,
+		SetupToken: r.PostFormValue("setup_token"),
 	})
 	if err != nil {
 		data.Error = drpc.Err(err).Message

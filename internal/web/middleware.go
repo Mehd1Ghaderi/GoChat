@@ -2,7 +2,9 @@ package web
 
 import (
 	"errors"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -52,8 +54,8 @@ func (h *Handler) headers(next http.Handler) http.Handler {
 
 func (h *Handler) throttle(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !h.reqs.Allow(h.clientIP(r)) {
-			w.Header().Set("Retry-After", "1")
+		if ok, wait := h.reqs.Allow(h.clientIP(r)); !ok {
+			retryAfter(w, wait)
 			http.Error(w, "too many requests", http.StatusTooManyRequests)
 			return
 		}
@@ -61,11 +63,15 @@ func (h *Handler) throttle(next http.Handler) http.Handler {
 	})
 }
 
+func retryAfter(w http.ResponseWriter, wait time.Duration) {
+	w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
+}
+
 // limited applies the stricter budget of the authentication endpoints.
 func (h *Handler) limited(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !h.auth.Allow(h.clientIP(r)) {
-			w.Header().Set("Retry-After", "60")
+		if ok, wait := h.auth.Allow(h.clientIP(r)); !ok {
+			retryAfter(w, wait)
 			w.Header().Set("X-Error", "Too many attempts, wait a minute.")
 			http.Error(w, "too many attempts, wait a minute", http.StatusTooManyRequests)
 			return
@@ -73,6 +79,8 @@ func (h *Handler) limited(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+const maxFormBytes = 1 << 20
 
 // csrf requires a same-origin request carrying the token of the CSRF cookie,
 // in the X-CSRF-Token header (htmx) or the _csrf field (plain forms).
@@ -83,6 +91,15 @@ func (h *Handler) csrf(next http.Handler) http.Handler {
 			http.Error(w, "cross-origin request refused", http.StatusForbidden)
 			return
 		}
+		// Only uploads stream large or multipart bodies; anything else is a
+		// small form.
+		if r.URL.Path != "/upload" {
+			if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
+				http.Error(w, "unsupported request body", http.StatusUnsupportedMediaType)
+				return
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
+		}
 		c, err := r.Cookie(h.cookieName("csrf"))
 		if err != nil || !secure.ValidToken(c.Value) {
 			h.refuseCSRF(w, r)
@@ -90,7 +107,6 @@ func (h *Handler) csrf(next http.Handler) http.Handler {
 		}
 		sent := r.Header.Get(csrfHeader)
 		if sent == "" && strings.HasPrefix(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
-			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 			sent = r.PostFormValue(csrfField)
 		}
 		if !secure.Equal(sent, c.Value) {

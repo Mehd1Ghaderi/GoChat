@@ -85,12 +85,15 @@ services:
     # Seals TOTP secrets at rest: 32 random bytes, base64.
     secret_key: ""
     open_signup: false
+    # When set, creating the first (admin) account requires this token.
+    setup_token: ""
     login_failures: 10
     login_window: 15m
   directory:
     workers: 16
     op_timeout: 10s
     invite_ttl: 168h
+    max_invites: 100
   channels:
     idle_timeout: 10m
     op_timeout: 10s
@@ -105,6 +108,7 @@ services:
     op_timeout: 30s
     max_size: 52428800
     max_uploads: 64
+    max_user_uploads: 4
     orphan_after: 24h
     janitor_interval: 1h
   hub:

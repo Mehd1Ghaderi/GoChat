@@ -22,11 +22,13 @@ import (
 	"github.com/ssenerg/gochat/internal/core/models"
 	"github.com/ssenerg/gochat/internal/core/secure"
 	"github.com/ssenerg/gochat/internal/core/validate"
+	"github.com/ssenerg/gochat/internal/core/window"
 	ierrors "github.com/ssenerg/gochat/internal/errors"
 	"github.com/ssenerg/gochat/internal/repos/scylla"
 	"github.com/ssenerg/gochat/internal/services/channels"
 	"github.com/ssenerg/gochat/internal/services/convert"
 	"github.com/ssenerg/gochat/internal/services/hub"
+	"github.com/ssenerg/gochat/internal/services/invites"
 	"github.com/ssenerg/gochat/internal/services/users"
 )
 
@@ -68,6 +70,7 @@ type Deps struct {
 	Engine   *actor.Engine
 	Hub      *actor.PID
 	Channels *actor.PID
+	invited  *window.Counter
 }
 
 // The channels every team starts with and every member joins.
@@ -77,6 +80,7 @@ var defaultChannels = []struct{ name, display, purpose string }{
 }
 
 func Pool(d *Deps) actor.Producer {
+	d.invited = window.New(d.Cfg.MaxInvites, d.Cfg.InviteTTL)
 	return actors.NewPool(d.Cfg.Workers, func() actor.Receiver { return &worker{Deps: d} },
 		actor.WithMiddleware(actors.Recover(d.Logger)))
 }
@@ -408,6 +412,11 @@ func (w *worker) createInvite(ctx context.Context, msg CreateInvite) (*Invite, e
 	if !w.Authz.Can(authz.ObjInvite, authz.ActCreate, string(m.Role), string(msg.P.Role)) {
 		return nil, ierrors.PermissionDenied()
 	}
+	if key := msg.P.UserID.String(); w.invited.Blocked(key) {
+		return nil, ierrors.ResourceExhausted("too many invites created, try again later")
+	} else {
+		w.invited.Add(key)
+	}
 	token := secure.Token()
 	now := time.Now().UTC()
 	inv := &models.Invite{
@@ -423,27 +432,8 @@ func (w *worker) createInvite(ctx context.Context, msg CreateInvite) (*Invite, e
 	return &Invite{Token: token, ExpiresAt: inv.ExpiresAt}, nil
 }
 
-var errBadInvite = ierrors.NotFound("invite is invalid or expired")
-
-func (w *worker) validInvite(ctx context.Context, token string) (*models.Invite, error) {
-	if !secure.ValidToken(token) {
-		return nil, errBadInvite
-	}
-	inv, err := w.Repo.GetInvite(ctx, secure.Hash(token))
-	if err != nil {
-		if ierrors.Is(err, ierrors.CodeNotFound) {
-			return nil, errBadInvite
-		}
-		return nil, err
-	}
-	if !ids.IsZero(inv.UsedBy) || !time.Now().Before(inv.ExpiresAt) {
-		return nil, errBadInvite
-	}
-	return inv, nil
-}
-
 func (w *worker) getInvite(ctx context.Context, token string) (*InviteInfo, error) {
-	inv, err := w.validInvite(ctx, token)
+	inv, err := invites.Valid(ctx, w.Repo, w.Authz, w.Users, token, gocql.UUID{})
 	if err != nil {
 		if ierrors.Is(err, ierrors.CodeNotFound) {
 			return &InviteInfo{}, nil
@@ -461,7 +451,7 @@ func (w *worker) getInvite(ctx context.Context, token string) (*InviteInfo, erro
 }
 
 func (w *worker) acceptInvite(ctx context.Context, msg AcceptInvite) (*pb.Team, error) {
-	inv, err := w.validInvite(ctx, msg.Token)
+	inv, err := invites.Valid(ctx, w.Repo, w.Authz, w.Users, msg.Token, msg.P.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -469,19 +459,26 @@ func (w *worker) acceptInvite(ctx context.Context, msg AcceptInvite) (*pb.Team, 
 		// Already a member: the invite stays unused for someone else.
 		return w.joinTeam(ctx, msg.P.UserID, inv.TeamID)
 	}
-	now := time.Now().UTC()
-	ok, err := w.Repo.ConsumeInvite(ctx, inv, msg.P.UserID, now)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, errBadInvite
+	// An invite the caller used in a join that did not complete is theirs
+	// to finish.
+	consumed := false
+	if inv.UsedBy != msg.P.UserID {
+		ok, err := w.Repo.ConsumeInvite(ctx, inv, msg.P.UserID, time.Now().UTC())
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, invites.ErrInvalid
+		}
+		consumed = true
 	}
 	team, err := w.joinTeam(ctx, msg.P.UserID, inv.TeamID)
 	if err != nil {
-		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = w.Repo.ReleaseInvite(c, inv, msg.P.UserID, time.Now())
+		if consumed {
+			c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = w.Repo.ReleaseInvite(c, inv, msg.P.UserID, time.Now())
+		}
 		return nil, err
 	}
 	return team, nil
@@ -493,15 +490,26 @@ func (w *worker) joinTeam(ctx context.Context, userID, teamID gocql.UUID) (*pb.T
 	if err != nil {
 		return nil, err
 	}
-	if m, err := w.Repo.GetTeamMember(ctx, teamID, userID); err == nil {
-		return convert.Team(team, m.Role), nil
-	}
 	user, err := w.Users.Get(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	member := &models.TeamMember{TeamID: teamID, UserID: userID, Role: models.TeamRoleMember, JoinedAt: time.Now().UTC()}
-	if err := w.Repo.AddTeamMember(ctx, member, user.Username, user.DisplayName); err != nil {
+	role := models.TeamRoleMember
+	m, err := w.Repo.GetTeamMember(ctx, teamID, userID)
+	switch {
+	case err == nil:
+		// A member in no channel of the team has a join to finish.
+		in, err := w.Repo.ListUserChannels(ctx, userID, teamID)
+		if err != nil || len(in) > 0 {
+			return convert.Team(team, m.Role), err
+		}
+		role = m.Role
+	case ierrors.Is(err, ierrors.CodeNotFound):
+		member := &models.TeamMember{TeamID: teamID, UserID: userID, Role: role, JoinedAt: time.Now().UTC()}
+		if err := w.Repo.AddTeamMember(ctx, member, user.Username, user.DisplayName); err != nil {
+			return nil, err
+		}
+	default:
 		return nil, err
 	}
 	p := &models.Principal{UserID: userID, Role: user.Role}
@@ -518,7 +526,7 @@ func (w *worker) joinTeam(ctx context.Context, userID, teamID gocql.UUID) (*pb.T
 			return nil, err
 		}
 	}
-	out := convert.Team(team, models.TeamRoleMember)
+	out := convert.Team(team, role)
 	w.deliver(userID, &pb.Event{Payload: &pb.Event_TeamJoined{TeamJoined: &pb.TeamJoined{Team: out}}})
 	return out, nil
 }

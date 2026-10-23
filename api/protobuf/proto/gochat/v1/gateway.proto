@@ -3,6 +3,7 @@ syntax = "proto3";
 package gochat.v1;
 
 import "gochat/v1/types.proto";
+import "google/protobuf/timestamp.proto";
 
 // GatewayService carries the real-time events of the people a web gateway
 // serves. A gateway attaches each of its connections with the session that
@@ -48,6 +49,8 @@ message Attached {
   uint64 conn_id = 1;
   User user = 2;
   string session_id = 3;
+  // expires_at is when the session ends, and the connection with it.
+  google.protobuf.Timestamp expires_at = 4;
 }
 
 message AttachRejected {

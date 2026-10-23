@@ -11,6 +11,8 @@ type Config struct {
 	Workers   int           `mapstructure:"workers"`
 	OpTimeout time.Duration `mapstructure:"op_timeout"`
 	InviteTTL time.Duration `mapstructure:"invite_ttl"`
+	// MaxInvites caps the invites one person creates per invite_ttl.
+	MaxInvites int `mapstructure:"max_invites"`
 }
 
 var _ config.Config = (*Config)(nil)
@@ -24,6 +26,9 @@ func (c *Config) Validate() error {
 	}
 	if c.InviteTTL < time.Minute || c.InviteTTL > 30*24*time.Hour {
 		return errors.New("invite_ttl must be between 1m and 720h")
+	}
+	if c.MaxInvites < 1 {
+		return errors.New("max_invites must be at least 1")
 	}
 	return nil
 }

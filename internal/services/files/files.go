@@ -26,7 +26,9 @@ type Repo interface {
 	InsertAttachment(ctx context.Context, a *models.Attachment) error
 	GetAttachment(ctx context.Context, id gocql.UUID) (*models.Attachment, error)
 	DeleteAttachment(ctx context.Context, a *models.Attachment) error
-	ListPendingAttachments(ctx context.Context, day int32) ([]gocql.UUID, error)
+	ListPendingUploads(ctx context.Context, day int32) ([]*scylla.PendingUpload, error)
+	DeleteOrphan(ctx context.Context, id gocql.UUID) (bool, error)
+	ForgetPending(ctx context.Context, p *scylla.PendingUpload) error
 }
 
 type Storage interface {
@@ -228,32 +230,32 @@ func (j *janitor) sweep() {
 	last := scylla.PendingDay(cutoff)
 	removed := 0
 	for day := last - 7; day <= last; day++ {
-		pending, err := j.Repo.ListPendingAttachments(ctx, day)
+		pending, err := j.Repo.ListPendingUploads(ctx, day)
 		if err != nil {
 			j.Logger.Warn("janitor failed to list uploads", zap.Error(err))
 			return
 		}
-		for _, id := range pending {
-			att, err := j.Repo.GetAttachment(ctx, id)
+		for _, p := range pending {
+			if p.CreatedAt.After(cutoff) {
+				continue
+			}
+			// The row goes first, and only while unposted, so a post racing
+			// the janitor either keeps its file or fails.
+			orphan, err := j.Repo.DeleteOrphan(ctx, p.ID)
 			if err != nil {
-				if ierrors.Is(err, ierrors.CodeNotFound) {
-					continue
-				}
-				j.Logger.Warn("janitor failed to read upload", zap.Error(err))
-				return
-			}
-			if !ids.IsZero(att.MessageID) || att.CreatedAt.After(cutoff) {
-				continue
-			}
-			if err := j.Storage.Delete(ctx, att.ObjectKey); err != nil {
-				j.Logger.Warn("janitor failed to delete object", zap.Error(err))
-				continue
-			}
-			if err := j.Repo.DeleteAttachment(ctx, att); err != nil {
 				j.Logger.Warn("janitor failed to delete upload", zap.Error(err))
 				continue
 			}
-			removed++
+			if orphan {
+				if err := j.Storage.Delete(ctx, p.ObjectKey); err != nil {
+					j.Logger.Warn("janitor failed to delete object", zap.Error(err))
+					continue
+				}
+				removed++
+			}
+			if err := j.Repo.ForgetPending(ctx, p); err != nil {
+				j.Logger.Warn("janitor failed to update the pending list", zap.Error(err))
+			}
 		}
 	}
 	if removed > 0 {

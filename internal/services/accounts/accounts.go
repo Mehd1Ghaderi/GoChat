@@ -5,7 +5,9 @@ package accounts
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
 	"github.com/ssenerg/gochat/internal/actors"
+	"github.com/ssenerg/gochat/internal/authz"
 	"github.com/ssenerg/gochat/internal/core/cache"
 	"github.com/ssenerg/gochat/internal/core/ids"
 	"github.com/ssenerg/gochat/internal/core/models"
@@ -22,9 +25,11 @@ import (
 	"github.com/ssenerg/gochat/internal/core/secure"
 	"github.com/ssenerg/gochat/internal/core/totp"
 	"github.com/ssenerg/gochat/internal/core/validate"
+	"github.com/ssenerg/gochat/internal/core/window"
 	ierrors "github.com/ssenerg/gochat/internal/errors"
 	"github.com/ssenerg/gochat/internal/services/convert"
 	"github.com/ssenerg/gochat/internal/services/hub"
+	"github.com/ssenerg/gochat/internal/services/invites"
 	"github.com/ssenerg/gochat/internal/services/users"
 )
 
@@ -54,6 +59,7 @@ type Repo interface {
 	ConsumeMFAChallenge(ctx context.Context, hash []byte) (bool, error)
 
 	GetTeam(ctx context.Context, id gocql.UUID) (*models.Team, error)
+	GetTeamMember(ctx context.Context, teamID, userID gocql.UUID) (*models.TeamMember, error)
 	GetInvite(ctx context.Context, hash []byte) (*models.Invite, error)
 	ConsumeInvite(ctx context.Context, inv *models.Invite, userID gocql.UUID, now time.Time) (bool, error)
 	ReleaseInvite(ctx context.Context, inv *models.Invite, userID gocql.UUID, now time.Time) error
@@ -62,15 +68,16 @@ type Repo interface {
 type SignupInfo struct{ InviteToken string }
 
 type SignupInfoResult struct {
-	Bootstrap       bool
-	Open            bool
-	InviteValid     bool
-	TeamDisplayName string
+	Bootstrap          bool
+	SetupTokenRequired bool
+	Open               bool
+	InviteValid        bool
+	TeamDisplayName    string
 }
 
 type SignUp struct {
-	Username, Email, DisplayName, Password, InviteToken string
-	IP, UserAgent                                       string
+	Username, Email, DisplayName, Password, InviteToken, SetupToken string
+	IP, UserAgent                                                   string
 }
 
 type SignUpResult struct {
@@ -125,23 +132,33 @@ type Done struct{}
 
 const recoveryCodeCount = 10
 
+// accountFailureFactor is how many more failed sign-ins an account takes from
+// all addresses together than from one.
+const accountFailureFactor = 10
+
 // Deps is what every worker of the pool shares.
 type Deps struct {
-	Logger   *zap.Logger
-	Cfg      *Config
-	Repo     Repo
-	Users    *users.Cache
-	Engine   *actor.Engine
-	Hub      *actor.PID
-	sealer   *secure.Sealer
-	sessions *cache.Cache[string, *models.Principal]
+	Logger *zap.Logger
+	Cfg    *Config
+	Repo   Repo
+	Users  *users.Cache
+	Authz  *authz.Authorizer
+	Engine *actor.Engine
+	Hub    *actor.PID
+	sealer *secure.Sealer
+	// recoveryKey keys the hashes of recovery codes, which are too short to
+	// be stored under a plain hash.
+	recoveryKey []byte
+	sessions    *cache.Cache[string, *models.Principal]
 	// revokedSessions keeps a revoked session's hash for a while, so a lookup
 	// that raced the revocation does not cache it again.
 	revokedSessions *cache.Cache[string, struct{}]
-	failures        *limiter
+	failures        *window.Counter
+	// accountFailures counts failed sign-ins per account from every address.
+	accountFailures *window.Counter
 }
 
-func NewDeps(logger *zap.Logger, cfg *Config, repo Repo, userCache *users.Cache, engine *actor.Engine, hubPID *actor.PID) (*Deps, error) {
+func NewDeps(logger *zap.Logger, cfg *Config, repo Repo, userCache *users.Cache, az *authz.Authorizer, engine *actor.Engine, hubPID *actor.PID) (*Deps, error) {
 	key, err := secure.DecodeKey(cfg.SecretKey)
 	if err != nil {
 		return nil, err
@@ -155,12 +172,15 @@ func NewDeps(logger *zap.Logger, cfg *Config, repo Repo, userCache *users.Cache,
 		Cfg:             cfg,
 		Repo:            repo,
 		Users:           userCache,
+		Authz:           az,
 		Engine:          engine,
 		Hub:             hubPID,
 		sealer:          sealer,
+		recoveryKey:     secure.DeriveKey(key, "recovery-codes"),
 		sessions:        cache.New[string, *models.Principal](cfg.SessionCacheSize, cfg.SessionCacheTTL),
 		revokedSessions: cache.New[string, struct{}](cfg.SessionCacheSize, cfg.SessionCacheTTL+cfg.OpTimeout),
-		failures:        newLimiter(cfg.LoginFailures, cfg.LoginWindow),
+		failures:        window.New(cfg.LoginFailures, cfg.LoginWindow),
+		accountFailures: window.New(cfg.LoginFailures*accountFailureFactor, cfg.LoginWindow),
 	}, nil
 }
 
@@ -226,20 +246,7 @@ func (w *worker) Receive(c *actor.Context) {
 }
 
 func (w *worker) validInvite(ctx context.Context, token string) (*models.Invite, error) {
-	if !secure.ValidToken(token) {
-		return nil, ierrors.NotFound("invite is invalid or expired")
-	}
-	inv, err := w.Repo.GetInvite(ctx, secure.Hash(token))
-	if err != nil {
-		if ierrors.Is(err, ierrors.CodeNotFound) {
-			return nil, ierrors.NotFound("invite is invalid or expired")
-		}
-		return nil, err
-	}
-	if !ids.IsZero(inv.UsedBy) || !time.Now().Before(inv.ExpiresAt) {
-		return nil, ierrors.NotFound("invite is invalid or expired")
-	}
-	return inv, nil
+	return invites.Valid(ctx, w.Repo, w.Authz, w.Users, token, gocql.UUID{})
 }
 
 func (w *worker) signupInfo(ctx context.Context, msg SignupInfo) (*SignupInfoResult, error) {
@@ -247,7 +254,7 @@ func (w *worker) signupInfo(ctx context.Context, msg SignupInfo) (*SignupInfoRes
 	if err != nil {
 		return nil, err
 	}
-	out := &SignupInfoResult{Bootstrap: !bootstrapped, Open: w.Cfg.OpenSignup}
+	out := &SignupInfoResult{Bootstrap: !bootstrapped, SetupTokenRequired: !bootstrapped && w.Cfg.SetupToken != "", Open: w.Cfg.OpenSignup}
 	if msg.InviteToken != "" {
 		if inv, err := w.validInvite(ctx, msg.InviteToken); err == nil {
 			if team, err := w.Repo.GetTeam(ctx, inv.TeamID); err == nil {
@@ -301,6 +308,9 @@ func (w *worker) signUp(ctx context.Context, msg SignUp) (*SignUpResult, error) 
 	}
 	claimed := false
 	if !bootstrapped && inv == nil {
+		if w.Cfg.SetupToken != "" && !secure.Equal(msg.SetupToken, w.Cfg.SetupToken) {
+			return nil, ierrors.New(ierrors.CodePermissionDenied, "the setup token is not correct")
+		}
 		if claimed, err = w.Repo.ClaimBootstrap(ctx, user.ID); err != nil {
 			return nil, err
 		}
@@ -372,16 +382,42 @@ func truncate(s string, n int) string {
 	return s
 }
 
-var errBadCredentials = ierrors.New(ierrors.CodeUnauthenticated, "invalid username or password")
+var (
+	errBadCredentials = ierrors.New(ierrors.CodeUnauthenticated, "invalid username or password")
+	errTooMany        = ierrors.ResourceExhausted("too many failed attempts, try again later")
+)
+
+// addressKey groups IPv6 addresses by their /64, which one host can rotate
+// through.
+func addressKey(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ""
+	}
+	if addr.Is6() && !addr.Is4In6() {
+		p, _ := addr.Prefix(64)
+		return p.String()
+	}
+	return addr.Unmap().String()
+}
+
+func (d *Deps) recoveryHash(userID gocql.UUID, code string) []byte {
+	m := hmac.New(sha256.New, d.recoveryKey)
+	m.Write(userID[:])
+	m.Write([]byte(code))
+	return m.Sum(nil)
+}
 
 func (w *worker) login(ctx context.Context, msg Login) (*LoginResult, error) {
 	login := strings.ToLower(strings.TrimSpace(msg.Login))
 	if login == "" || len(login) > 254 || len(msg.Password) > 256 {
 		return nil, errBadCredentials
 	}
-	key := "login:" + login
-	if w.failures.blocked(key) {
-		return nil, ierrors.ResourceExhausted("too many failed attempts, try again later")
+	// One address locks only itself out of an account; the account's own
+	// limit, higher, bounds guessing from many addresses.
+	key := "login:" + login + "|" + addressKey(msg.IP)
+	if w.failures.Blocked(key) {
+		return nil, errTooMany
 	}
 	var (
 		id  gocql.UUID
@@ -397,8 +433,12 @@ func (w *worker) login(ctx context.Context, msg Login) (*LoginResult, error) {
 			return nil, err
 		}
 		password.Dummy(msg.Password, w.Cfg.Password)
-		w.failures.fail(key)
+		w.failures.Add(key)
 		return nil, errBadCredentials
+	}
+	accountKey := id.String()
+	if w.accountFailures.Blocked(accountKey) {
+		return nil, errTooMany
 	}
 	user, err := w.Repo.GetUser(ctx, id)
 	if err != nil {
@@ -409,10 +449,11 @@ func (w *worker) login(ctx context.Context, msg Login) (*LoginResult, error) {
 		return nil, ierrors.Internal(err)
 	}
 	if !ok {
-		w.failures.fail(key)
+		w.failures.Add(key)
+		w.accountFailures.Add(accountKey)
 		return nil, errBadCredentials
 	}
-	w.failures.reset(key)
+	w.failures.Reset(key)
 	if user.Deactivated {
 		return nil, ierrors.New(ierrors.CodePermissionDenied, "account is deactivated")
 	}
@@ -469,6 +510,13 @@ func (w *worker) verifyMFA(ctx context.Context, msg VerifyMFA) (*LoginResult, er
 	if !counted {
 		return nil, ierrors.New(ierrors.CodeUnauthenticated, "invalid code")
 	}
+	// Every sign-in opens a new challenge, so wrong codes are also counted
+	// per account across challenges.
+	mfaKey := "mfa:" + ch.UserID.String()
+	if w.failures.Blocked(mfaKey) {
+		_, _ = w.Repo.ConsumeMFAChallenge(ctx, hash)
+		return nil, errTooMany
+	}
 	user, err := w.Repo.GetUser(ctx, ch.UserID)
 	if err != nil {
 		return nil, err
@@ -482,8 +530,11 @@ func (w *worker) verifyMFA(ctx context.Context, msg VerifyMFA) (*LoginResult, er
 		return nil, err
 	}
 	if !ok {
+		w.failures.Add(mfaKey)
+		w.Logger.Warn("wrong second factor", zap.String("user", user.ID.String()), zap.String("ip", msg.IP))
 		return nil, ierrors.New(ierrors.CodeUnauthenticated, "invalid code")
 	}
+	w.failures.Reset(mfaKey)
 	consumed, err := w.Repo.ConsumeMFAChallenge(ctx, hash)
 	if err != nil {
 		return nil, err
@@ -502,8 +553,7 @@ func (w *worker) verifyMFA(ctx context.Context, msg VerifyMFA) (*LoginResult, er
 // code, which it spends.
 func (w *worker) checkSecondFactor(ctx context.Context, user *models.User, code string, now time.Time) (bool, error) {
 	if rc, ok := totp.NormalizeRecovery(code); ok && len(strings.TrimSpace(code)) > 6 {
-		sum := sha256.Sum256([]byte(rc))
-		return w.Repo.ConsumeRecoveryCode(ctx, user.ID, sum[:])
+		return w.Repo.ConsumeRecoveryCode(ctx, user.ID, w.recoveryHash(user.ID, rc))
 	}
 	secret, err := w.sealer.Open(user.TOTPSecret, user.ID[:])
 	if err != nil {
@@ -585,7 +635,7 @@ func (w *worker) revoked(userID gocql.UUID, hashes [][]byte) {
 
 func (w *worker) verifyPassword(ctx context.Context, p *models.Principal, pass string) (*models.User, error) {
 	key := "reauth:" + p.UserID.String()
-	if w.failures.blocked(key) {
+	if w.failures.Blocked(key) {
 		return nil, ierrors.ResourceExhausted("too many failed attempts, try again later")
 	}
 	user, err := w.Repo.GetUser(ctx, p.UserID)
@@ -600,7 +650,7 @@ func (w *worker) verifyPassword(ctx context.Context, p *models.Principal, pass s
 		return nil, ierrors.Internal(err)
 	}
 	if !ok {
-		w.failures.fail(key)
+		w.failures.Add(key)
 		return nil, ierrors.New(ierrors.CodePermissionDenied, "password is incorrect")
 	}
 	return user, nil
@@ -645,7 +695,7 @@ func (w *worker) beginTOTP(ctx context.Context, msg BeginTOTP) (*TOTPSetup, erro
 
 func (w *worker) confirmTOTP(ctx context.Context, msg ConfirmTOTP) (RecoveryCodes, error) {
 	key := "totp:" + msg.P.UserID.String()
-	if w.failures.blocked(key) {
+	if w.failures.Blocked(key) {
 		return nil, ierrors.ResourceExhausted("too many failed attempts, try again later")
 	}
 	user, err := w.Repo.GetUser(ctx, msg.P.UserID)
@@ -664,8 +714,17 @@ func (w *worker) confirmTOTP(ctx context.Context, msg ConfirmTOTP) (RecoveryCode
 	}
 	step, ok := totp.Match(string(secret), msg.Code, time.Now())
 	if !ok {
-		w.failures.fail(key)
+		w.failures.Add(key)
 		return nil, ierrors.InvalidArgument("invalid code")
+	}
+	// The codes go first: enabling without them could lock the user out.
+	codes := totp.RecoveryCodes(recoveryCodeCount)
+	hashes := make([][]byte, len(codes))
+	for i, rc := range codes {
+		hashes[i] = w.recoveryHash(user.ID, rc)
+	}
+	if err := w.Repo.ReplaceRecoveryCodes(ctx, user.ID, hashes); err != nil {
+		return nil, err
 	}
 	applied, err := w.Repo.EnableTOTP(ctx, user.ID, user.TOTPPending, step, time.Now().UTC())
 	if err != nil {
@@ -674,16 +733,7 @@ func (w *worker) confirmTOTP(ctx context.Context, msg ConfirmTOTP) (RecoveryCode
 	if !applied {
 		return nil, ierrors.FailedPrecondition("the setup changed, start again")
 	}
-	codes := totp.RecoveryCodes(recoveryCodeCount)
-	hashes := make([][]byte, len(codes))
-	for i, rc := range codes {
-		sum := sha256.Sum256([]byte(rc))
-		hashes[i] = sum[:]
-	}
-	if err := w.Repo.ReplaceRecoveryCodes(ctx, user.ID, hashes); err != nil {
-		return nil, err
-	}
-	w.failures.reset(key)
+	w.failures.Reset(key)
 	w.Users.Invalidate(user.ID)
 	return codes, nil
 }
@@ -701,7 +751,7 @@ func (w *worker) disableTOTP(ctx context.Context, msg DisableTOTP) (Done, error)
 		return Done{}, err
 	}
 	if !ok {
-		w.failures.fail("reauth:" + user.ID.String())
+		w.failures.Add("reauth:" + user.ID.String())
 		return Done{}, ierrors.InvalidArgument("invalid code")
 	}
 	if err := w.Repo.DisableTOTP(ctx, user.ID, time.Now().UTC()); err != nil {

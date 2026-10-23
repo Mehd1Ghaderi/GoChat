@@ -28,10 +28,12 @@ type HTTPConfig struct {
 	ReadTimeout       time.Duration `mapstructure:"read_timeout"`
 	WriteTimeout      time.Duration `mapstructure:"write_timeout"`
 	IdleTimeout       time.Duration `mapstructure:"idle_timeout"`
-	// TransferTimeout bounds one upload or download.
-	TransferTimeout time.Duration `mapstructure:"transfer_timeout"`
-	MaxHeaderBytes  int           `mapstructure:"max_header_bytes"`
-	ShutdownTimeout time.Duration `mapstructure:"shutdown_timeout"`
+	// TransferTimeout bounds one upload or download, and TransferIdleTimeout
+	// how long an upload may send nothing.
+	TransferTimeout     time.Duration `mapstructure:"transfer_timeout"`
+	TransferIdleTimeout time.Duration `mapstructure:"transfer_idle_timeout"`
+	MaxHeaderBytes      int           `mapstructure:"max_header_bytes"`
+	ShutdownTimeout     time.Duration `mapstructure:"shutdown_timeout"`
 }
 
 type RateLimitConfig struct {
@@ -69,7 +71,7 @@ func (c *Config) Validate() error {
 	}
 	h := c.HTTP
 	if h.ReadHeaderTimeout <= 0 || h.ReadTimeout <= 0 || h.WriteTimeout <= 0 || h.IdleTimeout <= 0 ||
-		h.TransferTimeout <= 0 || h.ShutdownTimeout <= 0 {
+		h.TransferTimeout <= 0 || h.TransferIdleTimeout <= 0 || h.ShutdownTimeout <= 0 {
 		return errors.New("http timeouts must be positive")
 	}
 	if h.MaxHeaderBytes < 4096 {

@@ -20,7 +20,13 @@ func (r *Repository) InsertMessage(ctx context.Context, m *models.Message, newBu
 			return wrap(err)
 		}
 	}
-	return wrap(r.query(ctx, "INSERT INTO messages ("+messageColumns+") VALUES (?, ?, ?, ?, ?, ?, null)",
+	// Absent columns are left out: a null or a whole collection would each
+	// write a tombstone.
+	if len(m.Attachments) == 0 {
+		return wrap(r.query(ctx, "INSERT INTO messages (channel_id, bucket, id, user_id, content) VALUES (?, ?, ?, ?, ?)",
+			m.ChannelID, m.Bucket, m.ID, m.UserID, m.Content).ExecRelease())
+	}
+	return wrap(r.query(ctx, "INSERT INTO messages (channel_id, bucket, id, user_id, content, attachments) VALUES (?, ?, ?, ?, ?, ?)",
 		m.ChannelID, m.Bucket, m.ID, m.UserID, m.Content, m.Attachments).ExecRelease())
 }
 

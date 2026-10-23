@@ -9,6 +9,7 @@ import (
 
 	"github.com/anthdm/hollywood/actor"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
 	"github.com/ssenerg/gochat/internal/actors"
@@ -52,6 +53,7 @@ type Attach struct {
 	ConnID    uint64
 	User      *pb.User
 	SessionID string
+	ExpiresAt time.Time
 }
 
 type Reject struct {
@@ -236,7 +238,7 @@ func (h *hub) attach(c *actor.Context, msg Attach) {
 	}
 	per[gw.id]++
 	h.send(c, gw, &pb.ConnectResponse{Frame: &pb.ConnectResponse_Attached{Attached: &pb.Attached{
-		ConnId: msg.ConnID, User: msg.User, SessionId: msg.SessionID,
+		ConnId: msg.ConnID, User: msg.User, SessionId: msg.SessionID, ExpiresAt: timestamppb.New(msg.ExpiresAt),
 	}}})
 	if !h.announced[userID] {
 		h.announced[userID] = true

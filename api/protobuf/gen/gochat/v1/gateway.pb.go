@@ -9,6 +9,7 @@ package gochatv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -426,10 +427,12 @@ func (*Welcome) Descriptor() ([]byte, []int) {
 }
 
 type Attached struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ConnId        uint64                 `protobuf:"varint,1,opt,name=conn_id,json=connId,proto3" json:"conn_id,omitempty"`
-	User          *User                  `protobuf:"bytes,2,opt,name=user,proto3" json:"user,omitempty"`
-	SessionId     string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	ConnId    uint64                 `protobuf:"varint,1,opt,name=conn_id,json=connId,proto3" json:"conn_id,omitempty"`
+	User      *User                  `protobuf:"bytes,2,opt,name=user,proto3" json:"user,omitempty"`
+	SessionId string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	// expires_at is when the session ends, and the connection with it.
+	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -483,6 +486,13 @@ func (x *Attached) GetSessionId() string {
 		return x.SessionId
 	}
 	return ""
+}
+
+func (x *Attached) GetExpiresAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return nil
 }
 
 type AttachRejected struct {
@@ -1226,7 +1236,7 @@ var File_gochat_v1_gateway_proto protoreflect.FileDescriptor
 
 const file_gochat_v1_gateway_proto_rawDesc = "" +
 	"\n" +
-	"\x17gochat/v1/gateway.proto\x12\tgochat.v1\x1a\x15gochat/v1/types.proto\"\x9d\x01\n" +
+	"\x17gochat/v1/gateway.proto\x12\tgochat.v1\x1a\x15gochat/v1/types.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x9d\x01\n" +
 	"\x0eConnectRequest\x12(\n" +
 	"\x05hello\x18\x01 \x01(\v2\x10.gochat.v1.HelloH\x00R\x05hello\x12+\n" +
 	"\x06attach\x18\x02 \x01(\v2\x11.gochat.v1.AttachH\x00R\x06attach\x12+\n" +
@@ -1247,12 +1257,14 @@ const file_gochat_v1_gateway_proto_rawDesc = "" +
 	"\x05event\x18\x04 \x01(\v2\x10.gochat.v1.EventH\x00R\x05event\x12G\n" +
 	"\x10sessions_revoked\x18\x05 \x01(\v2\x1a.gochat.v1.SessionsRevokedH\x00R\x0fsessionsRevokedB\a\n" +
 	"\x05frame\"\t\n" +
-	"\aWelcome\"g\n" +
+	"\aWelcome\"\xa2\x01\n" +
 	"\bAttached\x12\x17\n" +
 	"\aconn_id\x18\x01 \x01(\x04R\x06connId\x12#\n" +
 	"\x04user\x18\x02 \x01(\v2\x0f.gochat.v1.UserR\x04user\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x03 \x01(\tR\tsessionId\"?\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\x129\n" +
+	"\n" +
+	"expires_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"?\n" +
 	"\x0eAttachRejected\x12\x17\n" +
 	"\aconn_id\x18\x01 \x01(\x04R\x06connId\x12\x14\n" +
 	"\x05retry\x18\x02 \x01(\bR\x05retry\"2\n" +
@@ -1320,29 +1332,30 @@ func file_gochat_v1_gateway_proto_rawDescGZIP() []byte {
 
 var file_gochat_v1_gateway_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_gochat_v1_gateway_proto_goTypes = []any{
-	(*ConnectRequest)(nil),  // 0: gochat.v1.ConnectRequest
-	(*Hello)(nil),           // 1: gochat.v1.Hello
-	(*Attach)(nil),          // 2: gochat.v1.Attach
-	(*Detach)(nil),          // 3: gochat.v1.Detach
-	(*ConnectResponse)(nil), // 4: gochat.v1.ConnectResponse
-	(*Welcome)(nil),         // 5: gochat.v1.Welcome
-	(*Attached)(nil),        // 6: gochat.v1.Attached
-	(*AttachRejected)(nil),  // 7: gochat.v1.AttachRejected
-	(*SessionsRevoked)(nil), // 8: gochat.v1.SessionsRevoked
-	(*Event)(nil),           // 9: gochat.v1.Event
-	(*MessagePosted)(nil),   // 10: gochat.v1.MessagePosted
-	(*MessageEdited)(nil),   // 11: gochat.v1.MessageEdited
-	(*MessageDeleted)(nil),  // 12: gochat.v1.MessageDeleted
-	(*Typing)(nil),          // 13: gochat.v1.Typing
-	(*ChannelJoined)(nil),   // 14: gochat.v1.ChannelJoined
-	(*ChannelLeft)(nil),     // 15: gochat.v1.ChannelLeft
-	(*Presence)(nil),        // 16: gochat.v1.Presence
-	(*TeamJoined)(nil),      // 17: gochat.v1.TeamJoined
-	(*TeamLeft)(nil),        // 18: gochat.v1.TeamLeft
-	(*User)(nil),            // 19: gochat.v1.User
-	(*Message)(nil),         // 20: gochat.v1.Message
-	(*Channel)(nil),         // 21: gochat.v1.Channel
-	(*Team)(nil),            // 22: gochat.v1.Team
+	(*ConnectRequest)(nil),        // 0: gochat.v1.ConnectRequest
+	(*Hello)(nil),                 // 1: gochat.v1.Hello
+	(*Attach)(nil),                // 2: gochat.v1.Attach
+	(*Detach)(nil),                // 3: gochat.v1.Detach
+	(*ConnectResponse)(nil),       // 4: gochat.v1.ConnectResponse
+	(*Welcome)(nil),               // 5: gochat.v1.Welcome
+	(*Attached)(nil),              // 6: gochat.v1.Attached
+	(*AttachRejected)(nil),        // 7: gochat.v1.AttachRejected
+	(*SessionsRevoked)(nil),       // 8: gochat.v1.SessionsRevoked
+	(*Event)(nil),                 // 9: gochat.v1.Event
+	(*MessagePosted)(nil),         // 10: gochat.v1.MessagePosted
+	(*MessageEdited)(nil),         // 11: gochat.v1.MessageEdited
+	(*MessageDeleted)(nil),        // 12: gochat.v1.MessageDeleted
+	(*Typing)(nil),                // 13: gochat.v1.Typing
+	(*ChannelJoined)(nil),         // 14: gochat.v1.ChannelJoined
+	(*ChannelLeft)(nil),           // 15: gochat.v1.ChannelLeft
+	(*Presence)(nil),              // 16: gochat.v1.Presence
+	(*TeamJoined)(nil),            // 17: gochat.v1.TeamJoined
+	(*TeamLeft)(nil),              // 18: gochat.v1.TeamLeft
+	(*User)(nil),                  // 19: gochat.v1.User
+	(*timestamppb.Timestamp)(nil), // 20: google.protobuf.Timestamp
+	(*Message)(nil),               // 21: gochat.v1.Message
+	(*Channel)(nil),               // 22: gochat.v1.Channel
+	(*Team)(nil),                  // 23: gochat.v1.Team
 }
 var file_gochat_v1_gateway_proto_depIdxs = []int32{
 	1,  // 0: gochat.v1.ConnectRequest.hello:type_name -> gochat.v1.Hello
@@ -1354,27 +1367,28 @@ var file_gochat_v1_gateway_proto_depIdxs = []int32{
 	9,  // 6: gochat.v1.ConnectResponse.event:type_name -> gochat.v1.Event
 	8,  // 7: gochat.v1.ConnectResponse.sessions_revoked:type_name -> gochat.v1.SessionsRevoked
 	19, // 8: gochat.v1.Attached.user:type_name -> gochat.v1.User
-	10, // 9: gochat.v1.Event.message_posted:type_name -> gochat.v1.MessagePosted
-	11, // 10: gochat.v1.Event.message_edited:type_name -> gochat.v1.MessageEdited
-	12, // 11: gochat.v1.Event.message_deleted:type_name -> gochat.v1.MessageDeleted
-	13, // 12: gochat.v1.Event.typing:type_name -> gochat.v1.Typing
-	14, // 13: gochat.v1.Event.channel_joined:type_name -> gochat.v1.ChannelJoined
-	15, // 14: gochat.v1.Event.channel_left:type_name -> gochat.v1.ChannelLeft
-	16, // 15: gochat.v1.Event.presence:type_name -> gochat.v1.Presence
-	17, // 16: gochat.v1.Event.team_joined:type_name -> gochat.v1.TeamJoined
-	18, // 17: gochat.v1.Event.team_left:type_name -> gochat.v1.TeamLeft
-	20, // 18: gochat.v1.MessagePosted.message:type_name -> gochat.v1.Message
-	20, // 19: gochat.v1.MessageEdited.message:type_name -> gochat.v1.Message
-	19, // 20: gochat.v1.Typing.user:type_name -> gochat.v1.User
-	21, // 21: gochat.v1.ChannelJoined.channel:type_name -> gochat.v1.Channel
-	22, // 22: gochat.v1.TeamJoined.team:type_name -> gochat.v1.Team
-	0,  // 23: gochat.v1.GatewayService.Connect:input_type -> gochat.v1.ConnectRequest
-	4,  // 24: gochat.v1.GatewayService.Connect:output_type -> gochat.v1.ConnectResponse
-	24, // [24:25] is the sub-list for method output_type
-	23, // [23:24] is the sub-list for method input_type
-	23, // [23:23] is the sub-list for extension type_name
-	23, // [23:23] is the sub-list for extension extendee
-	0,  // [0:23] is the sub-list for field type_name
+	20, // 9: gochat.v1.Attached.expires_at:type_name -> google.protobuf.Timestamp
+	10, // 10: gochat.v1.Event.message_posted:type_name -> gochat.v1.MessagePosted
+	11, // 11: gochat.v1.Event.message_edited:type_name -> gochat.v1.MessageEdited
+	12, // 12: gochat.v1.Event.message_deleted:type_name -> gochat.v1.MessageDeleted
+	13, // 13: gochat.v1.Event.typing:type_name -> gochat.v1.Typing
+	14, // 14: gochat.v1.Event.channel_joined:type_name -> gochat.v1.ChannelJoined
+	15, // 15: gochat.v1.Event.channel_left:type_name -> gochat.v1.ChannelLeft
+	16, // 16: gochat.v1.Event.presence:type_name -> gochat.v1.Presence
+	17, // 17: gochat.v1.Event.team_joined:type_name -> gochat.v1.TeamJoined
+	18, // 18: gochat.v1.Event.team_left:type_name -> gochat.v1.TeamLeft
+	21, // 19: gochat.v1.MessagePosted.message:type_name -> gochat.v1.Message
+	21, // 20: gochat.v1.MessageEdited.message:type_name -> gochat.v1.Message
+	19, // 21: gochat.v1.Typing.user:type_name -> gochat.v1.User
+	22, // 22: gochat.v1.ChannelJoined.channel:type_name -> gochat.v1.Channel
+	23, // 23: gochat.v1.TeamJoined.team:type_name -> gochat.v1.Team
+	0,  // 24: gochat.v1.GatewayService.Connect:input_type -> gochat.v1.ConnectRequest
+	4,  // 25: gochat.v1.GatewayService.Connect:output_type -> gochat.v1.ConnectResponse
+	25, // [25:26] is the sub-list for method output_type
+	24, // [24:25] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_gochat_v1_gateway_proto_init() }

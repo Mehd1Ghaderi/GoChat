@@ -92,6 +92,7 @@ services:
       STORAGE_MINIO_SECRET_KEY: ${STORAGE_MINIO_SECRET_KEY}
       SERVER_DRPC_GATEWAY_KEY: ${GATEWAY_KEY}
       SERVICES_ACCOUNTS_SECRET_KEY: ${SERVICES_ACCOUNTS_SECRET_KEY}
+      SERVICES_ACCOUNTS_SETUP_TOKEN: ${SERVICES_ACCOUNTS_SETUP_TOKEN:-}
     volumes:
       - ../../config/docker.server.yaml:/app/config/server.yaml:ro
     healthcheck:

@@ -70,8 +70,10 @@ func (r *Repository) DeleteUserSessions(ctx context.Context, userID gocql.UUID, 
 }
 
 func (r *Repository) CreateMFAChallenge(ctx context.Context, c *models.MFAChallenge, now time.Time) error {
-	return wrap(r.query(ctx, "INSERT INTO mfa_challenges (token_hash, user_id, attempts, expires_at, ip, user_agent) VALUES (?, ?, ?, ?, ?, ?) USING TTL ?",
-		c.TokenHash, c.UserID, c.Attempts, c.ExpiresAt, c.IP, c.UserAgent, ttlSeconds(c.ExpiresAt, now)).ExecRelease())
+	// Conditional like the attempt counter, so both take cluster timestamps.
+	_, err := r.query(ctx, "INSERT INTO mfa_challenges (token_hash, user_id, attempts, expires_at, ip, user_agent) VALUES (?, ?, ?, ?, ?, ?) IF NOT EXISTS USING TTL ?",
+		c.TokenHash, c.UserID, c.Attempts, c.ExpiresAt, c.IP, c.UserAgent, ttlSeconds(c.ExpiresAt, now)).ExecCASRelease()
+	return wrap(err)
 }
 
 func (r *Repository) GetMFAChallenge(ctx context.Context, hash []byte) (*models.MFAChallenge, error) {

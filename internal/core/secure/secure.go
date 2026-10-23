@@ -55,6 +55,15 @@ func Equal(a, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
+// DeriveKey derives a 32-byte key for purpose from key, so one secret can
+// key several unrelated uses.
+func DeriveKey(key []byte, purpose string) []byte {
+	m := hmac.New(sha256.New, key)
+	m.Write([]byte("gochat/"))
+	m.Write([]byte(purpose))
+	return m.Sum(nil)
+}
+
 func MAC(key []byte, parts ...string) string {
 	m := hmac.New(sha256.New, key)
 	for _, p := range parts {

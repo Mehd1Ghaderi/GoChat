@@ -72,8 +72,10 @@ type GetSignupInfoResponse struct {
 	Open            bool   `protobuf:"varint,2,opt,name=open,proto3" json:"open,omitempty"`
 	InviteValid     bool   `protobuf:"varint,3,opt,name=invite_valid,json=inviteValid,proto3" json:"invite_valid,omitempty"`
 	TeamDisplayName string `protobuf:"bytes,4,opt,name=team_display_name,json=teamDisplayName,proto3" json:"team_display_name,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// The first account needs the setup token from the server's configuration.
+	SetupTokenRequired bool `protobuf:"varint,5,opt,name=setup_token_required,json=setupTokenRequired,proto3" json:"setup_token_required,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *GetSignupInfoResponse) Reset() {
@@ -134,6 +136,13 @@ func (x *GetSignupInfoResponse) GetTeamDisplayName() string {
 	return ""
 }
 
+func (x *GetSignupInfoResponse) GetSetupTokenRequired() bool {
+	if x != nil {
+		return x.SetupTokenRequired
+	}
+	return false
+}
+
 type SignUpRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
@@ -141,6 +150,7 @@ type SignUpRequest struct {
 	DisplayName   string                 `protobuf:"bytes,3,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
 	Password      string                 `protobuf:"bytes,4,opt,name=password,proto3" json:"password,omitempty"`
 	InviteToken   string                 `protobuf:"bytes,5,opt,name=invite_token,json=inviteToken,proto3" json:"invite_token,omitempty"`
+	SetupToken    string                 `protobuf:"bytes,6,opt,name=setup_token,json=setupToken,proto3" json:"setup_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -206,6 +216,13 @@ func (x *SignUpRequest) GetPassword() string {
 func (x *SignUpRequest) GetInviteToken() string {
 	if x != nil {
 		return x.InviteToken
+	}
+	return ""
+}
+
+func (x *SignUpRequest) GetSetupToken() string {
+	if x != nil {
+		return x.SetupToken
 	}
 	return ""
 }
@@ -1030,18 +1047,21 @@ const file_gochat_v1_auth_proto_rawDesc = "" +
 	"\n" +
 	"\x14gochat/v1/auth.proto\x12\tgochat.v1\x1a\x15gochat/v1/types.proto\"9\n" +
 	"\x14GetSignupInfoRequest\x12!\n" +
-	"\finvite_token\x18\x01 \x01(\tR\vinviteToken\"\x98\x01\n" +
+	"\finvite_token\x18\x01 \x01(\tR\vinviteToken\"\xca\x01\n" +
 	"\x15GetSignupInfoResponse\x12\x1c\n" +
 	"\tbootstrap\x18\x01 \x01(\bR\tbootstrap\x12\x12\n" +
 	"\x04open\x18\x02 \x01(\bR\x04open\x12!\n" +
 	"\finvite_valid\x18\x03 \x01(\bR\vinviteValid\x12*\n" +
-	"\x11team_display_name\x18\x04 \x01(\tR\x0fteamDisplayName\"\xa3\x01\n" +
+	"\x11team_display_name\x18\x04 \x01(\tR\x0fteamDisplayName\x120\n" +
+	"\x14setup_token_required\x18\x05 \x01(\bR\x12setupTokenRequired\"\xc4\x01\n" +
 	"\rSignUpRequest\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12!\n" +
 	"\fdisplay_name\x18\x03 \x01(\tR\vdisplayName\x12\x1a\n" +
 	"\bpassword\x18\x04 \x01(\tR\bpassword\x12!\n" +
-	"\finvite_token\x18\x05 \x01(\tR\vinviteToken\"c\n" +
+	"\finvite_token\x18\x05 \x01(\tR\vinviteToken\x12\x1f\n" +
+	"\vsetup_token\x18\x06 \x01(\tR\n" +
+	"setupToken\"c\n" +
 	"\x0eSignUpResponse\x12,\n" +
 	"\asession\x18\x01 \x01(\v2\x12.gochat.v1.SessionR\asession\x12#\n" +
 	"\x04team\x18\x02 \x01(\v2\x0f.gochat.v1.TeamR\x04team\"@\n" +

@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"sync/atomic"
 
+	"github.com/gocql/gocql"
+
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
 	"github.com/ssenerg/gochat/internal/actors"
 	"github.com/ssenerg/gochat/internal/core/models"
@@ -46,6 +48,10 @@ func (s *fileService) Upload(stream pb.DRPCFileService_UploadStream) error {
 	if err != nil {
 		return err
 	}
+	if !s.startUpload(p.UserID) {
+		return ierrors.ResourceExhausted("too many uploads at once, wait for one to finish")
+	}
+	defer s.endUpload(p.UserID)
 	select {
 	case s.uploads <- struct{}{}:
 		defer func() { <-s.uploads }()
@@ -128,6 +134,24 @@ func (s *fileService) Upload(stream pb.DRPCFileService_UploadStream) error {
 		return abort(err)
 	}
 	return stream.SendAndClose(&pb.UploadResponse{Attachment: att})
+}
+
+func (s *fileService) startUpload(userID gocql.UUID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.uploading[userID] >= s.cfg.Files.MaxUserUploads {
+		return false
+	}
+	s.uploading[userID]++
+	return true
+}
+
+func (s *fileService) endUpload(userID gocql.UUID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.uploading[userID]--; s.uploading[userID] <= 0 {
+		delete(s.uploading, userID)
+	}
 }
 
 func (s *fileService) nextChunk(stream pb.DRPCFileService_UploadStream) ([]byte, error) {
@@ -250,5 +274,5 @@ func (s *gatewayService) attach(ctx context.Context, key string, a *pb.Attach) {
 		reject(err)
 		return
 	}
-	s.sys.Engine.Send(s.sys.Hub, hub.Attach{GatewayID: key, ConnID: a.ConnId, User: convert.User(u), SessionID: p.SessionID})
+	s.sys.Engine.Send(s.sys.Hub, hub.Attach{GatewayID: key, ConnID: a.ConnId, User: convert.User(u), SessionID: p.SessionID, ExpiresAt: p.ExpiresAt})
 }

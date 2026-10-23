@@ -21,6 +21,7 @@ type (
 	Ready struct {
 		User      *pb.User
 		SessionID string
+		ExpiresAt time.Time
 		// Again is set when the stream reconnected: events may have been lost.
 		Again bool
 	}
@@ -176,7 +177,7 @@ func (r *router) handle(c *actor.Context, resp *pb.ConnectResponse) {
 			r.byUser[cn.userID] = set
 		}
 		set[id] = struct{}{}
-		c.Send(cn.pid, Ready{User: f.Attached.User, SessionID: cn.sessionID, Again: again})
+		c.Send(cn.pid, Ready{User: f.Attached.User, SessionID: cn.sessionID, ExpiresAt: f.Attached.GetExpiresAt().AsTime(), Again: again})
 	case *pb.ConnectResponse_AttachRejected:
 		if cn := r.conns[f.AttachRejected.ConnId]; cn != nil {
 			delete(r.conns, f.AttachRejected.ConnId)

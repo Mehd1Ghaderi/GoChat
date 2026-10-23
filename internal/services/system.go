@@ -62,7 +62,7 @@ func Start(logger *zap.Logger, cfg *Config, repo *scylla.Repository, storage *mi
 		Logger: logger.Named("directory"), Cfg: cfg.Directory, Repo: repo, Authz: az,
 		Users: userCache, Engine: engine, Hub: s.Hub, Channels: s.Channels,
 	}), "directory", actor.WithID("main"))
-	accountDeps, err := accounts.NewDeps(logger.Named("accounts"), cfg.Accounts, repo, userCache, engine, s.Hub)
+	accountDeps, err := accounts.NewDeps(logger.Named("accounts"), cfg.Accounts, repo, userCache, az, engine, s.Hub)
 	if err != nil {
 		return nil, err
 	}

@@ -101,7 +101,9 @@ This builds the image, starts Scylla and MinIO on an internal network, applies
 the migrations and starts the server and the web gateway on
 `http://localhost:8080` (`WEB_PORT`). The first account to sign up becomes the
 system admin and is asked to create the first team; everyone else joins through
-invite links (or freely when `services.accounts.open_signup` is on).
+invite links (or freely when `services.accounts.open_signup` is on). Set
+`SERVICES_ACCOUNTS_SETUP_TOKEN` to require a token for that first account when
+the server is reachable by others before you set it up.
 
 ### Running the binaries on the host
 
@@ -153,13 +155,15 @@ Secrets that should come from the environment:
 | `STORAGE_MINIO_ACCESS_KEY`, `STORAGE_MINIO_SECRET_KEY` | server |
 | `SERVER_DRPC_GATEWAY_KEY` / `CLIENT_DRPC_GATEWAY_KEY` | server / web (same value) |
 | `SERVICES_ACCOUNTS_SECRET_KEY` | server |
+| `SERVICES_ACCOUNTS_SETUP_TOKEN` (optional) | server |
 
 Set `web.public_url` to the origin browsers use; an `https` origin turns on
 `Secure` cookies and HSTS. Behind a reverse proxy, list its addresses in
 `web.trusted_proxies` so rate limits see client addresses.
 
 The server exposes `/healthz`, `/readyz` and Prometheus `/metrics` on its admin
-listener (`server.admin.address`).
+listener (`server.admin.address`). Keep it and the DRPC listener on a private
+network, or enable TLS with client certificates on the DRPC link.
 
 ## Tests
 

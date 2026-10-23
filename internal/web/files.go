@@ -34,9 +34,10 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rc := http.NewResponseController(w)
-	_ = rc.SetReadDeadline(time.Now().Add(h.cfg.HTTP.TransferTimeout))
-	_ = rc.SetWriteDeadline(time.Now().Add(h.cfg.HTTP.TransferTimeout))
+	end := time.Now().Add(h.cfg.HTTP.TransferTimeout)
+	_ = rc.SetWriteDeadline(end)
 	r.Body = http.MaxBytesReader(w, r.Body, h.cfg.UploadLimit*maxFilesPerUpload+1<<20)
+	r.Body = &idleBody{ReadCloser: r.Body, rc: rc, idle: h.cfg.HTTP.TransferIdleTimeout, end: end}
 	mr, err := r.MultipartReader()
 	if err != nil {
 		h.fail(w, r, ierrors.InvalidArgument("expected a multipart upload"))
@@ -117,6 +118,26 @@ func (h *Handler) sendFile(ctx context.Context, chID, name string, body io.Reade
 		return nil, err
 	}
 	return res.Attachment, nil
+}
+
+// idleBody fails an upload that stalls, so a slow sender cannot hold an
+// upload slot for the whole transfer timeout.
+type idleBody struct {
+	io.ReadCloser
+	rc   *http.ResponseController
+	idle time.Duration
+	end  time.Time
+}
+
+func (b *idleBody) Read(p []byte) (int, error) {
+	deadline := time.Now().Add(b.idle)
+	if deadline.After(b.end) {
+		deadline = b.end
+	}
+	if err := b.rc.SetReadDeadline(deadline); err != nil {
+		return 0, err
+	}
+	return b.ReadCloser.Read(p)
 }
 
 // streamErr prefers the server's reason for ending a stream over the send

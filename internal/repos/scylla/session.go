@@ -1,6 +1,7 @@
 package scylla
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/gocql/gocql"
@@ -16,7 +17,7 @@ func newCluster(cfg *Config, keyspace string) *gocql.ClusterConfig {
 	cluster.NumConns = cfg.NumConns
 	cluster.Consistency, _ = parseConsistency(cfg.Consistency)
 	cluster.SerialConsistency, _ = parseSerial(cfg.SerialConsistency)
-	cluster.RetryPolicy = &gocql.ExponentialBackoffRetryPolicy{NumRetries: 3}
+	cluster.RetryPolicy = retryPolicy{&gocql.ExponentialBackoffRetryPolicy{NumRetries: 3}}
 	cluster.DisableInitialHostLookup = cfg.DisableHostLookup
 	if cfg.LocalDC != "" {
 		cluster.PoolConfig.HostSelectionPolicy = gocql.TokenAwareHostPolicy(gocql.DCAwareRoundRobinPolicy(cfg.LocalDC))
@@ -37,6 +38,36 @@ func newCluster(cfg *Config, keyspace string) *gocql.ClusterConfig {
 	return cluster
 }
 
+// retryPolicy backs off and retries, except a conditional write that timed
+// out: it may have applied, and a retry would find its own row and report
+// the condition as failed.
+type retryPolicy struct {
+	*gocql.ExponentialBackoffRetryPolicy
+}
+
+func (p retryPolicy) GetRetryType(err error) gocql.RetryType {
+	if casUnknown(err) {
+		return gocql.Rethrow
+	}
+	return p.ExponentialBackoffRetryPolicy.GetRetryType(err)
+}
+
+func (p retryPolicy) GetRetryTypeLWT(err error) gocql.RetryType {
+	if casUnknown(err) {
+		return gocql.Rethrow
+	}
+	return p.ExponentialBackoffRetryPolicy.GetRetryTypeLWT(err)
+}
+
+func casUnknown(err error) bool {
+	var wt *gocql.RequestErrWriteTimeout
+	if errors.As(err, &wt) {
+		return wt.WriteType == "CAS"
+	}
+	var cu *gocql.RequestErrCASWriteUnknown
+	return errors.As(err, &cu)
+}
+
 // Open connects to the configured keyspace.
 func Open(logger *zap.Logger, cfg *Config) (gocqlx.Session, error) {
 	session, err := gocqlx.WrapSession(newCluster(cfg, cfg.Keyspace).CreateSession())
@@ -45,6 +76,9 @@ func Open(logger *zap.Logger, cfg *Config) (gocqlx.Session, error) {
 		return gocqlx.Session{}, fmt.Errorf("failed to connect to scylla: %w", err)
 	}
 	logger.Info("connected to scylla", zap.Strings("hosts", cfg.Hosts), zap.String("keyspace", cfg.Keyspace))
+	if cfg.LocalDC == "" {
+		logger.Warn("local_dc is not set: in a cluster of several datacenters, local consistency levels will span them")
+	}
 	return session, nil
 }
 

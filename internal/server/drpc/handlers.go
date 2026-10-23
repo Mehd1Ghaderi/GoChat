@@ -2,6 +2,9 @@ package drpc
 
 import (
 	"context"
+	"sync"
+
+	"github.com/gocql/gocql"
 
 	"storj.io/drpc/drpcmux"
 
@@ -23,11 +26,14 @@ type base struct {
 	storage *minio.Storage
 	cfg     *services.Config
 	uploads chan struct{}
+	// uploading counts each user's uploads in progress.
+	mu        sync.Mutex
+	uploading map[gocql.UUID]int
 }
 
 // Mux registers every service on a new mux.
 func Mux(sys *services.System, storage *minio.Storage, cfg *services.Config) (*drpcmux.Mux, error) {
-	b := &base{sys: sys, storage: storage, cfg: cfg, uploads: make(chan struct{}, cfg.Files.MaxUploads)}
+	b := &base{sys: sys, storage: storage, cfg: cfg, uploads: make(chan struct{}, cfg.Files.MaxUploads), uploading: make(map[gocql.UUID]int)}
 	mux := drpcmux.New()
 	for _, reg := range []func() error{
 		func() error { return pb.DRPCRegisterAuthService(mux, &authService{b}) },
@@ -75,7 +81,7 @@ func (s *authService) GetSignupInfo(ctx context.Context, req *pb.GetSignupInfoRe
 		return nil, err
 	}
 	return &pb.GetSignupInfoResponse{
-		Bootstrap: info.Bootstrap, Open: info.Open, InviteValid: info.InviteValid, TeamDisplayName: info.TeamDisplayName,
+		Bootstrap: info.Bootstrap, SetupTokenRequired: info.SetupTokenRequired, Open: info.Open, InviteValid: info.InviteValid, TeamDisplayName: info.TeamDisplayName,
 	}, nil
 }
 
@@ -83,18 +89,18 @@ func (s *authService) SignUp(ctx context.Context, req *pb.SignUpRequest) (*pb.Si
 	cl := ClientOf(ctx)
 	res, err := actors.Ask[*accounts.SignUpResult](ctx, s.sys.Engine, s.sys.Accounts, accounts.SignUp{
 		Username: req.Username, Email: req.Email, DisplayName: req.DisplayName, Password: req.Password,
-		InviteToken: req.InviteToken, IP: cl.IP, UserAgent: cl.UserAgent,
+		InviteToken: req.InviteToken, SetupToken: req.SetupToken, IP: cl.IP, UserAgent: cl.UserAgent,
 	})
 	if err != nil {
 		return nil, err
 	}
 	out := &pb.SignUpResponse{Session: res.Session}
+	// The account exists either way; a join that failed is finished by
+	// opening the invite again.
 	if !ids.IsZero(res.InviteTeamID) {
-		team, err := actors.Ask[*pb.Team](ctx, s.sys.Engine, s.sys.Directory, directory.JoinTeam{UserID: res.User.ID, TeamID: res.InviteTeamID})
-		if err != nil {
-			return nil, err
+		if team, err := actors.Ask[*pb.Team](ctx, s.sys.Engine, s.sys.Directory, directory.JoinTeam{UserID: res.User.ID, TeamID: res.InviteTeamID}); err == nil {
+			out.Team = team
 		}
-		out.Team = team
 	}
 	return out, nil
 }

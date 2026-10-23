@@ -1,6 +1,7 @@
 package web
 
 import (
+	"net/netip"
 	"sync"
 	"time"
 
@@ -27,7 +28,10 @@ func newIPLimiter(r rate.Limit, burst int) *ipLimiter {
 	return &ipLimiter{rate: r, burst: burst, m: make(map[string]*bucket), swept: time.Now()}
 }
 
-func (l *ipLimiter) Allow(key string) bool {
+// Allow takes a token from the bucket of ip, or reports how long until one
+// is free.
+func (l *ipLimiter) Allow(ip string) (bool, time.Duration) {
+	key := addressKey(ip)
 	now := time.Now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -40,7 +44,23 @@ func (l *ipLimiter) Allow(key string) bool {
 		l.m[key] = b
 	}
 	b.seen = now
-	return b.lim.AllowN(now, 1)
+	res := b.lim.ReserveN(now, 1)
+	if d := res.DelayFrom(now); d > 0 {
+		res.CancelAt(now)
+		return false, d
+	}
+	return true, 0
+}
+
+// addressKey groups IPv6 addresses by their /64, which one host can rotate
+// through.
+func addressKey(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil || !addr.Is6() || addr.Is4In6() {
+		return ip
+	}
+	p, _ := addr.Prefix(64)
+	return p.String()
 }
 
 // sweep forgets idle buckets: a full one behaves like a fresh one.

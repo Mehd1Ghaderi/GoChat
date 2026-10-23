@@ -35,7 +35,8 @@ type Repo interface {
 	SetLastRead(ctx context.Context, userID, channelID, messageID gocql.UUID) error
 	ListLastReads(ctx context.Context, userID gocql.UUID) ([]*scylla.ChannelRead, error)
 	GetAttachments(ctx context.Context, ids []gocql.UUID) ([]*models.Attachment, error)
-	ClaimAttachment(ctx context.Context, a *models.Attachment, messageID gocql.UUID) error
+	ClaimAttachment(ctx context.Context, a *models.Attachment, messageID gocql.UUID) (bool, error)
+	UnclaimAttachment(ctx context.Context, a *models.Attachment, messageID gocql.UUID) error
 	DeleteAttachment(ctx context.Context, a *models.Attachment) error
 }
 

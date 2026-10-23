@@ -55,6 +55,7 @@ type (
 	}
 	railReady struct{ rail *render.Rail }
 	failed    struct{ text string }
+	expired   struct{}
 )
 
 type session struct {
@@ -77,6 +78,7 @@ type session struct {
 	flushing  bool
 	closing   bool
 	stopPing  context.CancelFunc
+	expiry    *time.Timer
 	// early holds what the browser sent before the server attached it.
 	early [][]byte
 }
@@ -108,12 +110,20 @@ func (s *session) Receive(c *actor.Context) {
 	case actor.Stopped:
 		c.Send(s.Router, unregister{connID: s.connID})
 		s.stopPing()
+		if s.expiry != nil {
+			s.expiry.Stop()
+		}
 		if !s.closing {
 			s.closing = true
 			close(s.out)
 		}
 	case Ready:
 		s.user, s.sessionID = msg.User, msg.SessionID
+		// The socket ends with its session.
+		if s.expiry == nil && !msg.ExpiresAt.IsZero() {
+			pid, engine := c.PID(), c.Engine()
+			s.expiry = time.AfterFunc(time.Until(msg.ExpiresAt), func() { engine.Send(pid, expired{}) })
+		}
 		for _, data := range s.early {
 			s.frame(c, data)
 		}
@@ -132,7 +142,7 @@ func (s *session) Receive(c *actor.Context) {
 			return
 		}
 		s.redirect("/login")
-	case Revoked:
+	case Revoked, expired:
 		s.redirect("/login")
 	case Event:
 		if s.user != nil {

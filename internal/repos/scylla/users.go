@@ -16,18 +16,20 @@ const userColumns = "id, username, email, display_name, password_hash, system_ro
 // CreateUser claims the username and the email, then writes the user. A claim
 // that fails releases the ones taken before it.
 func (r *Repository) CreateUser(ctx context.Context, u *models.User) error {
-	applied, err := r.query(ctx, "INSERT INTO usernames (username, user_id) VALUES (?, ?) IF NOT EXISTS", u.Username, u.ID).ExecCASRelease()
+	ok, err := r.claim(ctx, "INSERT INTO usernames (username, user_id) VALUES (?, ?) IF NOT EXISTS",
+		"SELECT user_id FROM usernames WHERE username = ?", "user_id", u.ID, u.Username)
 	if err != nil {
-		return wrap(err)
+		return err
 	}
-	if !applied {
+	if !ok {
 		return ierrors.AlreadyExists("username is taken")
 	}
-	applied, err = r.query(ctx, "INSERT INTO emails (email, user_id) VALUES (?, ?) IF NOT EXISTS", u.Email, u.ID).ExecCASRelease()
-	if err != nil || !applied {
-		r.releaseUsername(u.Username, u.ID)
+	ok, err = r.claim(ctx, "INSERT INTO emails (email, user_id) VALUES (?, ?) IF NOT EXISTS",
+		"SELECT user_id FROM emails WHERE email = ?", "user_id", u.ID, u.Email)
+	if err != nil || !ok {
+		r.release(nil, "DELETE FROM usernames WHERE username = ? IF user_id = ?", u.Username, u.ID)
 		if err != nil {
-			return wrap(err)
+			return err
 		}
 		return ierrors.AlreadyExists("email is already registered")
 	}
@@ -35,23 +37,19 @@ func (r *Repository) CreateUser(ctx context.Context, u *models.User) error {
 		u.ID, u.Username, u.Email, u.DisplayName, u.PasswordHash, string(u.Role), u.TOTPEnabled, u.TOTPSecret,
 		u.TOTPPending, u.TOTPLastStep, u.Deactivated, u.CreatedAt, u.UpdatedAt).ExecRelease()
 	if err != nil {
-		r.releaseUsername(u.Username, u.ID)
-		r.releaseEmail(u.Email, u.ID)
+		r.release(err, "DELETE FROM usernames WHERE username = ? IF user_id = ?", u.Username, u.ID)
+		r.release(err, "DELETE FROM emails WHERE email = ? IF user_id = ?", u.Email, u.ID)
 		return wrap(err)
 	}
 	return nil
 }
 
-func (r *Repository) releaseUsername(username string, id gocql.UUID) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_, _ = r.query(ctx, "DELETE FROM usernames WHERE username = ? IF user_id = ?", username, id).ExecCASRelease()
-}
-
-func (r *Repository) releaseEmail(email string, id gocql.UUID) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_, _ = r.query(ctx, "DELETE FROM emails WHERE email = ? IF user_id = ?", email, id).ExecCASRelease()
+// release runs a conditional delete undoing a claim, unless cause, the
+// failure that calls for it, may have applied after all.
+func (r *Repository) release(cause error, stmt string, args ...any) {
+	r.compensate(cause, func(ctx context.Context) {
+		_, _ = r.query(ctx, stmt, args...).ExecCASRelease()
+	})
 }
 
 func (r *Repository) GetUser(ctx context.Context, id gocql.UUID) (*models.User, error) {
@@ -101,8 +99,13 @@ func (r *Repository) UpdatePassword(ctx context.Context, id gocql.UUID, hash str
 	return wrap(r.query(ctx, "UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?", hash, now, id).ExecRelease())
 }
 
+// The TOTP columns are only written conditionally: conditional writes take
+// their timestamps from the cluster, and a plain write stamped by a skewed
+// client clock could shadow them.
+
 func (r *Repository) SetTOTPPending(ctx context.Context, id gocql.UUID, sealed []byte, now time.Time) error {
-	return wrap(r.query(ctx, "UPDATE users SET totp_pending = ?, updated_at = ? WHERE id = ?", sealed, now, id).ExecRelease())
+	_, err := r.query(ctx, "UPDATE users SET totp_pending = ?, updated_at = ? WHERE id = ? IF EXISTS", sealed, now, id).ExecCASRelease()
+	return wrap(err)
 }
 
 // EnableTOTP promotes the pending secret, guarded by it being the one the
@@ -115,10 +118,12 @@ func (r *Repository) EnableTOTP(ctx context.Context, id gocql.UUID, sealed []byt
 }
 
 func (r *Repository) DisableTOTP(ctx context.Context, id gocql.UUID, now time.Time) error {
-	b := r.batch(ctx, true)
-	b.Query("UPDATE users SET totp_enabled = false, totp_secret = null, totp_pending = null, totp_last_step = 0, updated_at = ? WHERE id = ?", now, id)
-	b.Query("DELETE FROM recovery_codes WHERE user_id = ?", id)
-	return r.execBatch(b)
+	_, err := r.query(ctx, "UPDATE users SET totp_enabled = false, totp_secret = null, totp_pending = null, totp_last_step = 0, updated_at = ? WHERE id = ? IF EXISTS",
+		now, id).ExecCASRelease()
+	if err != nil {
+		return wrap(err)
+	}
+	return wrap(r.query(ctx, "DELETE FROM recovery_codes WHERE user_id = ?", id).ExecRelease())
 }
 
 // AdvanceTOTPStep records step as used, refusing a step not after the last.
@@ -149,8 +154,8 @@ const bootstrapKey = "bootstrap_admin"
 
 // ClaimBootstrap lets exactly one account become the first system admin.
 func (r *Repository) ClaimBootstrap(ctx context.Context, id gocql.UUID) (bool, error) {
-	applied, err := r.query(ctx, "INSERT INTO system_state (key, value) VALUES (?, ?) IF NOT EXISTS", bootstrapKey, id.String()).ExecCASRelease()
-	return applied, wrap(err)
+	return r.claim(ctx, "INSERT INTO system_state (key, value) VALUES (?, ?) IF NOT EXISTS",
+		"SELECT value FROM system_state WHERE key = ?", "value", id.String(), bootstrapKey)
 }
 
 func (r *Repository) ReleaseBootstrap(ctx context.Context, id gocql.UUID) error {

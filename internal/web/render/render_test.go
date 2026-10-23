@@ -41,6 +41,27 @@ func TestMarkdownIsSafe(t *testing.T) {
 	}
 }
 
+func TestMarkdownCannotBlowUp(t *testing.T) {
+	r, err := New(16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wide := strings.Repeat("|a", 2000) + "|\n" + strings.Repeat("|-", 2000) + "|\n" + strings.Repeat("|\n", 4000)
+	long := "|a|b|\n|-|-|\n" + strings.Repeat("|\n", 7000)
+	cases := []string{wide, long, strings.Repeat(">", 8000) + " x", strings.Repeat("- ", 5000) + "x"}
+	for _, in := range cases {
+		if out := r.markdown(in); len(out) > 4*len(in)+64 {
+			t.Errorf("%d bytes of input rendered to %d", len(in), len(out))
+		}
+	}
+	if out := string(r.markdown("|a|b|\n|-|-|\n|1|2|")); !strings.Contains(out, "<table>") {
+		t.Errorf("small table not rendered: %q", out)
+	}
+	if out := string(r.markdown("> quote\n- item\n  - nested")); !strings.Contains(out, "<blockquote>") || !strings.Contains(out, "<ul>") {
+		t.Errorf("quote and list not rendered: %q", out)
+	}
+}
+
 func TestUnread(t *testing.T) {
 	older := "00000000-0000-1000-8000-000000000000"
 	newer := "00000001-0000-1000-8000-000000000000"

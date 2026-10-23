@@ -11,8 +11,10 @@ type Config struct {
 	Workers   int           `mapstructure:"workers"`
 	OpTimeout time.Duration `mapstructure:"op_timeout"`
 	MaxSize   int64         `mapstructure:"max_size"`
-	// MaxUploads bounds the uploads streaming at once.
-	MaxUploads int `mapstructure:"max_uploads"`
+	// MaxUploads bounds the uploads streaming at once, and MaxUserUploads
+	// those of one user.
+	MaxUploads     int `mapstructure:"max_uploads"`
+	MaxUserUploads int `mapstructure:"max_user_uploads"`
 	// OrphanAfter is how long an upload may wait to be posted before the
 	// janitor deletes it.
 	OrphanAfter     time.Duration `mapstructure:"orphan_after"`
@@ -22,8 +24,8 @@ type Config struct {
 var _ config.Config = (*Config)(nil)
 
 func (c *Config) Validate() error {
-	if c.Workers < 1 || c.MaxUploads < 1 {
-		return errors.New("workers and max_uploads must be at least 1")
+	if c.Workers < 1 || c.MaxUploads < 1 || c.MaxUserUploads < 1 {
+		return errors.New("workers, max_uploads and max_user_uploads must be at least 1")
 	}
 	if c.OpTimeout <= 0 {
 		return errors.New("op_timeout must be positive")
