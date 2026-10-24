@@ -241,16 +241,17 @@ func (s *socket) refuse(within time.Duration, part string) {
 }
 
 var (
-	inviteRe   = regexp.MustCompile(`/join/([A-Za-z0-9_-]{43})`)
-	channelRe  = regexp.MustCompile(`/t/[a-z0-9-]+/ch/([0-9a-f-]{36})`)
-	attRe      = regexp.MustCompile(`name="attachment" value="([0-9a-f-]{36})"`)
-	secretRe   = regexp.MustCompile(`<code>([A-Z2-7]{16,})</code>`)
-	codeRe     = regexp.MustCompile(`<code>([a-z2-7]{5}-[a-z2-7]{5})</code>`)
-	teamIDRe   = regexp.MustCompile(`data-team="([0-9a-f-]{36})"`)
-	msgIDRe    = regexp.MustCompile(`id="msg-([0-9a-f-]{36})"`)
-	newestRe   = regexp.MustCompile(`data-newest="([0-9a-f-]{36})"`)
-	offTopicRe = regexp.MustCompile(`data-channel="([0-9a-f-]{36})"(?s:[^<]*>.{0,600}?)<span class="label">Off-Topic</span>`)
-	photoRe    = regexp.MustCompile(`/photos/([ut])/([0-9a-f-]{36})/([0-9a-f]{16})`)
+	inviteRe    = regexp.MustCompile(`/join/([A-Za-z0-9_-]{43})`)
+	channelRe   = regexp.MustCompile(`/t/[a-z0-9-]+/ch/([0-9a-f-]{36})`)
+	attRe       = regexp.MustCompile(`name="attachment" value="([0-9a-f-]{36})"`)
+	secretRe    = regexp.MustCompile(`<code>([A-Z2-7]{16,})</code>`)
+	codeRe      = regexp.MustCompile(`<code>([a-z2-7]{5}-[a-z2-7]{5})</code>`)
+	teamIDRe    = regexp.MustCompile(`data-team="([0-9a-f-]{36})"`)
+	msgIDRe     = regexp.MustCompile(`id="msg-([0-9a-f-]{36})"`)
+	newestRe    = regexp.MustCompile(`data-newest="([0-9a-f-]{36})"`)
+	offTopicRe  = regexp.MustCompile(`data-channel="([0-9a-f-]{36})"(?s:[^<]*>.{0,600}?)<span class="label">Off-Topic</span>`)
+	photoRe     = regexp.MustCompile(`/photos/([ut])/([0-9a-f-]{36})/([0-9a-f]{16})`)
+	staticCSSRe = regexp.MustCompile(`/static/[0-9a-f]+/app\.css`)
 )
 
 // bootstrap sets a fresh server up with the admin and the team the tests use.
@@ -584,6 +585,23 @@ func TestEndToEnd(t *testing.T) {
 		}
 		if _, res, err := admin.socket("https://evil.example"); err == nil || res == nil || res.StatusCode != http.StatusForbidden {
 			t.Fatalf("a cross-origin socket was accepted")
+		}
+	})
+
+	t.Run("proxies may not rewrite pages", func(t *testing.T) {
+		res, body := admin.get("/settings")
+		if cc := res.Header.Get("Cache-Control"); !strings.Contains(cc, "no-store") || !strings.Contains(cc, "no-transform") {
+			t.Fatalf("page Cache-Control: %q", cc)
+		}
+		if res, _ := admin.do(http.MethodGet, "/settings", nil, "", true); !strings.Contains(res.Header.Get("Cache-Control"), "no-transform") {
+			t.Fatalf("fragment Cache-Control: %q", res.Header.Get("Cache-Control"))
+		}
+		css := staticCSSRe.FindString(body)
+		if css == "" {
+			t.Fatalf("no stylesheet in %s", body)
+		}
+		if res, _ := admin.get(css); res.StatusCode != http.StatusOK || strings.Contains(res.Header.Get("Cache-Control"), "no-transform") {
+			t.Fatalf("static asset: %d %q", res.StatusCode, res.Header.Get("Cache-Control"))
 		}
 	})
 

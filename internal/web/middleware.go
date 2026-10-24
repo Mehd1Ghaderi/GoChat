@@ -46,7 +46,9 @@ func (h *Handler) headers(next http.Handler) http.Handler {
 		if h.secure {
 			hd.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
 		}
-		hd.Set("Cache-Control", "no-store")
+		// no-transform keeps proxies such as Cloudflare from rewriting pages
+		// and injecting their own scripts.
+		hd.Set("Cache-Control", "no-store, no-transform")
 		hd.Set("Vary", "HX-Request, HX-Target")
 		next.ServeHTTP(w, r)
 	})
