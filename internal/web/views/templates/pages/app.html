@@ -20,8 +20,10 @@
       </header>
       {{template "channel-lists" .Lists}}
       <footer class="me">
-        {{template "avatar" (dict "User" .User "Size" "sm")}}
-        <span class="me-name"><strong>{{name .User}}</strong><small>@{{.User.Username}}</small></span>
+        <button type="button" class="me-status" hx-get="/status" hx-target="#modal" aria-label="Set your status" title="Set your status">
+          <span class="me-face">{{template "avatar" (dict "User" .User "Size" "sm")}}{{template "me-presence" (dict "Status" (chosen .User))}}</span>
+          {{template "me-name" (dict "User" .User)}}
+        </button>
         <a class="icon-btn" href="/settings" aria-label="Settings" title="Settings">{{icon "settings"}}</a>
         <form method="post" action="/logout">
           <input type="hidden" name="_csrf" value="{{.CSRF}}">

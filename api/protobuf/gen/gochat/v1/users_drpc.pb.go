@@ -43,6 +43,8 @@ type DRPCUserServiceClient interface {
 	GetPresence(ctx context.Context, in *GetPresenceRequest) (*GetPresenceResponse, error)
 	SetPhoto(ctx context.Context, in *SetPhotoRequest) (*SetPhotoResponse, error)
 	RemovePhoto(ctx context.Context, in *RemovePhotoRequest) (*RemovePhotoResponse, error)
+	SetStatus(ctx context.Context, in *SetStatusRequest) (*SetStatusResponse, error)
+	SetCustomStatus(ctx context.Context, in *SetCustomStatusRequest) (*SetCustomStatusResponse, error)
 }
 
 type drpcUserServiceClient struct {
@@ -100,12 +102,32 @@ func (c *drpcUserServiceClient) RemovePhoto(ctx context.Context, in *RemovePhoto
 	return out, nil
 }
 
+func (c *drpcUserServiceClient) SetStatus(ctx context.Context, in *SetStatusRequest) (*SetStatusResponse, error) {
+	out := new(SetStatusResponse)
+	err := c.cc.Invoke(ctx, "/gochat.v1.UserService/SetStatus", drpcEncoding_File_gochat_v1_users_proto{}, in, out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *drpcUserServiceClient) SetCustomStatus(ctx context.Context, in *SetCustomStatusRequest) (*SetCustomStatusResponse, error) {
+	out := new(SetCustomStatusResponse)
+	err := c.cc.Invoke(ctx, "/gochat.v1.UserService/SetCustomStatus", drpcEncoding_File_gochat_v1_users_proto{}, in, out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 type DRPCUserServiceServer interface {
 	GetUser(context.Context, *GetUserRequest) (*GetUserResponse, error)
 	UpdateProfile(context.Context, *UpdateProfileRequest) (*UpdateProfileResponse, error)
 	GetPresence(context.Context, *GetPresenceRequest) (*GetPresenceResponse, error)
 	SetPhoto(context.Context, *SetPhotoRequest) (*SetPhotoResponse, error)
 	RemovePhoto(context.Context, *RemovePhotoRequest) (*RemovePhotoResponse, error)
+	SetStatus(context.Context, *SetStatusRequest) (*SetStatusResponse, error)
+	SetCustomStatus(context.Context, *SetCustomStatusRequest) (*SetCustomStatusResponse, error)
 }
 
 type DRPCUserServiceUnimplementedServer struct{}
@@ -130,9 +152,17 @@ func (s *DRPCUserServiceUnimplementedServer) RemovePhoto(context.Context, *Remov
 	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
 }
 
+func (s *DRPCUserServiceUnimplementedServer) SetStatus(context.Context, *SetStatusRequest) (*SetStatusResponse, error) {
+	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
+}
+
+func (s *DRPCUserServiceUnimplementedServer) SetCustomStatus(context.Context, *SetCustomStatusRequest) (*SetCustomStatusResponse, error) {
+	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
+}
+
 type DRPCUserServiceDescription struct{}
 
-func (DRPCUserServiceDescription) NumMethods() int { return 5 }
+func (DRPCUserServiceDescription) NumMethods() int { return 7 }
 
 func (DRPCUserServiceDescription) Method(n int) (string, drpc.Encoding, drpc.Receiver, interface{}, bool) {
 	switch n {
@@ -181,6 +211,24 @@ func (DRPCUserServiceDescription) Method(n int) (string, drpc.Encoding, drpc.Rec
 						in1.(*RemovePhotoRequest),
 					)
 			}, DRPCUserServiceServer.RemovePhoto, true
+	case 5:
+		return "/gochat.v1.UserService/SetStatus", drpcEncoding_File_gochat_v1_users_proto{},
+			func(srv interface{}, ctx context.Context, in1, in2 interface{}) (drpc.Message, error) {
+				return srv.(DRPCUserServiceServer).
+					SetStatus(
+						ctx,
+						in1.(*SetStatusRequest),
+					)
+			}, DRPCUserServiceServer.SetStatus, true
+	case 6:
+		return "/gochat.v1.UserService/SetCustomStatus", drpcEncoding_File_gochat_v1_users_proto{},
+			func(srv interface{}, ctx context.Context, in1, in2 interface{}) (drpc.Message, error) {
+				return srv.(DRPCUserServiceServer).
+					SetCustomStatus(
+						ctx,
+						in1.(*SetCustomStatusRequest),
+					)
+			}, DRPCUserServiceServer.SetCustomStatus, true
 	default:
 		return "", nil, nil, nil, false
 	}
@@ -284,6 +332,46 @@ func (x *drpcUserService_RemovePhotoStream) GetStream() drpc.Stream {
 }
 
 func (x *drpcUserService_RemovePhotoStream) SendAndClose(m *RemovePhotoResponse) error {
+	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_users_proto{}); err != nil {
+		return err
+	}
+	return x.CloseSend()
+}
+
+type DRPCUserService_SetStatusStream interface {
+	drpc.Stream
+	SendAndClose(*SetStatusResponse) error
+}
+
+type drpcUserService_SetStatusStream struct {
+	drpc.Stream
+}
+
+func (x *drpcUserService_SetStatusStream) GetStream() drpc.Stream {
+	return x.Stream
+}
+
+func (x *drpcUserService_SetStatusStream) SendAndClose(m *SetStatusResponse) error {
+	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_users_proto{}); err != nil {
+		return err
+	}
+	return x.CloseSend()
+}
+
+type DRPCUserService_SetCustomStatusStream interface {
+	drpc.Stream
+	SendAndClose(*SetCustomStatusResponse) error
+}
+
+type drpcUserService_SetCustomStatusStream struct {
+	drpc.Stream
+}
+
+func (x *drpcUserService_SetCustomStatusStream) GetStream() drpc.Stream {
+	return x.Stream
+}
+
+func (x *drpcUserService_SetCustomStatusStream) SendAndClose(m *SetCustomStatusResponse) error {
 	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_users_proto{}); err != nil {
 		return err
 	}

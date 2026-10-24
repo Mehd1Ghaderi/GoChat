@@ -13,7 +13,7 @@ import (
 
 const (
 	userWritten = "id, username, email, display_name, password_hash, system_role, totp_enabled, totp_secret, totp_pending, totp_last_step, deactivated, created_at, updated_at"
-	userColumns = userWritten + ", photo"
+	userColumns = userWritten + ", photo, status, dnd_until, status_emoji, status_text, status_until"
 )
 
 // CreateUser claims the username and the email, then writes the user. A claim
@@ -101,6 +101,25 @@ func (r *Repository) UpdateDisplayName(ctx context.Context, id gocql.UUID, name 
 // SetUserPhoto records the version of the user's photo, empty for none.
 func (r *Repository) SetUserPhoto(ctx context.Context, id gocql.UUID, version string, now time.Time) error {
 	return wrap(r.query(ctx, "UPDATE users SET photo = ?, updated_at = ? WHERE id = ?", nullable(version), now, id).ExecRelease())
+}
+
+// SetStatus records the availability a user chose, and until when
+// do-not-disturb lasts.
+func (r *Repository) SetStatus(ctx context.Context, id gocql.UUID, status string, dndUntil time.Time) error {
+	return wrap(r.query(ctx, "UPDATE users SET status = ?, dnd_until = ? WHERE id = ?", nullable(status), nullTime(dndUntil), id).ExecRelease())
+}
+
+// SetCustomStatus records what a user says they are up to, empty to clear.
+func (r *Repository) SetCustomStatus(ctx context.Context, id gocql.UUID, emoji, text string, until time.Time) error {
+	return wrap(r.query(ctx, "UPDATE users SET status_emoji = ?, status_text = ?, status_until = ? WHERE id = ?",
+		nullable(emoji), nullable(text), nullTime(until), id).ExecRelease())
+}
+
+func nullTime(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
 }
 
 // nullable keeps an empty string from being stored as one.

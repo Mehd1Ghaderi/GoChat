@@ -845,9 +845,39 @@ func (s *userService) GetPresence(ctx context.Context, req *pb.GetPresenceReques
 	if err != nil {
 		return nil, err
 	}
-	online, err := actors.Ask[[]string](ctx, s.sys.Engine, s.sys.Directory, directory.Presence{P: p, UserIDs: req.UserIds})
+	statuses, err := actors.Ask[map[string]pb.Status](ctx, s.sys.Engine, s.sys.Directory, directory.Presence{P: p, UserIDs: req.UserIds})
 	if err != nil {
 		return nil, err
 	}
-	return &pb.GetPresenceResponse{OnlineUserIds: online}, nil
+	online := make([]string, 0, len(statuses))
+	for id := range statuses {
+		online = append(online, id)
+	}
+	return &pb.GetPresenceResponse{OnlineUserIds: online, Statuses: statuses}, nil
+}
+
+func (s *userService) SetStatus(ctx context.Context, req *pb.SetStatusRequest) (*pb.SetStatusResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	u, err := actors.Ask[*pb.User](ctx, s.sys.Engine, s.sys.Directory, directory.SetStatus{P: p, Status: req.Status, DNDMinutes: int(req.DndMinutes)})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.SetStatusResponse{User: u}, nil
+}
+
+func (s *userService) SetCustomStatus(ctx context.Context, req *pb.SetCustomStatusRequest) (*pb.SetCustomStatusResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	u, err := actors.Ask[*pb.User](ctx, s.sys.Engine, s.sys.Directory, directory.SetCustomStatus{
+		P: p, Emoji: req.Emoji, Text: req.Text, Minutes: int(req.Minutes),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.SetCustomStatusResponse{User: u}, nil
 }

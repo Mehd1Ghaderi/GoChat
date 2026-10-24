@@ -166,6 +166,8 @@ func (h *Handler) Routes() http.Handler {
 
 	mux.HandleFunc("GET /settings", h.settingsPage)
 	mux.Handle("POST /settings/profile", h.csrf(http.HandlerFunc(h.updateProfile)))
+	mux.HandleFunc("GET /status", h.statusModal)
+	mux.Handle("POST /status", h.csrf(http.HandlerFunc(h.setStatus)))
 	mux.Handle("POST /settings/photo", h.csrfMultipart(http.HandlerFunc(h.setPhoto)))
 	mux.Handle("POST /settings/photo/remove", h.csrf(http.HandlerFunc(h.setPhoto)))
 	mux.Handle("POST /settings/password", h.csrf(http.HandlerFunc(h.changePassword)))

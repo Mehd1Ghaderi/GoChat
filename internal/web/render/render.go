@@ -187,6 +187,10 @@ func (r *Renderer) funcs() template.FuncMap {
 		"isGroup":        func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_GROUP },
 		"isConversation": Conversation,
 		"inc":            func(n int) int { return n + 1 },
+		"statusClass":    StatusClass,
+		"statusLabel":    StatusLabel,
+		"chosen":         Chosen,
+		"emojiChar":      EmojiChar,
 		"isAdmin":        func(t *pb.Team) bool { return t != nil && t.Role == pb.TeamRole_TEAM_ROLE_ADMIN },
 		"isSystemAdmin": func(u *pb.User) bool {
 			return u != nil && u.Role == pb.SystemRole_SYSTEM_ROLE_ADMIN

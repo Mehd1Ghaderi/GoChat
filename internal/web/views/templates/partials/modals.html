@@ -278,3 +278,38 @@
 {{define "ws-control"}}<div id="ws-control" hidden hx-swap-oob="outerHTML" data-redirect="{{.}}"></div>{{end}}
 
 {{define "resync"}}<div id="resync" hx-swap-oob="outerHTML" hx-get="{{.}}" hx-trigger="load" hx-target="#main" hidden></div>{{end}}
+
+{{define "status-modal"}}
+{{template "modal-start" "Set your status"}}
+<form class="status-form" hx-post="/status" hx-swap="none">
+  <fieldset class="status-choices">
+    <legend>Availability</legend>
+    {{range .Choices}}
+    <label class="status-choice"><input type="radio" name="status" value="{{.Value}}"{{if .On}} checked{{end}}>
+      <span class="presence {{statusClass .Status}}" aria-hidden="true"></span><span>{{.Label}}</span>{{with .Note}}<small>{{.}}</small>{{end}}</label>
+    {{end}}
+  </fieldset>
+  <label class="dnd-for">Do not disturb for
+    <select name="dnd">{{range .DNDFor}}<option value="{{.Value}}">{{.Label}}</option>{{end}}</select>
+  </label>
+  <fieldset class="status-custom">
+    <legend>Custom status</legend>
+    <div class="status-presets">{{range .Presets}}<button type="button" class="preset" data-status-emoji="{{.Emoji}}" data-status-text="{{.Text}}"><span aria-hidden="true">{{emojiChar .Emoji}}</span>{{.Text}}</button>{{end}}</div>
+    <div class="status-line">
+      <select name="emoji" aria-label="Emoji" data-status-field><option value="">—</option>{{range .Emoji}}<option value="{{.Name}}"{{if eq .Name $.CustomEmoji}} selected{{end}}>{{.Char}}</option>{{end}}</select>
+      <input type="text" name="text" value="{{.CustomText}}" maxlength="100" placeholder="What are you up to?" aria-label="Status text" autocomplete="off" data-status-field>
+      <button type="button" class="icon-btn" data-status-clear aria-label="Clear custom status" title="Clear">{{icon "close"}}</button>
+    </div>
+    <label>Clear after
+      <select name="clear">{{range .ClearIn}}<option value="{{.Value}}">{{.Label}}</option>{{end}}</select>
+    </label>
+  </fieldset>
+  <div class="row end">
+    <button class="btn" type="button" data-close-modal>Cancel</button>
+    <button class="btn primary" type="submit">Save</button>
+  </div>
+</form>
+{{template "modal-end"}}
+{{end}}
+
+{{define "status-saved"}}{{template "me-presence" (dict "Status" (chosen .) "OOB" true)}}{{template "me-name" (dict "User" . "OOB" true)}}{{end}}

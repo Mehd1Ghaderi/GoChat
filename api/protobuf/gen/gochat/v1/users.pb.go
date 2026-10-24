@@ -21,6 +21,209 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type SetStatusRequest struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Status Status                 `protobuf:"varint,1,opt,name=status,proto3,enum=gochat.v1.Status" json:"status,omitempty"`
+	// How long do-not-disturb lasts; zero until it is turned off.
+	DndMinutes    int32 `protobuf:"varint,2,opt,name=dnd_minutes,json=dndMinutes,proto3" json:"dnd_minutes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetStatusRequest) Reset() {
+	*x = SetStatusRequest{}
+	mi := &file_gochat_v1_users_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetStatusRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetStatusRequest) ProtoMessage() {}
+
+func (x *SetStatusRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_users_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetStatusRequest.ProtoReflect.Descriptor instead.
+func (*SetStatusRequest) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_users_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *SetStatusRequest) GetStatus() Status {
+	if x != nil {
+		return x.Status
+	}
+	return Status_STATUS_UNSPECIFIED
+}
+
+func (x *SetStatusRequest) GetDndMinutes() int32 {
+	if x != nil {
+		return x.DndMinutes
+	}
+	return 0
+}
+
+type SetStatusResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	User          *User                  `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetStatusResponse) Reset() {
+	*x = SetStatusResponse{}
+	mi := &file_gochat_v1_users_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetStatusResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetStatusResponse) ProtoMessage() {}
+
+func (x *SetStatusResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_users_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetStatusResponse.ProtoReflect.Descriptor instead.
+func (*SetStatusResponse) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_users_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *SetStatusResponse) GetUser() *User {
+	if x != nil {
+		return x.User
+	}
+	return nil
+}
+
+// SetCustomStatusRequest with no emoji and no text clears the status.
+type SetCustomStatusRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Emoji string                 `protobuf:"bytes,1,opt,name=emoji,proto3" json:"emoji,omitempty"`
+	Text  string                 `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
+	// When the status clears itself; zero to keep it.
+	Minutes       int32 `protobuf:"varint,3,opt,name=minutes,proto3" json:"minutes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetCustomStatusRequest) Reset() {
+	*x = SetCustomStatusRequest{}
+	mi := &file_gochat_v1_users_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetCustomStatusRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetCustomStatusRequest) ProtoMessage() {}
+
+func (x *SetCustomStatusRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_users_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetCustomStatusRequest.ProtoReflect.Descriptor instead.
+func (*SetCustomStatusRequest) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_users_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *SetCustomStatusRequest) GetEmoji() string {
+	if x != nil {
+		return x.Emoji
+	}
+	return ""
+}
+
+func (x *SetCustomStatusRequest) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *SetCustomStatusRequest) GetMinutes() int32 {
+	if x != nil {
+		return x.Minutes
+	}
+	return 0
+}
+
+type SetCustomStatusResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	User          *User                  `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetCustomStatusResponse) Reset() {
+	*x = SetCustomStatusResponse{}
+	mi := &file_gochat_v1_users_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetCustomStatusResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetCustomStatusResponse) ProtoMessage() {}
+
+func (x *SetCustomStatusResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_users_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetCustomStatusResponse.ProtoReflect.Descriptor instead.
+func (*SetCustomStatusResponse) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_users_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *SetCustomStatusResponse) GetUser() *User {
+	if x != nil {
+		return x.User
+	}
+	return nil
+}
+
 type GetUserRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
@@ -30,7 +233,7 @@ type GetUserRequest struct {
 
 func (x *GetUserRequest) Reset() {
 	*x = GetUserRequest{}
-	mi := &file_gochat_v1_users_proto_msgTypes[0]
+	mi := &file_gochat_v1_users_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -42,7 +245,7 @@ func (x *GetUserRequest) String() string {
 func (*GetUserRequest) ProtoMessage() {}
 
 func (x *GetUserRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_users_proto_msgTypes[0]
+	mi := &file_gochat_v1_users_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -55,7 +258,7 @@ func (x *GetUserRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetUserRequest.ProtoReflect.Descriptor instead.
 func (*GetUserRequest) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_users_proto_rawDescGZIP(), []int{0}
+	return file_gochat_v1_users_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *GetUserRequest) GetUserId() string {
@@ -74,7 +277,7 @@ type GetUserResponse struct {
 
 func (x *GetUserResponse) Reset() {
 	*x = GetUserResponse{}
-	mi := &file_gochat_v1_users_proto_msgTypes[1]
+	mi := &file_gochat_v1_users_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -86,7 +289,7 @@ func (x *GetUserResponse) String() string {
 func (*GetUserResponse) ProtoMessage() {}
 
 func (x *GetUserResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_users_proto_msgTypes[1]
+	mi := &file_gochat_v1_users_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -99,7 +302,7 @@ func (x *GetUserResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetUserResponse.ProtoReflect.Descriptor instead.
 func (*GetUserResponse) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_users_proto_rawDescGZIP(), []int{1}
+	return file_gochat_v1_users_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *GetUserResponse) GetUser() *User {
@@ -118,7 +321,7 @@ type UpdateProfileRequest struct {
 
 func (x *UpdateProfileRequest) Reset() {
 	*x = UpdateProfileRequest{}
-	mi := &file_gochat_v1_users_proto_msgTypes[2]
+	mi := &file_gochat_v1_users_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -130,7 +333,7 @@ func (x *UpdateProfileRequest) String() string {
 func (*UpdateProfileRequest) ProtoMessage() {}
 
 func (x *UpdateProfileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_users_proto_msgTypes[2]
+	mi := &file_gochat_v1_users_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -143,7 +346,7 @@ func (x *UpdateProfileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateProfileRequest.ProtoReflect.Descriptor instead.
 func (*UpdateProfileRequest) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_users_proto_rawDescGZIP(), []int{2}
+	return file_gochat_v1_users_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *UpdateProfileRequest) GetDisplayName() string {
@@ -162,7 +365,7 @@ type UpdateProfileResponse struct {
 
 func (x *UpdateProfileResponse) Reset() {
 	*x = UpdateProfileResponse{}
-	mi := &file_gochat_v1_users_proto_msgTypes[3]
+	mi := &file_gochat_v1_users_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -174,7 +377,7 @@ func (x *UpdateProfileResponse) String() string {
 func (*UpdateProfileResponse) ProtoMessage() {}
 
 func (x *UpdateProfileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_users_proto_msgTypes[3]
+	mi := &file_gochat_v1_users_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -187,7 +390,7 @@ func (x *UpdateProfileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateProfileResponse.ProtoReflect.Descriptor instead.
 func (*UpdateProfileResponse) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_users_proto_rawDescGZIP(), []int{3}
+	return file_gochat_v1_users_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *UpdateProfileResponse) GetUser() *User {
@@ -206,7 +409,7 @@ type GetPresenceRequest struct {
 
 func (x *GetPresenceRequest) Reset() {
 	*x = GetPresenceRequest{}
-	mi := &file_gochat_v1_users_proto_msgTypes[4]
+	mi := &file_gochat_v1_users_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -218,7 +421,7 @@ func (x *GetPresenceRequest) String() string {
 func (*GetPresenceRequest) ProtoMessage() {}
 
 func (x *GetPresenceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_users_proto_msgTypes[4]
+	mi := &file_gochat_v1_users_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -231,7 +434,7 @@ func (x *GetPresenceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPresenceRequest.ProtoReflect.Descriptor instead.
 func (*GetPresenceRequest) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_users_proto_rawDescGZIP(), []int{4}
+	return file_gochat_v1_users_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *GetPresenceRequest) GetUserIds() []string {
@@ -244,13 +447,15 @@ func (x *GetPresenceRequest) GetUserIds() []string {
 type GetPresenceResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	OnlineUserIds []string               `protobuf:"bytes,1,rep,name=online_user_ids,json=onlineUserIds,proto3" json:"online_user_ids,omitempty"`
+	// The status of each user not offline.
+	Statuses      map[string]Status `protobuf:"bytes,2,rep,name=statuses,proto3" json:"statuses,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value,enum=gochat.v1.Status"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetPresenceResponse) Reset() {
 	*x = GetPresenceResponse{}
-	mi := &file_gochat_v1_users_proto_msgTypes[5]
+	mi := &file_gochat_v1_users_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -262,7 +467,7 @@ func (x *GetPresenceResponse) String() string {
 func (*GetPresenceResponse) ProtoMessage() {}
 
 func (x *GetPresenceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_users_proto_msgTypes[5]
+	mi := &file_gochat_v1_users_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -275,12 +480,19 @@ func (x *GetPresenceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPresenceResponse.ProtoReflect.Descriptor instead.
 func (*GetPresenceResponse) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_users_proto_rawDescGZIP(), []int{5}
+	return file_gochat_v1_users_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *GetPresenceResponse) GetOnlineUserIds() []string {
 	if x != nil {
 		return x.OnlineUserIds
+	}
+	return nil
+}
+
+func (x *GetPresenceResponse) GetStatuses() map[string]Status {
+	if x != nil {
+		return x.Statuses
 	}
 	return nil
 }
@@ -294,7 +506,7 @@ type SetPhotoRequest struct {
 
 func (x *SetPhotoRequest) Reset() {
 	*x = SetPhotoRequest{}
-	mi := &file_gochat_v1_users_proto_msgTypes[6]
+	mi := &file_gochat_v1_users_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -306,7 +518,7 @@ func (x *SetPhotoRequest) String() string {
 func (*SetPhotoRequest) ProtoMessage() {}
 
 func (x *SetPhotoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_users_proto_msgTypes[6]
+	mi := &file_gochat_v1_users_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -319,7 +531,7 @@ func (x *SetPhotoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetPhotoRequest.ProtoReflect.Descriptor instead.
 func (*SetPhotoRequest) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_users_proto_rawDescGZIP(), []int{6}
+	return file_gochat_v1_users_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *SetPhotoRequest) GetImage() []byte {
@@ -338,7 +550,7 @@ type SetPhotoResponse struct {
 
 func (x *SetPhotoResponse) Reset() {
 	*x = SetPhotoResponse{}
-	mi := &file_gochat_v1_users_proto_msgTypes[7]
+	mi := &file_gochat_v1_users_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -350,7 +562,7 @@ func (x *SetPhotoResponse) String() string {
 func (*SetPhotoResponse) ProtoMessage() {}
 
 func (x *SetPhotoResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_users_proto_msgTypes[7]
+	mi := &file_gochat_v1_users_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -363,7 +575,7 @@ func (x *SetPhotoResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetPhotoResponse.ProtoReflect.Descriptor instead.
 func (*SetPhotoResponse) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_users_proto_rawDescGZIP(), []int{7}
+	return file_gochat_v1_users_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *SetPhotoResponse) GetUser() *User {
@@ -381,7 +593,7 @@ type RemovePhotoRequest struct {
 
 func (x *RemovePhotoRequest) Reset() {
 	*x = RemovePhotoRequest{}
-	mi := &file_gochat_v1_users_proto_msgTypes[8]
+	mi := &file_gochat_v1_users_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -393,7 +605,7 @@ func (x *RemovePhotoRequest) String() string {
 func (*RemovePhotoRequest) ProtoMessage() {}
 
 func (x *RemovePhotoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_users_proto_msgTypes[8]
+	mi := &file_gochat_v1_users_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -406,7 +618,7 @@ func (x *RemovePhotoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemovePhotoRequest.ProtoReflect.Descriptor instead.
 func (*RemovePhotoRequest) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_users_proto_rawDescGZIP(), []int{8}
+	return file_gochat_v1_users_proto_rawDescGZIP(), []int{12}
 }
 
 type RemovePhotoResponse struct {
@@ -418,7 +630,7 @@ type RemovePhotoResponse struct {
 
 func (x *RemovePhotoResponse) Reset() {
 	*x = RemovePhotoResponse{}
-	mi := &file_gochat_v1_users_proto_msgTypes[9]
+	mi := &file_gochat_v1_users_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -430,7 +642,7 @@ func (x *RemovePhotoResponse) String() string {
 func (*RemovePhotoResponse) ProtoMessage() {}
 
 func (x *RemovePhotoResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_users_proto_msgTypes[9]
+	mi := &file_gochat_v1_users_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -443,7 +655,7 @@ func (x *RemovePhotoResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemovePhotoResponse.ProtoReflect.Descriptor instead.
 func (*RemovePhotoResponse) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_users_proto_rawDescGZIP(), []int{9}
+	return file_gochat_v1_users_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *RemovePhotoResponse) GetUser() *User {
@@ -457,7 +669,19 @@ var File_gochat_v1_users_proto protoreflect.FileDescriptor
 
 const file_gochat_v1_users_proto_rawDesc = "" +
 	"\n" +
-	"\x15gochat/v1/users.proto\x12\tgochat.v1\x1a\x15gochat/v1/types.proto\")\n" +
+	"\x15gochat/v1/users.proto\x12\tgochat.v1\x1a\x15gochat/v1/types.proto\"^\n" +
+	"\x10SetStatusRequest\x12)\n" +
+	"\x06status\x18\x01 \x01(\x0e2\x11.gochat.v1.StatusR\x06status\x12\x1f\n" +
+	"\vdnd_minutes\x18\x02 \x01(\x05R\n" +
+	"dndMinutes\"8\n" +
+	"\x11SetStatusResponse\x12#\n" +
+	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user\"\\\n" +
+	"\x16SetCustomStatusRequest\x12\x14\n" +
+	"\x05emoji\x18\x01 \x01(\tR\x05emoji\x12\x12\n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\x12\x18\n" +
+	"\aminutes\x18\x03 \x01(\x05R\aminutes\">\n" +
+	"\x17SetCustomStatusResponse\x12#\n" +
+	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user\")\n" +
 	"\x0eGetUserRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\"6\n" +
 	"\x0fGetUserResponse\x12#\n" +
@@ -467,22 +691,28 @@ const file_gochat_v1_users_proto_rawDesc = "" +
 	"\x15UpdateProfileResponse\x12#\n" +
 	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user\"/\n" +
 	"\x12GetPresenceRequest\x12\x19\n" +
-	"\buser_ids\x18\x01 \x03(\tR\auserIds\"=\n" +
+	"\buser_ids\x18\x01 \x03(\tR\auserIds\"\xd7\x01\n" +
 	"\x13GetPresenceResponse\x12&\n" +
-	"\x0fonline_user_ids\x18\x01 \x03(\tR\ronlineUserIds\"'\n" +
+	"\x0fonline_user_ids\x18\x01 \x03(\tR\ronlineUserIds\x12H\n" +
+	"\bstatuses\x18\x02 \x03(\v2,.gochat.v1.GetPresenceResponse.StatusesEntryR\bstatuses\x1aN\n" +
+	"\rStatusesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12'\n" +
+	"\x05value\x18\x02 \x01(\x0e2\x11.gochat.v1.StatusR\x05value:\x028\x01\"'\n" +
 	"\x0fSetPhotoRequest\x12\x14\n" +
 	"\x05image\x18\x01 \x01(\fR\x05image\"7\n" +
 	"\x10SetPhotoResponse\x12#\n" +
 	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user\"\x14\n" +
 	"\x12RemovePhotoRequest\":\n" +
 	"\x13RemovePhotoResponse\x12#\n" +
-	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user2\x84\x03\n" +
+	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user2\xa6\x04\n" +
 	"\vUserService\x12@\n" +
 	"\aGetUser\x12\x19.gochat.v1.GetUserRequest\x1a\x1a.gochat.v1.GetUserResponse\x12R\n" +
 	"\rUpdateProfile\x12\x1f.gochat.v1.UpdateProfileRequest\x1a .gochat.v1.UpdateProfileResponse\x12L\n" +
 	"\vGetPresence\x12\x1d.gochat.v1.GetPresenceRequest\x1a\x1e.gochat.v1.GetPresenceResponse\x12C\n" +
 	"\bSetPhoto\x12\x1a.gochat.v1.SetPhotoRequest\x1a\x1b.gochat.v1.SetPhotoResponse\x12L\n" +
-	"\vRemovePhoto\x12\x1d.gochat.v1.RemovePhotoRequest\x1a\x1e.gochat.v1.RemovePhotoResponseB\x9f\x01\n" +
+	"\vRemovePhoto\x12\x1d.gochat.v1.RemovePhotoRequest\x1a\x1e.gochat.v1.RemovePhotoResponse\x12F\n" +
+	"\tSetStatus\x12\x1b.gochat.v1.SetStatusRequest\x1a\x1c.gochat.v1.SetStatusResponse\x12X\n" +
+	"\x0fSetCustomStatus\x12!.gochat.v1.SetCustomStatusRequest\x1a\".gochat.v1.SetCustomStatusResponseB\x9f\x01\n" +
 	"\rcom.gochat.v1B\n" +
 	"UsersProtoP\x01Z=github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1;gochatv1\xa2\x02\x03GXX\xaa\x02\tGochat.V1\xca\x02\tGochat\\V1\xe2\x02\x15Gochat\\V1\\GPBMetadata\xea\x02\n" +
 	"Gochat::V1b\x06proto3"
@@ -499,40 +729,55 @@ func file_gochat_v1_users_proto_rawDescGZIP() []byte {
 	return file_gochat_v1_users_proto_rawDescData
 }
 
-var file_gochat_v1_users_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_gochat_v1_users_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_gochat_v1_users_proto_goTypes = []any{
-	(*GetUserRequest)(nil),        // 0: gochat.v1.GetUserRequest
-	(*GetUserResponse)(nil),       // 1: gochat.v1.GetUserResponse
-	(*UpdateProfileRequest)(nil),  // 2: gochat.v1.UpdateProfileRequest
-	(*UpdateProfileResponse)(nil), // 3: gochat.v1.UpdateProfileResponse
-	(*GetPresenceRequest)(nil),    // 4: gochat.v1.GetPresenceRequest
-	(*GetPresenceResponse)(nil),   // 5: gochat.v1.GetPresenceResponse
-	(*SetPhotoRequest)(nil),       // 6: gochat.v1.SetPhotoRequest
-	(*SetPhotoResponse)(nil),      // 7: gochat.v1.SetPhotoResponse
-	(*RemovePhotoRequest)(nil),    // 8: gochat.v1.RemovePhotoRequest
-	(*RemovePhotoResponse)(nil),   // 9: gochat.v1.RemovePhotoResponse
-	(*User)(nil),                  // 10: gochat.v1.User
+	(*SetStatusRequest)(nil),        // 0: gochat.v1.SetStatusRequest
+	(*SetStatusResponse)(nil),       // 1: gochat.v1.SetStatusResponse
+	(*SetCustomStatusRequest)(nil),  // 2: gochat.v1.SetCustomStatusRequest
+	(*SetCustomStatusResponse)(nil), // 3: gochat.v1.SetCustomStatusResponse
+	(*GetUserRequest)(nil),          // 4: gochat.v1.GetUserRequest
+	(*GetUserResponse)(nil),         // 5: gochat.v1.GetUserResponse
+	(*UpdateProfileRequest)(nil),    // 6: gochat.v1.UpdateProfileRequest
+	(*UpdateProfileResponse)(nil),   // 7: gochat.v1.UpdateProfileResponse
+	(*GetPresenceRequest)(nil),      // 8: gochat.v1.GetPresenceRequest
+	(*GetPresenceResponse)(nil),     // 9: gochat.v1.GetPresenceResponse
+	(*SetPhotoRequest)(nil),         // 10: gochat.v1.SetPhotoRequest
+	(*SetPhotoResponse)(nil),        // 11: gochat.v1.SetPhotoResponse
+	(*RemovePhotoRequest)(nil),      // 12: gochat.v1.RemovePhotoRequest
+	(*RemovePhotoResponse)(nil),     // 13: gochat.v1.RemovePhotoResponse
+	nil,                             // 14: gochat.v1.GetPresenceResponse.StatusesEntry
+	(Status)(0),                     // 15: gochat.v1.Status
+	(*User)(nil),                    // 16: gochat.v1.User
 }
 var file_gochat_v1_users_proto_depIdxs = []int32{
-	10, // 0: gochat.v1.GetUserResponse.user:type_name -> gochat.v1.User
-	10, // 1: gochat.v1.UpdateProfileResponse.user:type_name -> gochat.v1.User
-	10, // 2: gochat.v1.SetPhotoResponse.user:type_name -> gochat.v1.User
-	10, // 3: gochat.v1.RemovePhotoResponse.user:type_name -> gochat.v1.User
-	0,  // 4: gochat.v1.UserService.GetUser:input_type -> gochat.v1.GetUserRequest
-	2,  // 5: gochat.v1.UserService.UpdateProfile:input_type -> gochat.v1.UpdateProfileRequest
-	4,  // 6: gochat.v1.UserService.GetPresence:input_type -> gochat.v1.GetPresenceRequest
-	6,  // 7: gochat.v1.UserService.SetPhoto:input_type -> gochat.v1.SetPhotoRequest
-	8,  // 8: gochat.v1.UserService.RemovePhoto:input_type -> gochat.v1.RemovePhotoRequest
-	1,  // 9: gochat.v1.UserService.GetUser:output_type -> gochat.v1.GetUserResponse
-	3,  // 10: gochat.v1.UserService.UpdateProfile:output_type -> gochat.v1.UpdateProfileResponse
-	5,  // 11: gochat.v1.UserService.GetPresence:output_type -> gochat.v1.GetPresenceResponse
-	7,  // 12: gochat.v1.UserService.SetPhoto:output_type -> gochat.v1.SetPhotoResponse
-	9,  // 13: gochat.v1.UserService.RemovePhoto:output_type -> gochat.v1.RemovePhotoResponse
-	9,  // [9:14] is the sub-list for method output_type
-	4,  // [4:9] is the sub-list for method input_type
-	4,  // [4:4] is the sub-list for extension type_name
-	4,  // [4:4] is the sub-list for extension extendee
-	0,  // [0:4] is the sub-list for field type_name
+	15, // 0: gochat.v1.SetStatusRequest.status:type_name -> gochat.v1.Status
+	16, // 1: gochat.v1.SetStatusResponse.user:type_name -> gochat.v1.User
+	16, // 2: gochat.v1.SetCustomStatusResponse.user:type_name -> gochat.v1.User
+	16, // 3: gochat.v1.GetUserResponse.user:type_name -> gochat.v1.User
+	16, // 4: gochat.v1.UpdateProfileResponse.user:type_name -> gochat.v1.User
+	14, // 5: gochat.v1.GetPresenceResponse.statuses:type_name -> gochat.v1.GetPresenceResponse.StatusesEntry
+	16, // 6: gochat.v1.SetPhotoResponse.user:type_name -> gochat.v1.User
+	16, // 7: gochat.v1.RemovePhotoResponse.user:type_name -> gochat.v1.User
+	15, // 8: gochat.v1.GetPresenceResponse.StatusesEntry.value:type_name -> gochat.v1.Status
+	4,  // 9: gochat.v1.UserService.GetUser:input_type -> gochat.v1.GetUserRequest
+	6,  // 10: gochat.v1.UserService.UpdateProfile:input_type -> gochat.v1.UpdateProfileRequest
+	8,  // 11: gochat.v1.UserService.GetPresence:input_type -> gochat.v1.GetPresenceRequest
+	10, // 12: gochat.v1.UserService.SetPhoto:input_type -> gochat.v1.SetPhotoRequest
+	12, // 13: gochat.v1.UserService.RemovePhoto:input_type -> gochat.v1.RemovePhotoRequest
+	0,  // 14: gochat.v1.UserService.SetStatus:input_type -> gochat.v1.SetStatusRequest
+	2,  // 15: gochat.v1.UserService.SetCustomStatus:input_type -> gochat.v1.SetCustomStatusRequest
+	5,  // 16: gochat.v1.UserService.GetUser:output_type -> gochat.v1.GetUserResponse
+	7,  // 17: gochat.v1.UserService.UpdateProfile:output_type -> gochat.v1.UpdateProfileResponse
+	9,  // 18: gochat.v1.UserService.GetPresence:output_type -> gochat.v1.GetPresenceResponse
+	11, // 19: gochat.v1.UserService.SetPhoto:output_type -> gochat.v1.SetPhotoResponse
+	13, // 20: gochat.v1.UserService.RemovePhoto:output_type -> gochat.v1.RemovePhotoResponse
+	1,  // 21: gochat.v1.UserService.SetStatus:output_type -> gochat.v1.SetStatusResponse
+	3,  // 22: gochat.v1.UserService.SetCustomStatus:output_type -> gochat.v1.SetCustomStatusResponse
+	16, // [16:23] is the sub-list for method output_type
+	9,  // [9:16] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_gochat_v1_users_proto_init() }
@@ -547,7 +792,7 @@ func file_gochat_v1_users_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gochat_v1_users_proto_rawDesc), len(file_gochat_v1_users_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

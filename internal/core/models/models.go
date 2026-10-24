@@ -59,6 +59,12 @@ type User struct {
 	UpdatedAt    time.Time  `db:"updated_at"`
 	// Photo is the version of the profile photo, empty when there is none.
 	Photo string `db:"photo"`
+	// Status is the availability the user chose, empty for online.
+	Status      string    `db:"status"`
+	DNDUntil    time.Time `db:"dnd_until"`
+	StatusEmoji string    `db:"status_emoji"`
+	StatusText  string    `db:"status_text"`
+	StatusUntil time.Time `db:"status_until"`
 }
 
 type Session struct {

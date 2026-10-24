@@ -186,10 +186,26 @@ type MeResult struct {
 	Email string
 }
 
+// Presence replies with the statuses of the users among UserIDs who are not
+// offline.
 type Presence struct {
 	P       *models.Principal
 	UserIDs []string
 }
+
+// SetStatus and SetCustomStatus reply with the caller as they now are.
+type (
+	SetStatus struct {
+		P          *models.Principal
+		Status     pb.Status
+		DNDMinutes int
+	}
+	SetCustomStatus struct {
+		P           *models.Principal
+		Emoji, Text string
+		Minutes     int
+	}
+)
 
 // ListMuted replies with the ids of the channels the caller muted.
 type ListMuted struct{ P *models.Principal }

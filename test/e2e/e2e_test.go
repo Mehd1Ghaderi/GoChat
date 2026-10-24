@@ -830,6 +830,47 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
+	t.Run("statuses show and do not disturb holds notifications", func(t *testing.T) {
+		_, list := admin.do(http.MethodGet, "/t/"+teamName+"/people/search?q="+bobName, nil, "", true)
+		bobUser := pickRe.FindStringSubmatch(list)[1]
+		res, _ := admin.hx("/t/"+teamName+"/dm", url.Values{"user_id": {bobUser}})
+		direct := channelRe.FindStringSubmatch(res.Header.Get("HX-Location"))[1]
+		setStatus := func(status, emoji, text string) (*http.Response, string) {
+			return bob.hx("/status", url.Values{"status": {status}, "dnd": {"0"}, "emoji": {emoji}, "text": {text}, "clear": {"60"}})
+		}
+		if _, modal := bob.do(http.MethodGet, "/status", nil, "", true); !strings.Contains(modal, "Set your status") || !strings.Contains(modal, `value="dnd"`) {
+			t.Fatalf("status modal: %s", modal)
+		}
+		if res, body := setStatus("dnd", "calendar", "In a meeting"); res.StatusCode != http.StatusOK || !strings.Contains(body, `class="presence dnd"`) || !strings.Contains(body, "In a meeting") {
+			t.Fatalf("set status: %d %s", res.StatusCode, body)
+		}
+		adminWS.expect(5*time.Second, `id="presence-`+bobUser+`" class="presence dnd"`)
+		adminWS.expect(5*time.Second, `id="channel-lists"`, `class="cs" title="In a meeting"`)
+		if _, page := admin.do(http.MethodGet, "/t/"+teamName+"/ch/"+direct, nil, "", true); !strings.Contains(page, `class="custom-status"`) || !strings.Contains(page, `class="presence dnd"`) {
+			t.Fatalf("the conversation does not show bob's status: %s", page)
+		}
+		adminWS.send(map[string]string{"op": "post", "channel_id": direct, "content": "are you there"})
+		frames := strings.Join(bobWS.collect(2*time.Second), "\n")
+		if strings.Contains(frames, `id="notify"`) || !strings.Contains(frames, `id="unread-`+direct+`" class="mentions"`) {
+			t.Fatalf("do not disturb notified, or did not count the message: %s", frames)
+		}
+		if res, _ := setStatus("busy", "", ""); res.StatusCode != http.StatusBadRequest {
+			t.Fatalf("an unknown status: %d", res.StatusCode)
+		}
+		if res, _ := setStatus("online", "<b>", "hi"); res.StatusCode != http.StatusBadRequest {
+			t.Fatalf("an unknown emoji: %d", res.StatusCode)
+		}
+		adminWS.expect(5*time.Second, `id="presence-`+bobUser+`" class="presence on"`)
+		setStatus("offline", "", "")
+		adminWS.expect(5*time.Second, `id="presence-`+bobUser+`" class="presence "`)
+		if res, body := setStatus("online", "", ""); res.StatusCode != http.StatusOK || !strings.Contains(body, "@"+bobName) {
+			t.Fatalf("clear status: %d %s", res.StatusCode, body)
+		}
+		adminWS.expect(5*time.Second, `id="presence-`+bobUser+`" class="presence on"`)
+		adminWS.send(map[string]string{"op": "post", "channel_id": direct, "content": "now?"})
+		bobWS.expect(5*time.Second, `id="notify"`, "now?")
+	})
+
 	t.Run("csrf and origin are enforced", func(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodPost, baseURL+"/t/"+teamName+"/invites", nil)
 		req.Header.Set("HX-Request", "true")

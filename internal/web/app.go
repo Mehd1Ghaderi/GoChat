@@ -235,7 +235,7 @@ func (h *Handler) channelView(ctx context.Context, u *pb.User, team *pb.Team, ch
 	}
 	if ch.Peer != nil {
 		if p, err := h.client.Users.GetPresence(ctx, &pb.GetPresenceRequest{UserIds: []string{ch.Peer.Id}}); err == nil {
-			view.PeerOnline = len(p.OnlineUserIds) > 0
+			view.PeerStatus = p.Statuses[ch.Peer.Id]
 		}
 	}
 	return view, nil
@@ -367,15 +367,13 @@ func (h *Handler) lists(ctx context.Context, team *pb.Team, active string) (*ren
 		unread = int(t.UnreadCount)
 	}
 	channels, direct := render.Split(res.Channels)
-	online := map[string]bool{}
+	var status map[string]pb.Status
 	if peers := render.Peers(direct); len(peers) > 0 {
 		if p, err := h.client.Users.GetPresence(ctx, &pb.GetPresenceRequest{UserIds: peers}); err == nil {
-			for _, id := range p.OnlineUserIds {
-				online[id] = true
-			}
+			status = p.Statuses
 		}
 	}
-	return &render.Lists{Team: team, Channels: channels, DMs: direct, Active: active, Online: online, ThreadsUnread: unread}, nil
+	return &render.Lists{Team: team, Channels: channels, DMs: direct, Active: active, Status: status, ThreadsUnread: unread}, nil
 }
 
 func (h *Handler) olderMessages(w http.ResponseWriter, r *http.Request) {

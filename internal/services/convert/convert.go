@@ -87,14 +87,17 @@ func User(u *models.User) *pb.User {
 		return nil
 	}
 	return &pb.User{
-		Id:          u.ID.String(),
-		Username:    u.Username,
-		DisplayName: u.DisplayName,
-		Role:        SystemRole(u.Role),
-		TotpEnabled: u.TOTPEnabled,
-		CreatedAt:   Time(u.CreatedAt),
-		Deactivated: u.Deactivated,
-		Photo:       u.Photo,
+		Id:           u.ID.String(),
+		Username:     u.Username,
+		DisplayName:  u.DisplayName,
+		Role:         SystemRole(u.Role),
+		TotpEnabled:  u.TOTPEnabled,
+		CreatedAt:    Time(u.CreatedAt),
+		Deactivated:  u.Deactivated,
+		Photo:        u.Photo,
+		Status:       Status(u.Status),
+		DndUntil:     Time(u.DNDUntil),
+		CustomStatus: Custom(u, time.Now()),
 	}
 }
 
@@ -104,13 +107,35 @@ func PublicUser(u *models.User) *pb.User {
 		return nil
 	}
 	return &pb.User{
-		Id:          u.ID.String(),
-		Username:    u.Username,
-		DisplayName: u.DisplayName,
-		Role:        SystemRole(u.Role),
-		Deactivated: u.Deactivated,
-		Photo:       u.Photo,
+		Id:           u.ID.String(),
+		Username:     u.Username,
+		DisplayName:  u.DisplayName,
+		Role:         SystemRole(u.Role),
+		Deactivated:  u.Deactivated,
+		Photo:        u.Photo,
+		CustomStatus: Custom(u, time.Now()),
 	}
+}
+
+// Status is the availability a user chose.
+func Status(s string) pb.Status {
+	switch s {
+	case "away":
+		return pb.Status_STATUS_AWAY
+	case "dnd":
+		return pb.Status_STATUS_DND
+	case "offline":
+		return pb.Status_STATUS_OFFLINE
+	}
+	return pb.Status_STATUS_ONLINE
+}
+
+// Custom is the custom status of u, nil when it has none or it ran out.
+func Custom(u *models.User, now time.Time) *pb.CustomStatus {
+	if u.StatusEmoji == "" || (!u.StatusUntil.IsZero() && !now.Before(u.StatusUntil)) {
+		return nil
+	}
+	return &pb.CustomStatus{Emoji: u.StatusEmoji, Text: u.StatusText, ExpiresAt: Time(u.StatusUntil)}
 }
 
 func Team(t *models.Team, role models.TeamRole) *pb.Team {

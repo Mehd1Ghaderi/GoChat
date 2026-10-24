@@ -98,7 +98,12 @@ type session struct {
 	muted map[string]bool
 	names map[string]string
 	// saved holds the messages the user saved.
-	saved     map[string]bool
+	saved map[string]bool
+	// peerOf names the other person of each direct conversation.
+	peerOf map[string]string
+	// dnd is set while the user does not want to be disturbed.
+	dnd       bool
+	dndUntil  time.Time
 	typingSeq uint64
 	// typer is who the typing line names, and shown the newest message on
 	// the page.
@@ -134,6 +139,7 @@ func NewSession(d *Deps, connID uint64, call drpc.Call, ws *websocket.Conn) acto
 			mentions: make(map[string]int),
 			muted:    make(map[string]bool),
 			saved:    make(map[string]bool),
+			peerOf:   make(map[string]string),
 			names:    make(map[string]string),
 			peers:    make(map[string]bool),
 			reads:    make(map[string]string),
@@ -165,6 +171,10 @@ func (s *session) Receive(c *actor.Context) {
 		}
 	case Ready:
 		s.user, s.sessionID = msg.User, msg.SessionID
+		s.dnd = render.Chosen(msg.User) == pb.Status_STATUS_DND
+		if t := msg.User.GetDndUntil(); t != nil {
+			s.dndUntil = t.AsTime()
+		}
 		// The socket ends with its session.
 		if s.expiry == nil && !msg.ExpiresAt.IsZero() {
 			pid, engine := c.PID(), c.Engine()
@@ -255,6 +265,7 @@ func (s *session) Receive(c *actor.Context) {
 		s.mentions = make(map[string]int)
 		s.peers = make(map[string]bool, len(msg.lists.DMs))
 		s.directs = make(map[string]bool, len(msg.lists.DMs))
+		s.peerOf = make(map[string]string, len(msg.lists.DMs))
 		for _, ch := range msg.lists.Channels {
 			s.sidebar[ch.Id] = true
 			s.mentions[ch.Id] = int(ch.MentionCount)
@@ -271,6 +282,7 @@ func (s *session) Receive(c *actor.Context) {
 			s.muted[ch.Id] = ch.Muted
 			if ch.Peer != nil {
 				s.peers[ch.Peer.Id] = true
+				s.peerOf[ch.Id] = ch.Peer.Id
 			}
 		}
 		if msg.lists.OOB {
@@ -452,15 +464,13 @@ func (s *session) loadSidebar(c *actor.Context, oob bool) {
 			unread = int(t.UnreadCount)
 		}
 		channels, direct := render.Split(res.Channels)
-		online := map[string]bool{}
+		var status map[string]pb.Status
 		if peers := render.Peers(direct); len(peers) > 0 {
 			if p, err := s.Client.Users.GetPresence(ctx, &pb.GetPresenceRequest{UserIds: peers}); err == nil {
-				for _, id := range p.OnlineUserIds {
-					online[id] = true
-				}
+				status = p.Statuses
 			}
 		}
-		return sidebarReady{teamID: teamID, lists: &render.Lists{Team: team, Channels: channels, DMs: direct, Online: online, ThreadsUnread: unread, OOB: oob}}
+		return sidebarReady{teamID: teamID, lists: &render.Lists{Team: team, Channels: channels, DMs: direct, Status: status, ThreadsUnread: unread, OOB: oob}}
 	})
 }
 
@@ -598,7 +608,7 @@ func (s *session) view(c *actor.Context, f *clientFrame) {
 // user, in a direct conversation, by mention or in a thread they take part
 // in. The tab shows it when it is in the background or elsewhere.
 func (s *session) notify(m *pb.Message, participants []string) {
-	if s.muted[m.ChannelId] {
+	if s.muted[m.ChannelId] || (s.dnd && (s.dndUntil.IsZero() || time.Now().Before(s.dndUntil))) {
 		return
 	}
 	direct := s.directs[m.ChannelId]
@@ -823,8 +833,27 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 			s.loadRail(c)
 		}
 	case *pb.Event_Presence:
-		if s.peers[p.Presence.UserId] {
-			s.fragment("presence", render.Presence{ID: p.Presence.UserId, Online: p.Presence.Online})
+		d := render.Presence{ID: p.Presence.UserId, Status: p.Presence.Status}
+		if d.ID == me {
+			s.dnd, s.dndUntil = d.Status == pb.Status_STATUS_DND, time.Time{}
+			s.fragment("me-presence", map[string]any{"Status": d.Status, "OOB": true})
+		}
+		if s.peers[d.ID] {
+			s.fragment("presence", d)
+		}
+		if s.peerOf[s.channelID] == d.ID {
+			s.fragment("head-presence", d)
+		}
+	case *pb.Event_ProfileChanged:
+		u := p.ProfileChanged.User
+		if u.GetId() == me {
+			s.fragment("me-name", map[string]any{"User": u, "OOB": true})
+		}
+		if s.peers[u.GetId()] {
+			s.loadSidebar(c, true)
+		}
+		if s.peerOf[s.channelID] == u.GetId() {
+			s.fragment("peer-status", map[string]any{"User": u, "OOB": true})
 		}
 	}
 }

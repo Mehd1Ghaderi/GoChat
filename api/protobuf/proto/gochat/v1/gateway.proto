@@ -83,6 +83,7 @@ message Event {
     ChannelUpdated channel_updated = 14;
     SavedChanged saved_changed = 15;
     PinsChanged pins_changed = 16;
+    ProfileChanged profile_changed = 17;
   }
 }
 
@@ -92,6 +93,11 @@ message SavedChanged {
   string message_id = 2;
   string root_id = 3;
   bool saved = 4;
+}
+
+// ProfileChanged tells everyone a person changed how others see them.
+message ProfileChanged {
+  User user = 1;
 }
 
 // PinsChanged tells a channel's members how many messages it pins.
@@ -153,6 +159,7 @@ message ChannelLeft {
 message Presence {
   string user_id = 1;
   bool online = 2;
+  Status status = 3;
 }
 
 message TeamJoined {

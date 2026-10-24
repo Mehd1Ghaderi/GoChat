@@ -71,7 +71,8 @@ type Lists struct {
 	DMs      []*pb.Channel
 	// Active is the open channel's id, or "threads".
 	Active string
-	Online map[string]bool
+	// Status holds the peers who are not offline.
+	Status map[string]pb.Status
 	// ThreadsUnread counts the followed threads with unread replies.
 	ThreadsUnread int
 	OOB           bool
@@ -115,7 +116,7 @@ type ChannelView struct {
 	Oldest     string
 	Newest     string
 	Moderator  bool
-	PeerOnline bool
+	PeerStatus pb.Status
 	// OpenThread is the root of a thread to open with the channel.
 	OpenThread string
 	// Anchored is set when newer messages than those shown exist: the view
@@ -151,7 +152,7 @@ type Typing struct {
 
 type Presence struct {
 	ID     string
-	Online bool
+	Status pb.Status
 }
 
 type Toast struct {

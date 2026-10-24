@@ -22,6 +22,25 @@ enum ChannelRole {
   CHANNEL_ROLE_ADMIN = 2;
 }
 
+// Status is how available a person is. Chosen, ONLINE means online while
+// connected.
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  STATUS_ONLINE = 1;
+  STATUS_AWAY = 2;
+  STATUS_DND = 3;
+  STATUS_OFFLINE = 4;
+}
+
+// CustomStatus is what a person says they are up to.
+message CustomStatus {
+  // An emoji name.
+  string emoji = 1;
+  string text = 2;
+  // Unset when it stays until cleared.
+  google.protobuf.Timestamp expires_at = 3;
+}
+
 enum ChannelType {
   CHANNEL_TYPE_UNSPECIFIED = 0;
   CHANNEL_TYPE_PUBLIC = 1;
@@ -40,6 +59,11 @@ message User {
   bool deactivated = 7;
   // photo is the version of the profile photo, empty when there is none.
   string photo = 8;
+  // The status the user chose and until when do-not-disturb lasts, for the
+  // user only.
+  Status status = 9;
+  google.protobuf.Timestamp dnd_until = 10;
+  CustomStatus custom_status = 11;
 }
 
 message Session {

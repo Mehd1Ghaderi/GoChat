@@ -501,6 +501,15 @@
       closeThread();
       return;
     }
+    var preset = target.closest("[data-status-emoji]");
+    var clear = target.closest("[data-status-clear]");
+    if (preset || clear) {
+      var fields = (preset || clear).closest("form").elements;
+      fields.emoji.value = preset ? preset.dataset.statusEmoji : "";
+      fields.text.value = preset ? preset.dataset.statusText : "";
+      fields.text.focus();
+      return;
+    }
     var closer = target.closest("[data-close-modal]");
     if (closer && (closer === target || closer.tagName === "BUTTON")) {
       closeModal();

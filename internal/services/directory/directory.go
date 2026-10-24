@@ -38,6 +38,8 @@ type Repo interface {
 	UpdateDisplayName(ctx context.Context, id gocql.UUID, name string, now time.Time) error
 	UpdateMemberDisplayName(ctx context.Context, userID gocql.UUID, name string) error
 	SetUserPhoto(ctx context.Context, id gocql.UUID, version string, now time.Time) error
+	SetStatus(ctx context.Context, id gocql.UUID, status string, dndUntil time.Time) error
+	SetCustomStatus(ctx context.Context, id gocql.UUID, emoji, text string, until time.Time) error
 
 	CreateTeam(ctx context.Context, t *models.Team) error
 	GetTeam(ctx context.Context, id gocql.UUID) (*models.Team, error)
@@ -163,6 +165,10 @@ func (w *worker) Receive(c *actor.Context) {
 		out, err = w.me(ctx, msg.P)
 	case Presence:
 		out, err = w.presence(ctx, msg)
+	case SetStatus:
+		out, err = w.setStatus(ctx, msg)
+	case SetCustomStatus:
+		out, err = w.setCustomStatus(ctx, msg)
 	case ListMuted:
 		out, err = w.listMuted(ctx, msg.P)
 	default:
@@ -994,7 +1000,7 @@ func (w *worker) me(ctx context.Context, p *models.Principal) (*MeResult, error)
 	return &MeResult{User: convert.User(u), Email: u.Email}, nil
 }
 
-func (w *worker) presence(ctx context.Context, msg Presence) ([]string, error) {
+func (w *worker) presence(ctx context.Context, msg Presence) (map[string]pb.Status, error) {
 	if len(msg.UserIDs) > 200 {
 		return nil, ierrors.InvalidArgument("too many users")
 	}
@@ -1003,7 +1009,7 @@ func (w *worker) presence(ctx context.Context, msg Presence) ([]string, error) {
 			return nil, ierrors.InvalidArgument("invalid user id")
 		}
 	}
-	return actors.Ask[[]string](ctx, w.Engine, w.Hub, hub.Online{UserIDs: msg.UserIDs})
+	return actors.Ask[map[string]pb.Status](ctx, w.Engine, w.Hub, hub.Statuses{UserIDs: msg.UserIDs})
 }
 
 func (w *worker) listMuted(ctx context.Context, p *models.Principal) ([]string, error) {
