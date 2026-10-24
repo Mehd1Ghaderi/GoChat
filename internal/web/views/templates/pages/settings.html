@@ -25,6 +25,11 @@
       <div class="row"><button class="btn primary" type="submit">Change password</button><span id="password-status" class="status"></span></div>
     </form>
   </section>
+  <section class="card" id="notifications">
+    <h2>Desktop notifications</h2>
+    <p class="muted">For direct messages, mentions and replies in your threads, while GoChat is in the background. Mute a channel from its header to silence it.</p>
+    <div class="row"><button class="btn" type="button" data-notify-toggle hidden>Turn on</button><span class="status" data-notify-state></span></div>
+  </section>
   <section class="card" id="totp">
     {{template "totp" .}}
   </section>

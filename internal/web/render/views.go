@@ -103,6 +103,8 @@ type ChannelView struct {
 	Newest     string
 	Moderator  bool
 	PeerOnline bool
+	// OpenThread is the root of a thread to open with the channel.
+	OpenThread string
 }
 
 func Title(ch *pb.Channel) string {
@@ -187,4 +189,27 @@ func (v ReactionsView) key() string {
 		fmt.Fprintf(&b, "%s:%d:%t,", r.Name, r.Count, r.Mine)
 	}
 	return b.String()
+}
+
+// Notice is a desktop notification a tab shows for a message.
+type Notice struct {
+	Title, Body, URL, Tag string
+}
+
+const excerptRunes = 140
+
+// Excerpt is a message's text, short and on one line, for a notification.
+func Excerpt(m *pb.Message) string {
+	text := strings.Join(strings.Fields(m.GetContent()), " ")
+	if r := []rune(text); len(r) > excerptRunes {
+		text = string(r[:excerptRunes]) + "…"
+	}
+	if text == "" {
+		if n := len(m.GetAttachments()); n == 1 {
+			text = "Sent a file"
+		} else if n > 1 {
+			text = fmt.Sprintf("Sent %d files", n)
+		}
+	}
+	return text
 }

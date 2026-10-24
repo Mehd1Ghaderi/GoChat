@@ -28,6 +28,8 @@ var icons = map[string]string{
 	"download": `<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 20h14"/>`,
 	"photo":    `<rect x="3.5" y="5" width="17" height="14" rx="2.5"/><circle cx="9" cy="10" r="1.75"/><path d="M20.5 15.5l-4.5-4.5-8.5 8"/>`,
 	"check":    `<path d="M5 12.5l4.5 4.5L19 7.5"/>`,
+	"bell":     `<path d="M6.5 16.5V11a5.5 5.5 0 0 1 11 0v5.5l1.5 1.5H5l1.5-1.5zM10 20.5a2.2 2.2 0 0 0 4 0"/>`,
+	"bell-off": `<path d="M9 5.9A5.5 5.5 0 0 1 17.5 11v4M6.5 9.6V16.5L5 18h12M10 20.5a2.2 2.2 0 0 0 4 0M4 4l16 16"/>`,
 	"smile":    `<circle cx="12" cy="12" r="8.5"/><path d="M8.6 14.2a4.2 4.2 0 0 0 6.8 0"/><circle cx="9.3" cy="10" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.7" cy="10" r="1.1" fill="currentColor" stroke="none"/>`,
 	"reply":    `<path d="M10 7L5 12l5 5"/><path d="M5 12h8.5a5.5 5.5 0 0 1 5.5 5.5V19"/>`,
 	"browse":   `<path d="M4 6h16M4 12h10M4 18h7"/><circle cx="17.5" cy="16.5" r="2.5"/><path d="M19.5 18.5L21 20"/>`,

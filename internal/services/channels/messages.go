@@ -96,6 +96,12 @@ type React struct {
 	Remove    bool
 }
 
+// Mute mutes the channel for the caller, or with Muted false unmutes it.
+type Mute struct {
+	Target
+	Muted bool
+}
+
 type Typing struct{ Target }
 
 type MarkRead struct {

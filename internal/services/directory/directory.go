@@ -66,6 +66,7 @@ type Repo interface {
 	ListUserChannels(ctx context.Context, userID, teamID gocql.UUID) ([]*models.ChannelMember, error)
 	ListLastReads(ctx context.Context, userID gocql.UUID) ([]*scylla.ChannelRead, error)
 	CountMentions(ctx context.Context, userID gocql.UUID) (map[gocql.UUID]int, error)
+	ListMuted(ctx context.Context, userID gocql.UUID) (map[gocql.UUID]bool, error)
 }
 
 type Deps struct {
@@ -152,6 +153,8 @@ func (w *worker) Receive(c *actor.Context) {
 		out, err = w.me(ctx, msg.P)
 	case Presence:
 		out, err = w.presence(ctx, msg)
+	case ListMuted:
+		out, err = w.listMuted(ctx, msg.P)
 	default:
 		return
 	}
@@ -715,6 +718,10 @@ func (w *worker) listChannels(ctx context.Context, msg ListChannels) ([]*pb.Chan
 	if err != nil {
 		return nil, err
 	}
+	muted, err := w.Repo.ListMuted(ctx, msg.P.UserID)
+	if err != nil {
+		return nil, err
+	}
 	var all []*models.Channel
 	for start := 0; start < len(chIDs); start += 100 {
 		found, err := w.Repo.GetChannels(ctx, chIDs[start:min(start+100, len(chIDs))])
@@ -746,6 +753,7 @@ func (w *worker) listChannels(ctx context.Context, msg ListChannels) ([]*pb.Chan
 		}
 		view := convert.Channel(ch, roles[ch.ID], lastRead[ch.ID], peer)
 		view.MentionCount = int32(min(mentions[ch.ID], 9999)) //nolint:gosec // bounded
+		view.Muted = muted[ch.ID]
 		out = append(out, view)
 	}
 	slices.SortFunc(out, func(a, b *pb.Channel) int { return cmp.Compare(sortKey(a), sortKey(b)) })
@@ -978,4 +986,16 @@ func (w *worker) presence(ctx context.Context, msg Presence) ([]string, error) {
 		}
 	}
 	return actors.Ask[[]string](ctx, w.Engine, w.Hub, hub.Online{UserIDs: msg.UserIDs})
+}
+
+func (w *worker) listMuted(ctx context.Context, p *models.Principal) ([]string, error) {
+	muted, err := w.Repo.ListMuted(ctx, p.UserID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(muted))
+	for id := range muted {
+		out = append(out, id.String())
+	}
+	return out, nil
 }

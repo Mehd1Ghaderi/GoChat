@@ -463,6 +463,13 @@ fieldset.choice legend { font-weight: 600; font-size: .92rem; padding: 0 .3rem; 
 @media (hover: hover) { .emoji-btn:hover { background: var(--bg-hover); } }
 .emoji { font-size: 1.1em; line-height: 1; }
 
+/* Muted channels step back in the sidebar; the header shows the state. */
+.sb-link.muted { color: var(--side-muted); }
+.sb-link.muted .label { font-weight: 450; }
+.muted-mark { color: var(--side-muted); }
+.muted-mark .i { width: 14px; height: 14px; }
+#mute-toggle.on { color: var(--accent-soft-ink); background: var(--accent-soft); }
+
 /* Threads: replies open beside the channel, over it on narrower screens. */
 .thread-link {
   display: inline-flex; align-items: center; gap: .4rem; margin: .3rem 0 0 -.45rem; padding: .25rem .5rem;

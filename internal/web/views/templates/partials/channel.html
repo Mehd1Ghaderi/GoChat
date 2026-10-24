@@ -1,5 +1,5 @@
 {{define "channel"}}
-<section class="channel" id="channel-view" data-team="{{.Team.Id}}" data-team-name="{{.Team.Name}}" data-channel="{{.Channel.Id}}" data-title="{{.Title}}" data-newest="{{.Newest}}"{{if .Moderator}} data-moderator="1"{{end}}>
+<section class="channel" id="channel-view" data-team="{{.Team.Id}}" data-team-name="{{.Team.Name}}" data-channel="{{.Channel.Id}}" data-title="{{.Title}}" data-newest="{{.Newest}}"{{if .Moderator}} data-moderator="1"{{end}}{{with .OpenThread}} data-open-thread="{{.}}"{{end}}>
   <header class="channel-header">
     <label for="nav-toggle" class="icon-btn menu-btn" aria-label="Open navigation">{{icon "menu"}}</label>
     <div class="channel-title">
@@ -7,6 +7,7 @@
       {{with .Channel.Purpose}}<p class="purpose">{{.}}</p>{{end}}
     </div>
     <div class="channel-actions">
+      {{if .Member}}{{template "mute-button" (dict "Team" .Team.Name "Channel" .Channel.Id "Muted" .Channel.Muted)}}{{end}}
       {{if and .Member (not (isDirect .Channel))}}
       <button class="icon-btn" hx-get="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/members" hx-target="#modal" aria-label="Members" title="Members">{{icon "members"}}</button>
       {{if ne .Channel.Name "town-square"}}
@@ -131,3 +132,7 @@
 {{define "older-replies-page"}}{{if .HasMore}}{{template "older-replies" .}}{{end}}{{range .Replies}}{{template "message" .}}{{end}}{{end}}
 
 {{define "thread-closed"}}<aside id="thread" class="thread-pane" aria-label="Thread" hx-swap-oob="outerHTML"></aside>{{end}}
+
+{{define "mute-button"}}<button id="mute-toggle" class="icon-btn{{if .Muted}} on{{end}}" type="button" hx-post="/t/{{.Team}}/ch/{{.Channel}}/mute" hx-vals='{"muted": "{{if .Muted}}0{{else}}1{{end}}"}' hx-swap="outerHTML" aria-pressed="{{if .Muted}}true{{else}}false{{end}}" aria-label="{{if .Muted}}Unmute channel{{else}}Mute channel{{end}}" title="{{if .Muted}}Muted: no notifications. Click to unmute{{else}}Mute channel{{end}}">{{if .Muted}}{{icon "bell-off"}}{{else}}{{icon "bell"}}{{end}}</button>{{end}}
+
+{{define "notify"}}<div id="notify" hidden hx-swap-oob="outerHTML" data-title="{{.Notice.Title}}" data-body="{{.Notice.Body}}" data-url="{{.Notice.URL}}" data-tag="{{.Notice.Tag}}" data-channel="{{.Channel}}" data-root="{{.Root}}"></div>{{end}}

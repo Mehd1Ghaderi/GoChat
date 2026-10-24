@@ -82,6 +82,7 @@ message Channel {
   // Unread messages that call out the caller, or every unread one in a
   // direct conversation.
   int32 mention_count = 12;
+  bool muted = 13;
 }
 
 message ChannelMember {

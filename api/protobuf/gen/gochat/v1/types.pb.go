@@ -554,6 +554,7 @@ type Channel struct {
 	// Unread messages that call out the caller, or every unread one in a
 	// direct conversation.
 	MentionCount  int32 `protobuf:"varint,12,opt,name=mention_count,json=mentionCount,proto3" json:"mention_count,omitempty"`
+	Muted         bool  `protobuf:"varint,13,opt,name=muted,proto3" json:"muted,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -670,6 +671,13 @@ func (x *Channel) GetMentionCount() int32 {
 		return x.MentionCount
 	}
 	return 0
+}
+
+func (x *Channel) GetMuted() bool {
+	if x != nil {
+		return x.Muted
+	}
+	return false
 }
 
 type ChannelMember struct {
@@ -1011,7 +1019,7 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"TeamMember\x12#\n" +
 	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user\x12'\n" +
 	"\x04role\x18\x02 \x01(\x0e2\x13.gochat.v1.TeamRoleR\x04role\x127\n" +
-	"\tjoined_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bjoinedAt\"\xaa\x03\n" +
+	"\tjoined_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bjoinedAt\"\xc0\x03\n" +
 	"\aChannel\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
 	"\ateam_id\x18\x02 \x01(\tR\x06teamId\x12\x12\n" +
@@ -1027,7 +1035,8 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	" \x01(\v2\x0f.gochat.v1.UserR\x04peer\x129\n" +
 	"\n" +
 	"created_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12#\n" +
-	"\rmention_count\x18\f \x01(\x05R\fmentionCount\"\x99\x01\n" +
+	"\rmention_count\x18\f \x01(\x05R\fmentionCount\x12\x14\n" +
+	"\x05muted\x18\r \x01(\bR\x05muted\"\x99\x01\n" +
 	"\rChannelMember\x12#\n" +
 	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user\x12*\n" +
 	"\x04role\x18\x02 \x01(\x0e2\x16.gochat.v1.ChannelRoleR\x04role\x127\n" +

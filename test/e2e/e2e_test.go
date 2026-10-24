@@ -205,6 +205,23 @@ func (s *socket) expect(within time.Duration, parts ...string) string {
 	}
 }
 
+// collect returns the frames that arrive within a while.
+func (s *socket) collect(within time.Duration) []string {
+	var out []string
+	deadline := time.After(within)
+	for {
+		select {
+		case f, ok := <-s.in:
+			if !ok {
+				return out
+			}
+			out = append(out, f)
+		case <-deadline:
+			return out
+		}
+	}
+}
+
 func (s *socket) refuse(within time.Duration, part string) {
 	s.t.Helper()
 	deadline := time.After(within)
@@ -448,6 +465,39 @@ func TestEndToEnd(t *testing.T) {
 		}
 		if _, picker := bob.do(http.MethodGet, "/m/"+town+"/"+msg+"/react", nil, "", true); !strings.Contains(picker, `class="emoji-grid"`) {
 			t.Fatalf("picker: %s", picker)
+		}
+	})
+
+	t.Run("notifications follow mentions, replies and mutes", func(t *testing.T) {
+		_, page := bob.get("/t/" + teamName + "/ch/" + town)
+		offTopic := offTopicRe.FindStringSubmatch(page)[1]
+		adminWS.send(map[string]string{"op": "post", "channel_id": offTopic, "content": "a word, @" + bobName})
+		f := bobWS.expect(5*time.Second, `id="notify"`, `data-url="/c/`+offTopic+`"`)
+		if !strings.Contains(f, "in Off-Topic") || !strings.Contains(f, "a word, @"+bobName) {
+			t.Fatalf("notice: %s", f)
+		}
+
+		bobWS.send(map[string]string{"op": "post", "channel_id": town, "content": "thread for notices"})
+		root := msgIDRe.FindStringSubmatch(adminWS.expect(5*time.Second, "thread for notices", `hx-swap-oob="afterbegin"`))[1]
+		adminWS.send(map[string]string{"op": "post", "channel_id": town, "root_id": root, "content": "a reply for bob"})
+		if f := bobWS.expect(5*time.Second, `id="notify"`, "replied in a thread"); !strings.Contains(f, "?thread="+root) {
+			t.Fatalf("reply notice: %s", f)
+		}
+
+		if res, body := bob.hx("/t/"+teamName+"/ch/"+offTopic+"/mute", url.Values{"muted": {"1"}}); res.StatusCode != http.StatusOK || !strings.Contains(body, `aria-pressed="true"`) {
+			t.Fatalf("mute: %d %s", res.StatusCode, body)
+		}
+		bobWS.expect(5*time.Second, `id="channel-lists"`, "sb-link muted")
+		adminWS.send(map[string]string{"op": "post", "channel_id": offTopic, "content": "again, @" + bobName})
+		frames := strings.Join(bobWS.collect(2*time.Second), "\n")
+		if strings.Contains(frames, `id="notify"`) || !strings.Contains(frames, `id="unread-`+offTopic+`" class="mentions"`) {
+			t.Fatalf("a muted channel notified, or did not count the mention: %s", frames)
+		}
+		bob.hx("/t/"+teamName+"/ch/"+offTopic+"/mute", url.Values{"muted": {"0"}})
+
+		res, _ := bob.get("/c/" + offTopic + "?thread=" + root)
+		if loc := res.Header.Get("Location"); res.StatusCode != http.StatusSeeOther || loc != "/t/"+teamName+"/ch/"+offTopic+"?thread="+root {
+			t.Fatalf("channel link: %d %q", res.StatusCode, loc)
 		}
 	})
 

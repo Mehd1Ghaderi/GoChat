@@ -49,6 +49,8 @@ type DRPCChannelServiceClient interface {
 	ListChannelMembers(ctx context.Context, in *ListChannelMembersRequest) (*ListChannelMembersResponse, error)
 	OpenDirectChannel(ctx context.Context, in *OpenDirectChannelRequest) (*OpenDirectChannelResponse, error)
 	MarkChannelRead(ctx context.Context, in *MarkChannelReadRequest) (*MarkChannelReadResponse, error)
+	SetChannelMuted(ctx context.Context, in *SetChannelMutedRequest) (*SetChannelMutedResponse, error)
+	ListMutedChannels(ctx context.Context, in *ListMutedChannelsRequest) (*ListMutedChannelsResponse, error)
 }
 
 type drpcChannelServiceClient struct {
@@ -160,6 +162,24 @@ func (c *drpcChannelServiceClient) MarkChannelRead(ctx context.Context, in *Mark
 	return out, nil
 }
 
+func (c *drpcChannelServiceClient) SetChannelMuted(ctx context.Context, in *SetChannelMutedRequest) (*SetChannelMutedResponse, error) {
+	out := new(SetChannelMutedResponse)
+	err := c.cc.Invoke(ctx, "/gochat.v1.ChannelService/SetChannelMuted", drpcEncoding_File_gochat_v1_channels_proto{}, in, out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *drpcChannelServiceClient) ListMutedChannels(ctx context.Context, in *ListMutedChannelsRequest) (*ListMutedChannelsResponse, error) {
+	out := new(ListMutedChannelsResponse)
+	err := c.cc.Invoke(ctx, "/gochat.v1.ChannelService/ListMutedChannels", drpcEncoding_File_gochat_v1_channels_proto{}, in, out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 type DRPCChannelServiceServer interface {
 	ListChannels(context.Context, *ListChannelsRequest) (*ListChannelsResponse, error)
 	BrowseChannels(context.Context, *BrowseChannelsRequest) (*BrowseChannelsResponse, error)
@@ -172,6 +192,8 @@ type DRPCChannelServiceServer interface {
 	ListChannelMembers(context.Context, *ListChannelMembersRequest) (*ListChannelMembersResponse, error)
 	OpenDirectChannel(context.Context, *OpenDirectChannelRequest) (*OpenDirectChannelResponse, error)
 	MarkChannelRead(context.Context, *MarkChannelReadRequest) (*MarkChannelReadResponse, error)
+	SetChannelMuted(context.Context, *SetChannelMutedRequest) (*SetChannelMutedResponse, error)
+	ListMutedChannels(context.Context, *ListMutedChannelsRequest) (*ListMutedChannelsResponse, error)
 }
 
 type DRPCChannelServiceUnimplementedServer struct{}
@@ -220,9 +242,17 @@ func (s *DRPCChannelServiceUnimplementedServer) MarkChannelRead(context.Context,
 	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
 }
 
+func (s *DRPCChannelServiceUnimplementedServer) SetChannelMuted(context.Context, *SetChannelMutedRequest) (*SetChannelMutedResponse, error) {
+	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
+}
+
+func (s *DRPCChannelServiceUnimplementedServer) ListMutedChannels(context.Context, *ListMutedChannelsRequest) (*ListMutedChannelsResponse, error) {
+	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
+}
+
 type DRPCChannelServiceDescription struct{}
 
-func (DRPCChannelServiceDescription) NumMethods() int { return 11 }
+func (DRPCChannelServiceDescription) NumMethods() int { return 13 }
 
 func (DRPCChannelServiceDescription) Method(n int) (string, drpc.Encoding, drpc.Receiver, interface{}, bool) {
 	switch n {
@@ -325,6 +355,24 @@ func (DRPCChannelServiceDescription) Method(n int) (string, drpc.Encoding, drpc.
 						in1.(*MarkChannelReadRequest),
 					)
 			}, DRPCChannelServiceServer.MarkChannelRead, true
+	case 11:
+		return "/gochat.v1.ChannelService/SetChannelMuted", drpcEncoding_File_gochat_v1_channels_proto{},
+			func(srv interface{}, ctx context.Context, in1, in2 interface{}) (drpc.Message, error) {
+				return srv.(DRPCChannelServiceServer).
+					SetChannelMuted(
+						ctx,
+						in1.(*SetChannelMutedRequest),
+					)
+			}, DRPCChannelServiceServer.SetChannelMuted, true
+	case 12:
+		return "/gochat.v1.ChannelService/ListMutedChannels", drpcEncoding_File_gochat_v1_channels_proto{},
+			func(srv interface{}, ctx context.Context, in1, in2 interface{}) (drpc.Message, error) {
+				return srv.(DRPCChannelServiceServer).
+					ListMutedChannels(
+						ctx,
+						in1.(*ListMutedChannelsRequest),
+					)
+			}, DRPCChannelServiceServer.ListMutedChannels, true
 	default:
 		return "", nil, nil, nil, false
 	}
@@ -548,6 +596,46 @@ func (x *drpcChannelService_MarkChannelReadStream) GetStream() drpc.Stream {
 }
 
 func (x *drpcChannelService_MarkChannelReadStream) SendAndClose(m *MarkChannelReadResponse) error {
+	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_channels_proto{}); err != nil {
+		return err
+	}
+	return x.CloseSend()
+}
+
+type DRPCChannelService_SetChannelMutedStream interface {
+	drpc.Stream
+	SendAndClose(*SetChannelMutedResponse) error
+}
+
+type drpcChannelService_SetChannelMutedStream struct {
+	drpc.Stream
+}
+
+func (x *drpcChannelService_SetChannelMutedStream) GetStream() drpc.Stream {
+	return x.Stream
+}
+
+func (x *drpcChannelService_SetChannelMutedStream) SendAndClose(m *SetChannelMutedResponse) error {
+	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_channels_proto{}); err != nil {
+		return err
+	}
+	return x.CloseSend()
+}
+
+type DRPCChannelService_ListMutedChannelsStream interface {
+	drpc.Stream
+	SendAndClose(*ListMutedChannelsResponse) error
+}
+
+type drpcChannelService_ListMutedChannelsStream struct {
+	drpc.Stream
+}
+
+func (x *drpcChannelService_ListMutedChannelsStream) GetStream() drpc.Stream {
+	return x.Stream
+}
+
+func (x *drpcChannelService_ListMutedChannelsStream) SendAndClose(m *ListMutedChannelsResponse) error {
 	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_channels_proto{}); err != nil {
 		return err
 	}

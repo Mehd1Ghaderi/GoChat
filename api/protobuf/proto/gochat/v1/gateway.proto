@@ -79,7 +79,13 @@ message Event {
     TeamJoined team_joined = 10;
     TeamLeft team_left = 11;
     ReactionsChanged reactions_changed = 12;
+    ChannelMuted channel_muted = 13;
   }
+}
+
+message ChannelMuted {
+  string channel_id = 1;
+  bool muted = 2;
 }
 
 message ReactionsChanged {

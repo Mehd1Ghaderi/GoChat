@@ -227,3 +227,33 @@ func (r *Repository) CountMentions(ctx context.Context, userID gocql.UUID) (map[
 	}
 	return out, wrap(iter.Close())
 }
+
+func (r *Repository) SetMuted(ctx context.Context, userID, channelID gocql.UUID, muted bool) error {
+	if !muted {
+		return wrap(r.query(ctx, "DELETE FROM channel_prefs WHERE user_id = ? AND channel_id = ?", userID, channelID).ExecRelease())
+	}
+	return wrap(r.query(ctx, "INSERT INTO channel_prefs (user_id, channel_id, muted) VALUES (?, ?, true)", userID, channelID).ExecRelease())
+}
+
+func (r *Repository) IsMuted(ctx context.Context, userID, channelID gocql.UUID) (bool, error) {
+	var muted bool
+	err := r.query(ctx, "SELECT muted FROM channel_prefs WHERE user_id = ? AND channel_id = ?", userID, channelID).Scan(&muted)
+	if errors.Is(err, gocql.ErrNotFound) {
+		return false, nil
+	}
+	return muted, wrap(err)
+}
+
+// ListMuted returns the channels a user muted.
+func (r *Repository) ListMuted(ctx context.Context, userID gocql.UUID) (map[gocql.UUID]bool, error) {
+	out := map[gocql.UUID]bool{}
+	iter := r.query(ctx, "SELECT channel_id, muted FROM channel_prefs WHERE user_id = ?", userID).Iter()
+	var id gocql.UUID
+	var muted bool
+	for iter.Scan(&id, &muted) {
+		if muted {
+			out[id] = true
+		}
+	}
+	return out, wrap(iter.Close())
+}

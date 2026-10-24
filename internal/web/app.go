@@ -256,6 +256,7 @@ func (h *Handler) channelPage(w http.ResponseWriter, r *http.Request) {
 			h.fail(w, r, err)
 			return
 		}
+		view.OpenThread = threadParam(r)
 		h.fragment(w, http.StatusOK, "channel", view)
 		return
 	}
@@ -296,6 +297,7 @@ func (h *Handler) channelPage(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
+	view.OpenThread = threadParam(r)
 	h.page(w, r, http.StatusOK, "app", appPage{
 		Page:    Page{Title: view.Title, CSRF: h.csrfToken(w, r), User: u},
 		Teams:   teams,
@@ -1097,4 +1099,76 @@ func (h *Handler) react(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("HX-Trigger", "closeModal")
 	}
 	h.fragment(w, http.StatusOK, "reactions", render.Reactions(chID, msgID, rootID, res.Reactions, u, true))
+}
+
+// threadParam is the valid ?thread of a request, or empty.
+func threadParam(r *http.Request) string {
+	if t := r.URL.Query().Get("thread"); uuidRe.MatchString(t) {
+		return t
+	}
+	return ""
+}
+
+// channelLink sends /c/{channel} to the channel in its team, for links that
+// do not know the team, such as a notification's.
+func (h *Handler) channelLink(w http.ResponseWriter, r *http.Request) {
+	if h.signedIn(w, r) == nil {
+		return
+	}
+	chID := r.PathValue("channel")
+	if !uuidRe.MatchString(chID) {
+		h.notFound(w, r)
+		return
+	}
+	ctx, cancel := h.ctx(r)
+	defer cancel()
+	res, err := h.client.Channels.GetChannel(ctx, &pb.GetChannelRequest{ChannelId: chID})
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	var name string
+	if id := res.Channel.TeamId; id != "" {
+		t, err := h.client.Teams.GetTeam(ctx, &pb.GetTeamRequest{Key: &pb.GetTeamRequest_Id{Id: id}})
+		if err != nil {
+			h.fail(w, r, err)
+			return
+		}
+		name = t.Team.Name
+	} else {
+		teams, err := h.client.Teams.ListTeams(ctx, &pb.ListTeamsRequest{})
+		if err != nil {
+			h.fail(w, r, err)
+			return
+		}
+		if len(teams.Teams) == 0 {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		name = teams.Teams[0].Name
+	}
+	target := "/t/" + name + "/ch/" + chID
+	if t := threadParam(r); t != "" {
+		target += "?thread=" + t
+	}
+	http.Redirect(w, r, safeNext(target), http.StatusSeeOther) //nolint:gosec // safeNext keeps it on this site
+}
+
+func (h *Handler) muteChannel(w http.ResponseWriter, r *http.Request) {
+	_, team, ctx, cancel := h.teamFor(w, r)
+	if team == nil {
+		return
+	}
+	defer cancel()
+	chID := r.PathValue("channel")
+	if !uuidRe.MatchString(chID) {
+		h.notFound(w, r)
+		return
+	}
+	muted := r.PostFormValue("muted") == "1"
+	if _, err := h.client.Channels.SetChannelMuted(ctx, &pb.SetChannelMutedRequest{ChannelId: chID, Muted: muted}); err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	h.fragment(w, http.StatusOK, "mute-button", map[string]any{"Team": team.Name, "Channel": chID, "Muted": muted})
 }

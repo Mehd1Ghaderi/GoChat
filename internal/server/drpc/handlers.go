@@ -510,6 +510,29 @@ func (s *channelService) MarkChannelRead(ctx context.Context, req *pb.MarkChanne
 	return &pb.MarkChannelReadResponse{}, nil
 }
 
+func (s *channelService) SetChannelMuted(ctx context.Context, req *pb.SetChannelMutedRequest) (*pb.SetChannelMutedResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := actors.Ask[channels.Done](ctx, s.sys.Engine, s.sys.Channels, channels.Mute{Target: t, Muted: req.Muted}); err != nil {
+		return nil, err
+	}
+	return &pb.SetChannelMutedResponse{}, nil
+}
+
+func (s *channelService) ListMutedChannels(ctx context.Context, _ *pb.ListMutedChannelsRequest) (*pb.ListMutedChannelsResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids, err := actors.Ask[[]string](ctx, s.sys.Engine, s.sys.Directory, directory.ListMuted{P: p})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ListMutedChannelsResponse{ChannelIds: ids}, nil
+}
+
 type messageService struct{ *base }
 
 func (s *messageService) PostMessage(ctx context.Context, req *pb.PostMessageRequest) (*pb.PostMessageResponse, error) {

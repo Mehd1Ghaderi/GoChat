@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"regexp"
+	"slices"
 	"time"
 
 	"github.com/anthdm/hollywood/actor"
@@ -58,9 +59,10 @@ type (
 		teamID string
 		lists  *render.Lists
 	}
-	railReady struct{ rail *render.Rail }
-	failed    struct{ text string }
-	expired   struct{}
+	railReady  struct{ rail *render.Rail }
+	mutedReady struct{ ids []string }
+	failed     struct{ text string }
+	expired    struct{}
 	// viewChecked carries the newest message of the channel a tab opened.
 	viewChecked struct{ channelID, last string }
 	leftChannel struct{ channelID string }
@@ -81,9 +83,12 @@ type session struct {
 	moderator bool
 	sidebar   map[string]bool
 	// mentions counts unread mentions per channel in the sidebar.
-	mentions  map[string]int
-	peers     map[string]bool
-	directs   map[string]bool
+	mentions map[string]int
+	peers    map[string]bool
+	directs  map[string]bool
+	// muted holds the channels the user muted, names the sidebar's titles.
+	muted     map[string]bool
+	names     map[string]string
 	typingSeq uint64
 	// typer is who the typing line names, and shown the newest message on
 	// the page.
@@ -113,6 +118,8 @@ func NewSession(d *Deps, connID uint64, call drpc.Call, ws *websocket.Conn) acto
 			limiter:  rate.NewLimiter(rate.Limit(d.Cfg.FrameRate), d.Cfg.FrameBurst),
 			sidebar:  make(map[string]bool),
 			mentions: make(map[string]int),
+			muted:    make(map[string]bool),
+			names:    make(map[string]string),
 			peers:    make(map[string]bool),
 			reads:    make(map[string]string),
 			posts:    make(chan *pb.PostMessageRequest, queuedPosts),
@@ -155,6 +162,13 @@ func (s *session) Receive(c *actor.Context) {
 		if msg.Again {
 			s.resync(c)
 		}
+		s.rpc(c, func(ctx context.Context) any {
+			res, err := s.Client.Channels.ListMutedChannels(ctx, &pb.ListMutedChannelsRequest{})
+			if err != nil {
+				return nil
+			}
+			return mutedReady{ids: res.ChannelIds}
+		})
 	case Rejected:
 		if msg.Retry {
 			s.close(websocket.StatusTryAgainLater)
@@ -213,11 +227,14 @@ func (s *session) Receive(c *actor.Context) {
 		for _, ch := range msg.lists.Channels {
 			s.sidebar[ch.Id] = true
 			s.mentions[ch.Id] = int(ch.MentionCount)
+			s.names[ch.Id] = render.Title(ch)
+			s.muted[ch.Id] = ch.Muted
 		}
 		for _, ch := range msg.lists.DMs {
 			s.sidebar[ch.Id] = true
 			s.directs[ch.Id] = true
 			s.mentions[ch.Id] = int(ch.MentionCount)
+			s.muted[ch.Id] = ch.Muted
 			if ch.Peer != nil {
 				s.peers[ch.Peer.Id] = true
 			}
@@ -228,6 +245,10 @@ func (s *session) Receive(c *actor.Context) {
 		}
 	case railReady:
 		s.fragment("team-rail", msg.rail)
+	case mutedReady:
+		for _, id := range msg.ids {
+			s.muted[id] = true
+		}
 	case failed:
 		s.toast("error", msg.text)
 	}
@@ -498,6 +519,29 @@ func (s *session) view(c *actor.Context, f *clientFrame) {
 	})
 }
 
+// notify asks the tab to show a desktop notification for a message to the
+// user, in a direct conversation, by mention or in a thread they take part
+// in. The tab shows it when it is in the background or elsewhere.
+func (s *session) notify(m *pb.Message, participants []string) {
+	if s.muted[m.ChannelId] {
+		return
+	}
+	direct := s.directs[m.ChannelId]
+	reply := m.RootId != "" && slices.Contains(participants, s.user.Id)
+	if !direct && !reply && !render.Mentions(m, s.user) {
+		return
+	}
+	n := render.Notice{Title: render.DisplayName(m.Author), Body: render.Excerpt(m), URL: "/c/" + m.ChannelId, Tag: m.Id}
+	switch {
+	case m.RootId != "":
+		n.Title += " replied in a thread"
+		n.URL += "?thread=" + m.RootId
+	case !direct && s.names[m.ChannelId] != "":
+		n.Title += " in " + s.names[m.ChannelId]
+	}
+	s.fragment("notify", map[string]any{"Notice": n, "Channel": m.ChannelId, "Root": m.RootId})
+}
+
 // mentioned counts one more unread mention in a sidebar channel.
 func (s *session) mentioned(channelID string) {
 	if !s.sidebar[channelID] {
@@ -548,6 +592,9 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 	case *pb.Event_MessagePosted:
 		m := p.MessagePosted.Message
 		mine := m.GetAuthor().GetId() == me
+		if !mine {
+			s.notify(m, p.MessagePosted.ParticipantIds)
+		}
 		if m.RootId != "" {
 			if m.RootId == s.threadID {
 				s.message("reply-new", s.Render.Message(m, s.user, s.moderator))
@@ -571,7 +618,7 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 		} else if !mine && s.sidebar[m.ChannelId] {
 			if s.direct(m.ChannelId) || render.Mentions(m, s.user) {
 				s.mentioned(m.ChannelId)
-			} else if s.mentions[m.ChannelId] == 0 {
+			} else if s.mentions[m.ChannelId] == 0 && !s.muted[m.ChannelId] {
 				s.fragment("unread", m.ChannelId)
 			}
 		}
@@ -590,6 +637,11 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 		}
 		if (d.RootId == "" && d.ChannelId == s.channelID) || (d.RootId != "" && d.RootId == s.threadID) {
 			s.fragment("message-deleted", d.MessageId)
+		}
+	case *pb.Event_ChannelMuted:
+		s.muted[p.ChannelMuted.ChannelId] = p.ChannelMuted.Muted
+		if s.sidebar[p.ChannelMuted.ChannelId] {
+			s.loadSidebar(c, true)
 		}
 	case *pb.Event_ReactionsChanged:
 		d := p.ReactionsChanged

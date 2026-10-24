@@ -16,6 +16,22 @@ service ChannelService {
   rpc ListChannelMembers(ListChannelMembersRequest) returns (ListChannelMembersResponse);
   rpc OpenDirectChannel(OpenDirectChannelRequest) returns (OpenDirectChannelResponse);
   rpc MarkChannelRead(MarkChannelReadRequest) returns (MarkChannelReadResponse);
+  // A muted channel neither notifies nor shows its unread messages.
+  rpc SetChannelMuted(SetChannelMutedRequest) returns (SetChannelMutedResponse);
+  rpc ListMutedChannels(ListMutedChannelsRequest) returns (ListMutedChannelsResponse);
+}
+
+message SetChannelMutedRequest {
+  string channel_id = 1;
+  bool muted = 2;
+}
+
+message SetChannelMutedResponse {}
+
+message ListMutedChannelsRequest {}
+
+message ListMutedChannelsResponse {
+  repeated string channel_ids = 1;
 }
 
 message ListChannelsRequest {

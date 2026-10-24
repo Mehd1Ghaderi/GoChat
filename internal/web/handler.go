@@ -136,6 +136,8 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /m/{channel}/{message}", h.messageFragment)
 	mux.HandleFunc("GET /m/{channel}/{message}/thread", h.threadPanel)
 	mux.HandleFunc("GET /m/{channel}/people", h.mentionSuggestions)
+	mux.HandleFunc("GET /c/{channel}", h.channelLink)
+	mux.Handle("POST /t/{team}/ch/{channel}/mute", h.csrf(http.HandlerFunc(h.muteChannel)))
 	mux.HandleFunc("GET /m/{channel}/{message}/react", h.reactionPicker)
 	mux.Handle("POST /m/{channel}/{message}/react", h.csrf(http.HandlerFunc(h.react)))
 	mux.HandleFunc("GET /m/{channel}/{message}/edit", h.editMessageForm)

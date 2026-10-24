@@ -56,10 +56,75 @@
     if (always || box.scrollHeight - box.scrollTop - box.clientHeight < 120) box.scrollTop = box.scrollHeight;
   }
 
+  // The tab's title counts unread mentions, so they show from any tab.
+  function updateTitle() {
+    var v = view();
+    if (!v || !v.dataset.title) return;
+    var count = 0;
+    document.querySelectorAll(".channel-lists .mentions").forEach(function (b) {
+      count += parseInt(b.textContent, 10) || 0;
+    });
+    document.title = (count ? "(" + count + ") " : "") + v.dataset.title + " · GoChat";
+  }
+
+  // Desktop notifications: the server says which messages deserve one; the
+  // tab shows it unless it already shows that conversation to the user.
+  function notifyPref() {
+    try {
+      return window.localStorage.getItem("gochat.notify") || "on";
+    } catch (e) {
+      return "on";
+    }
+  }
+
+  function setNotifyPref(value) {
+    try {
+      window.localStorage.setItem("gochat.notify", value);
+    } catch (e) { /* private mode: the default stands */ }
+  }
+
+  function showNotice(d) {
+    if (!("Notification" in window) || Notification.permission !== "granted" || notifyPref() === "off") return;
+    var v = view();
+    var looking = document.visibilityState === "visible" && document.hasFocus();
+    var here = d.root ? threadRoot() === d.root : !!v && v.dataset.channel === d.channel;
+    if (looking && here) return;
+    var n = new Notification(d.title, { body: d.body, tag: d.tag });
+    n.onclick = function () {
+      window.focus();
+      n.close();
+      window.location.assign(d.url);
+    };
+  }
+
+  function refreshNotifySetting() {
+    var button = document.querySelector("[data-notify-toggle]");
+    var state = document.querySelector("[data-notify-state]");
+    if (!button || !state) return;
+    if (!("Notification" in window)) {
+      state.textContent = "This browser does not support them.";
+      return;
+    }
+    var perm = Notification.permission;
+    var on = perm === "granted" && notifyPref() !== "off";
+    button.hidden = perm === "denied";
+    button.textContent = on ? "Turn off" : "Turn on";
+    state.textContent = perm === "denied" ? "Blocked: allow notifications for this site in your browser." : on ? "On" : "Off";
+    state.className = "status" + (on ? " ok" : "");
+  }
+
+  function openLinkedThread() {
+    var v = view();
+    if (!v || !v.dataset.openThread) return;
+    var root = v.dataset.openThread;
+    delete v.dataset.openThread;
+    htmx.ajax("GET", "/m/" + v.dataset.channel + "/" + root + "/thread", { target: "#thread", swap: "innerHTML" });
+  }
+
   function markActive() {
     var v = view();
     if (!v) return;
-    if (v.dataset.title) document.title = v.dataset.title + " · GoChat";
+    updateTitle();
     var id = v.dataset.channel;
     document.querySelectorAll(".sb-link").forEach(function (a) {
       var on = a.dataset.channel === id;
@@ -231,6 +296,7 @@
       closeThread();
       markActive();
       announce(false);
+      openLinkedThread();
       var ta = document.querySelector("#composer textarea");
       if (ta && window.matchMedia("(min-width: 821px)").matches) ta.focus();
     }
@@ -245,6 +311,8 @@
     }
     if (t.classList.contains("toast")) expireToasts();
     if (t.id.indexOf("replies-") === 0) scrollThread(false);
+    if (t.id === "notify") showNotice(t.dataset);
+    if (t.id === "channel-lists" || t.id.indexOf("unread-") === 0) updateTitle();
   });
 
   document.body.addEventListener("closeModal", closeModal);
@@ -295,6 +363,18 @@
   document.addEventListener("click", function (e) {
     var target = e.target;
     if (!(target instanceof Element)) return;
+    if (target.closest("[data-notify-toggle]")) {
+      if (Notification.permission === "default") {
+        Notification.requestPermission().then(function () {
+          setNotifyPref("on");
+          refreshNotifySetting();
+        });
+      } else {
+        setNotifyPref(notifyPref() === "off" ? "on" : "off");
+        refreshNotifySetting();
+      }
+      return;
+    }
     var option = target.closest(".suggest-box [role=option]");
     if (option) {
       var ta = option.closest(".composer-wrap").querySelector("form.composer textarea");
@@ -409,5 +489,7 @@
   document.addEventListener("DOMContentLoaded", function () {
     localTimes(document);
     markActive();
+    refreshNotifySetting();
+    openLinkedThread();
   });
 })();

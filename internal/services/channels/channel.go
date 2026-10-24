@@ -181,6 +181,8 @@ func (a *channel) handle(c *actor.Context, req Request) {
 		out, err = a.typingEvent(msg)
 	case React:
 		out, err = a.react(msg)
+	case Mute:
+		out, err = a.mute(msg)
 	case MarkRead:
 		err = a.markRead(c, msg)
 	case Join:
@@ -249,7 +251,31 @@ func (a *channel) view(p *models.Principal) (*pb.Channel, error) {
 			return nil, ierrors.NotFound("channel not found")
 		}
 	}
-	return a.channelFor(p.UserID, role)
+	out, err := a.channelFor(p.UserID, role)
+	if err != nil || !ok {
+		return out, err
+	}
+	ctx, cancel := a.ctx()
+	defer cancel()
+	if out.Muted, err = a.Repo.IsMuted(ctx, p.UserID, a.id); err != nil {
+		a.Logger.Warn("failed to read a channel's mute", zap.String("channel", a.id.String()), zap.Error(err))
+	}
+	return out, nil
+}
+
+func (a *channel) mute(msg Mute) (Done, error) {
+	if _, err := a.member(msg.P); err != nil {
+		return Done{}, err
+	}
+	ctx, cancel := a.ctx()
+	defer cancel()
+	if err := a.Repo.SetMuted(ctx, msg.P.UserID, a.id, msg.Muted); err != nil {
+		return Done{}, err
+	}
+	a.deliver([]string{msg.P.UserID.String()}, &pb.Event{Payload: &pb.Event_ChannelMuted{ChannelMuted: &pb.ChannelMuted{
+		ChannelId: a.id.String(), Muted: msg.Muted,
+	}}})
+	return Done{}, nil
 }
 
 // channelFor renders the channel as userID sees it.

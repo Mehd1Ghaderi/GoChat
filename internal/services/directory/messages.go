@@ -150,4 +150,7 @@ type Presence struct {
 	UserIDs []string
 }
 
+// ListMuted replies with the ids of the channels the caller muted.
+type ListMuted struct{ P *models.Principal }
+
 type Done struct{}

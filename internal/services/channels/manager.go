@@ -49,6 +49,8 @@ type Repo interface {
 	GetUserIDByUsername(ctx context.Context, username string) (gocql.UUID, error)
 	AddMentions(ctx context.Context, channelID, messageID gocql.UUID, userIDs []gocql.UUID) error
 	ClearMentions(ctx context.Context, userID, channelID gocql.UUID) error
+	SetMuted(ctx context.Context, userID, channelID gocql.UUID, muted bool) error
+	IsMuted(ctx context.Context, userID, channelID gocql.UUID) (bool, error)
 	ListLastReads(ctx context.Context, userID gocql.UUID) ([]*scylla.ChannelRead, error)
 	GetAttachments(ctx context.Context, ids []gocql.UUID) ([]*models.Attachment, error)
 	ClaimAttachment(ctx context.Context, a *models.Attachment, messageID gocql.UUID) (bool, error)
