@@ -10,8 +10,12 @@ kotlin {
     iosSimulatorArm64()
 
     sourceSets {
+        all {
+            languageSettings.optIn("kotlin.time.ExperimentalTime")
+        }
         commonMain.dependencies {
             api(libs.kotlinx.coroutines.core)
+            api(libs.kotlinx.datetime)
             api(libs.wire.runtime)
             api(libs.ktor.client.core)
             implementation(libs.ktor.client.websockets)
