@@ -103,12 +103,61 @@ jobs:
         if: failure()
         run: $COMPOSE logs --no-color --tail 200
 
-  # Sends the image to the server over SSH, where deployments/docker/deploy.sh
-  # starts it, for every push to main that passes. See "Deploying" in the
-  # README for the settings of the production environment.
+  # Builds the image for amd64 and arm64. For pushes to main, and runs
+  # started by hand on main, it is published as ghcr.io/OWNER/REPO, tagged
+  # latest and sha-COMMIT; the deploy job deploys that image.
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.image.outputs.digest }}
+    env:
+      PUBLISH: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Log in to ghcr.io
+        if: env.PUBLISH == 'true'
+        env:
+          TOKEN: ${{ github.token }}
+        run: printf '%s' "$TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Image
+        id: image
+        run: |
+          image=ghcr.io/${GITHUB_REPOSITORY,,}
+          source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY
+          description="Self-hosted team chat: teams, channels, direct messages and attachments"
+          # Docker's default builder cannot build several platforms at once.
+          # Its image is pinned: it builds and pushes what gets deployed.
+          docker buildx create --use --driver docker-container \
+            --driver-opt image=moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea >/dev/null
+          docker buildx build --pull --platform linux/amd64,linux/arm64 \
+            --file deployments/docker/Dockerfile \
+            --label org.opencontainers.image.title=gochat \
+            --label "org.opencontainers.image.description=$description" \
+            --label "org.opencontainers.image.source=$source" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --annotation "index:org.opencontainers.image.description=$description" \
+            --annotation "index:org.opencontainers.image.source=$source" \
+            --tag "$image:latest" --tag "$image:sha-${GITHUB_SHA::7}" \
+            --output "type=image,push=$PUBLISH" \
+            --metadata-file "$RUNNER_TEMP/image.json" .
+          echo "digest=$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/image.json")" >> "$GITHUB_OUTPUT"
+      - name: Log out of ghcr.io
+        if: always() && env.PUBLISH == 'true'
+        run: docker logout ghcr.io
+
+  # Tells the server, over SSH, the digest of the image the image job
+  # published, for every push to main that passes. The server's key runs
+  # only deployments/docker/deploy.sh there, which pulls that image and
+  # starts it. See "Deploying" in the README for the settings of the
+  # production environment.
   deploy:
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    needs: [test, vulncheck, e2e]
+    needs: [test, vulncheck, e2e, image]
     runs-on: ubuntu-latest
     environment:
       name: production
@@ -116,9 +165,6 @@ jobs:
     concurrency:
       group: deploy
       cancel-in-progress: false
-    env:
-      DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/apps/gochat' }}
-      DEPLOY_PLATFORM: ${{ vars.DEPLOY_PLATFORM || 'linux/amd64' }}
     steps:
       - name: Settings
         id: settings
@@ -132,24 +178,7 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # It is quoted in remote commands.
-          if ! printf '%s' "$DEPLOY_PATH" | grep -Eqx '/[A-Za-z0-9._/-]+'; then
-            echo "::error::DEPLOY_PATH must be an absolute path of letters, digits and . _ - /"
-            exit 1
-          fi
           echo "ready=true" >> "$GITHUB_OUTPUT"
-      - if: steps.settings.outputs.ready == 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Image
-        if: steps.settings.outputs.ready == 'true'
-        run: |
-          docker build --pull --platform "$DEPLOY_PLATFORM" --tag gochat:latest \
-            --file deployments/docker/Dockerfile \
-            --label org.opencontainers.image.title=gochat \
-            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
-            --label "org.opencontainers.image.revision=$GITHUB_SHA" .
       - name: SSH
         if: steps.settings.outputs.ready == 'true'
         env:
@@ -173,12 +202,18 @@ jobs:
             BatchMode yes
             ServerAliveInterval 15
           EOF
+      # Whatever command is sent, the server's key runs deploy.sh, which
+      # takes the command as the digest to deploy.
       - name: Deploy
         if: steps.settings.outputs.ready == 'true'
+        env:
+          DIGEST: ${{ needs.image.outputs.digest }}
         run: |
-          tar -cf - -C deployments/docker docker-compose.yml deploy.sh |
-            ssh server "mkdir -p '$DEPLOY_PATH' && tar -xf - -C '$DEPLOY_PATH'"
-          docker save gochat:latest | gzip | ssh server "sh '$DEPLOY_PATH/deploy.sh'"
+          case $DIGEST in
+            sha256:*) ;;
+            *) echo "::error::The image job published no image (digest: '$DIGEST')"; exit 1 ;;
+          esac
+          ssh server "$DIGEST" < /dev/null
       - name: Forget the key
         if: always()
         run: rm -f ~/.ssh/deploy_key
