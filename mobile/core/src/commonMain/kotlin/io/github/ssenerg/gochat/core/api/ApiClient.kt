@@ -1,0 +1,184 @@
+package io.github.ssenerg.gochat.core.api
+
+import com.squareup.wire.Message
+import com.squareup.wire.ProtoAdapter
+import gochat.v1.ApiError
+import gochat.v1.Attachment
+import gochat.v1.User
+import io.ktor.client.HttpClient
+import io.ktor.client.HttpClientConfig
+import io.ktor.client.call.body
+import io.ktor.client.engine.HttpClientEngine
+import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.timeout
+import io.ktor.client.plugins.websocket.WebSockets
+import io.ktor.client.request.HttpRequestBuilder
+import io.ktor.client.request.accept
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.request.parameter
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
+import kotlinx.coroutines.CancellationException
+
+/** A call the server refused: the chat API's error code and its reason. */
+class ApiException(val code: Int, message: String, val status: Int = 0) : Exception(message) {
+    val isUnauthenticated: Boolean get() = code == UNAUTHENTICATED
+
+    companion object {
+        const val INVALID_ARGUMENT = 3
+        const val NOT_FOUND = 5
+        const val ALREADY_EXISTS = 6
+        const val PERMISSION_DENIED = 7
+        const val RESOURCE_EXHAUSTED = 8
+        const val FAILED_PRECONDITION = 9
+        const val UNAVAILABLE = 14
+        const val UNAUTHENTICATED = 16
+    }
+}
+
+/** What to tell a person about a failure. */
+fun Throwable.userMessage(): String = when (this) {
+    is ApiException -> message?.replaceFirstChar { it.uppercase() } ?: "Something went wrong."
+    is CancellationException -> "Cancelled."
+    else -> "Cannot reach the server. Check your connection."
+}
+
+private val PROTO = ContentType("application", "proto")
+
+/**
+ * The client API of a GoChat server: its chat API over HTTP, in protobuf,
+ * as client.proto in the server's repository describes. The session token
+ * goes in the Authorization header of every request.
+ */
+class ApiClient(baseUrl: String, token: String? = null, engine: HttpClientEngine? = null) {
+    val baseUrl: String = normalizeServerUrl(baseUrl)
+
+    /** The session token, once signed in. */
+    var token: String? = token
+
+    val http: HttpClient = if (engine != null) HttpClient(engine) { configure() } else HttpClient { configure() }
+
+    private fun HttpClientConfig<*>.configure() {
+        expectSuccess = false
+        install(WebSockets)
+        install(HttpTimeout) {
+            connectTimeoutMillis = 15_000
+        }
+    }
+
+    internal fun HttpRequestBuilder.authorize() {
+        token?.let { header(HttpHeaders.Authorization, "Bearer $it") }
+    }
+
+    /** Makes one call of the chat API, such as "gochat.v1.ChannelService/GetChannel". */
+    suspend fun <Res : Any> call(method: String, request: Message<*, *>, response: ProtoAdapter<Res>): Res {
+        val res = http.post("$baseUrl/api/v1/rpc/$method") {
+            timeout { requestTimeoutMillis = 30_000 }
+            authorize()
+            contentType(PROTO)
+            accept(PROTO)
+            setBody(request.encode())
+        }
+        return decode(res, response)
+    }
+
+    /** Uploads one attachment of a channel, a voice message when [voice]. */
+    suspend fun upload(
+        channelId: String,
+        name: String,
+        bytes: ByteArray,
+        voice: Boolean = false,
+        durationMs: Long = 0,
+    ): Attachment {
+        val res = http.post("$baseUrl/api/v1/files") {
+            timeout { requestTimeoutMillis = 10 * 60_000 }
+            authorize()
+            accept(PROTO)
+            parameter("channel_id", channelId)
+            parameter("name", name)
+            if (voice) {
+                parameter("voice", "1")
+                parameter("duration_ms", durationMs.toString())
+            }
+            contentType(ContentType.Application.OctetStream)
+            setBody(bytes)
+        }
+        return decode(res, Attachment.ADAPTER)
+    }
+
+    /** Downloads an attachment. */
+    suspend fun download(attachmentId: String): ByteArray {
+        val res = http.get(fileUrl(attachmentId)) {
+            timeout { requestTimeoutMillis = 10 * 60_000 }
+            authorize()
+            accept(PROTO)
+        }
+        if (!res.status.isSuccess()) throw failure(res)
+        return res.body()
+    }
+
+    /** Sets the caller's profile photo from any picture. */
+    suspend fun setPhoto(picture: ByteArray): User {
+        val res = http.post("$baseUrl/api/v1/photo") {
+            timeout { requestTimeoutMillis = 2 * 60_000 }
+            authorize()
+            accept(PROTO)
+            contentType(ContentType.Application.OctetStream)
+            setBody(picture)
+        }
+        return decode(res, User.ADAPTER)
+    }
+
+    fun fileUrl(attachmentId: String) = "$baseUrl/api/v1/files/$attachmentId"
+
+    /** Where a person's photo is, or null when they have none. */
+    fun userPhotoUrl(user: User?): String? =
+        user?.takeIf { it.photo.isNotEmpty() }?.let { "$baseUrl/api/v1/photos/u/${it.id}/${it.photo}" }
+
+    fun teamPhotoUrl(teamId: String, photo: String): String? =
+        photo.takeIf { it.isNotEmpty() }?.let { "$baseUrl/api/v1/photos/t/$teamId/$it" }
+
+    /** The event socket's address. */
+    val gatewayUrl: String
+        get() = baseUrl.replaceFirst("https://", "wss://").replaceFirst("http://", "ws://") + "/api/v1/gateway"
+
+    fun close() = http.close()
+
+    private suspend fun <T : Any> decode(res: HttpResponse, adapter: ProtoAdapter<T>): T {
+        if (!res.status.isSuccess()) throw failure(res)
+        return adapter.decode(res.body<ByteArray>())
+    }
+
+    private suspend fun failure(res: HttpResponse): ApiException {
+        val status = res.status.value
+        val bytes = runCatching { res.body<ByteArray>() }.getOrNull()
+        val isProto = res.headers[HttpHeaders.ContentType]?.startsWith("application/proto") == true
+        if (bytes != null && isProto) {
+            runCatching { ApiError.ADAPTER.decode(bytes) }.getOrNull()?.let {
+                return ApiException(it.code, it.message.ifEmpty { "The server refused the request." }, status)
+            }
+        }
+        return when (status) {
+            401 -> ApiException(ApiException.UNAUTHENTICATED, "Sign in again.", status)
+            429 -> ApiException(ApiException.RESOURCE_EXHAUSTED, "Too many requests, try again in a moment.", status)
+            in 500..599 -> ApiException(ApiException.UNAVAILABLE, "The server is unavailable, try again later.", status)
+            else -> ApiException(0, "The server refused the request ($status).", status)
+        }
+    }
+}
+
+/**
+ * Turns what a person typed into a server address: https:// unless they
+ * named the scheme, and no trailing slash.
+ */
+fun normalizeServerUrl(input: String): String {
+    var url = input.trim().trimEnd('/')
+    if (!url.startsWith("http://") && !url.startsWith("https://")) url = "https://$url"
+    return url
+}
