@@ -91,6 +91,9 @@ type client struct {
 	speak   []outbound
 	offers  int
 	closed  *closeFrame
+	// early is set when a candidate came before any offer, which a browser
+	// would drop.
+	early bool
 }
 
 func (s *sfu) join(session, userID string, send bool) (*client, error) {
@@ -168,6 +171,11 @@ func (c *client) pump() {
 				c.mu.Unlock()
 				c.s.engine.Send(c.s.rooms, toRoom{channelID: "room", msg: answer{session: c.session, sdp: ans.SDP}})
 			case opCandidate:
+				c.mu.Lock()
+				if c.offers == 0 && c.pc.RemoteDescription() == nil {
+					c.early = true
+				}
+				c.mu.Unlock()
 				_ = c.pc.AddICECandidate(*m.Candidate)
 			case opSpeaking:
 				c.mu.Lock()
@@ -215,6 +223,13 @@ func TestRoomForwardsVoice(t *testing.T) {
 	eventually(t, "alice hears bob", func() bool { return alice.heard("bob") > 10 })
 	if alice.heard("alice") != 0 || bob.heard("bob") != 0 {
 		t.Fatal("someone heard themselves")
+	}
+	for _, c := range []*client{alice, bob} {
+		c.mu.Lock()
+		if c.early {
+			t.Errorf("%s got a candidate before its first offer", c.userID)
+		}
+		c.mu.Unlock()
 	}
 
 	// A third person hears both, who now hear them too.

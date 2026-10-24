@@ -84,7 +84,7 @@
     // The chat server moves whoever joins elsewhere: only the page's own
     // connection has to go.
     if (call) hangUp(call);
-    var state = { channel: channelID, name: "", remote: {}, queue: Promise.resolve(), connected: false, closing: false };
+    var state = { channel: channelID, name: "", remote: {}, early: [], queue: Promise.resolve(), connected: false, closing: false };
     call = state;
     render();
     navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
@@ -140,11 +140,21 @@
         return null;
       case "offer":
         return state.pc.setRemoteDescription({ type: "offer", sdp: msg.sdp })
+          .then(function () {
+            var early = state.early.splice(0);
+            return Promise.all(early.map(function (c) { return state.pc.addIceCandidate(c).catch(function () {}); }));
+          })
           .then(function () { return state.pc.createAnswer(); })
           .then(function (answer) { return state.pc.setLocalDescription(answer); })
           .then(function () { send(state, { op: "answer", sdp: state.pc.localDescription.sdp }); });
       case "candidate":
-        return msg.candidate && state.pc ? state.pc.addIceCandidate(msg.candidate) : null;
+        if (!msg.candidate || !state.pc) return null;
+        // A candidate before the offer it belongs to waits for it.
+        if (!state.pc.remoteDescription) {
+          state.early.push(msg.candidate);
+          return null;
+        }
+        return state.pc.addIceCandidate(msg.candidate);
       case "speaking":
         setSpeaking(msg.user_id, !!msg.speaking);
         return null;

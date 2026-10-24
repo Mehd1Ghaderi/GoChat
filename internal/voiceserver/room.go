@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/anthdm/hollywood/actor"
@@ -63,6 +64,38 @@ type peer struct {
 	// needOffer is set when the peer's tracks changed while it could not
 	// take an offer, or before its first.
 	needOffer bool
+	// Pion finds candidates on its own goroutine as soon as an offer is
+	// set, before the offer is sent: those found before the first offer
+	// wait, since a browser drops candidates that come before it.
+	mu      sync.Mutex
+	offered bool
+	early   []webrtc.ICECandidateInit
+}
+
+// candidate sends a candidate the peer's connection found, or keeps it
+// until the first offer is out.
+func (p *peer) candidate(init webrtc.ICECandidateInit) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.offered {
+		p.early = append(p.early, init)
+		return
+	}
+	p.out.send(outbound{Op: opCandidate, Candidate: &init})
+}
+
+// offer sends an offer, and after the first, the candidates that waited.
+func (p *peer) offer(sdp string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.out.send(outbound{Op: opOffer, SDP: sdp})
+	if !p.offered {
+		p.offered = true
+		for i := range p.early {
+			p.out.send(outbound{Op: opCandidate, Candidate: &p.early[i]})
+		}
+		p.early = nil
+	}
 }
 
 // room forwards the voice of each peer of one voice channel to the others,
@@ -165,11 +198,9 @@ func (r *room) add(c *actor.Context, msg addPeer) error {
 	p := &peer{session: msg.session, userID: msg.userID, pc: pc, out: msg.out, speak: rate.NewLimiter(10, 20), needOffer: true}
 	self, engine := c.PID(), c.Engine()
 	pc.OnICECandidate(func(cand *webrtc.ICECandidate) {
-		if cand == nil {
-			return
+		if cand != nil {
+			p.candidate(cand.ToJSON())
 		}
-		init := cand.ToJSON()
-		p.out.send(outbound{Op: opCandidate, Candidate: &init})
 	})
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
 		engine.Send(self, pcState{session: p.session, state: s})
@@ -318,7 +349,7 @@ func (r *room) syncOnce(c *actor.Context) bool {
 			return true
 		}
 		p.needOffer = false
-		p.out.send(outbound{Op: opOffer, SDP: offer.SDP})
+		p.offer(offer.SDP)
 	}
 	return false
 }
