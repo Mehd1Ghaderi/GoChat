@@ -63,6 +63,12 @@ type SetQuota struct {
 	Quota  int64
 }
 
+// Discard deletes uploads of the caller's that are not posted.
+type Discard struct {
+	P             *models.Principal
+	AttachmentIDs []string
+}
+
 type Done struct{}
 
 var (

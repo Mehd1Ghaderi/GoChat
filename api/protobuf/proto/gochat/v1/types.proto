@@ -99,6 +99,9 @@ message Team {
   google.protobuf.Timestamp created_at = 6;
   // photo is the version of the team photo, empty when there is none.
   string photo = 7;
+  // The team's creator, its owner: only they or a system admin demote or
+  // remove its admins.
+  string owner_id = 8;
 }
 
 message TeamMember {

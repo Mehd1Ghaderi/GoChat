@@ -79,13 +79,28 @@ func NewHandler(logger *zap.Logger, cfg *Config, client *drpc.Client, r *render.
 		"style-src 'self'",
 		"img-src 'self' data:",
 		"media-src 'self'",
-		"connect-src " + strings.Join(append([]string{"'self'", h.wsOrig}, cfg.VoiceOrigins...), " "),
+		"connect-src " + strings.Join(sources(append([]string{"'self'", h.wsOrig}, cfg.VoiceOrigins...)), " "),
 		"form-action 'self'",
 		"frame-ancestors 'none'",
 		"base-uri 'none'",
 		"manifest-src 'self'",
 	}, "; ")
 	return h
+}
+
+// sources drops the repeats from a CSP source list, such as a voice server
+// behind the same host as the gateway.
+func sources(list []string) []string {
+	seen := make(map[string]bool, len(list))
+	out := list[:0]
+	for _, src := range list {
+		key := strings.TrimSuffix(strings.ToLower(src), "/")
+		if !seen[key] {
+			seen[key] = true
+			out = append(out, src)
+		}
+	}
+	return out
 }
 
 // Routes returns the gateway's whole HTTP surface.

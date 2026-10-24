@@ -164,6 +164,7 @@ func Team(t *models.Team, role models.TeamRole) *pb.Team {
 		Role:        TeamRole(role),
 		CreatedAt:   Time(t.CreatedAt),
 		Photo:       t.Photo,
+		OwnerId:     t.CreatedBy.String(),
 	}
 }
 

@@ -13,6 +13,9 @@ type Config struct {
 	InviteTTL time.Duration `mapstructure:"invite_ttl"`
 	// MaxInvites caps the invites one person creates per invite_ttl.
 	MaxInvites int `mapstructure:"max_invites"`
+	// MaxTeamsPerDay caps the teams one person creates a day; system admins
+	// create any number.
+	MaxTeamsPerDay int `mapstructure:"max_teams_per_day"`
 }
 
 var _ config.Config = (*Config)(nil)
@@ -29,6 +32,9 @@ func (c *Config) Validate() error {
 	}
 	if c.MaxInvites < 1 {
 		return errors.New("max_invites must be at least 1")
+	}
+	if c.MaxTeamsPerDay < 1 {
+		return errors.New("max_teams_per_day must be at least 1")
 	}
 	return nil
 }

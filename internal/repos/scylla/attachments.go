@@ -96,6 +96,13 @@ func (r *Repository) DeleteAttachment(ctx context.Context, a *models.Attachment)
 	return nil
 }
 
+// PendObject puts an object whose row is gone on the pending list, for the
+// janitor to delete once it would an upload made at.
+func (r *Repository) PendObject(ctx context.Context, id gocql.UUID, key string, at time.Time) error {
+	return wrap(r.query(ctx, "INSERT INTO pending_uploads (day, shard, id, object_key, created_at) VALUES (?, ?, ?, ?, ?)",
+		PendingDay(at), pendingShard(id), id, key, at).ExecRelease())
+}
+
 // DeleteOrphan deletes an upload's row unless it was posted meanwhile,
 // reporting whether its object is no longer referenced.
 func (r *Repository) DeleteOrphan(ctx context.Context, id gocql.UUID) (bool, error) {

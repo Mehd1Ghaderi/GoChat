@@ -728,8 +728,26 @@ func (h *Handler) revokeInvite(w http.ResponseWriter, r *http.Request) {
 type teamMembersData struct {
 	Team    *pb.Team
 	Admin   bool
+	System  bool
 	MeID    string
 	Members []*pb.TeamMember
+}
+
+// CanChange reports whether the viewer may change m's role or remove them,
+// as the server allows: admins only the owner may, the owner no one else.
+func (d teamMembersData) CanChange(m *pb.TeamMember) bool {
+	id := m.GetUser().GetId()
+	switch {
+	case !d.Admin || id == d.MeID:
+		return false
+	case d.System:
+		return true
+	case id == d.Team.GetOwnerId():
+		return false
+	case m.Role == pb.TeamRole_TEAM_ROLE_ADMIN:
+		return d.MeID == d.Team.GetOwnerId()
+	}
+	return true
 }
 
 func (h *Handler) renderTeamMembers(w http.ResponseWriter, r *http.Request, ctx context.Context, u *pb.User, team *pb.Team) {
@@ -740,7 +758,7 @@ func (h *Handler) renderTeamMembers(w http.ResponseWriter, r *http.Request, ctx 
 	}
 	h.fragment(w, http.StatusOK, "team-members", teamMembersData{
 		Team: team, Admin: team.Role == pb.TeamRole_TEAM_ROLE_ADMIN || u.Role == pb.SystemRole_SYSTEM_ROLE_ADMIN,
-		MeID: u.Id, Members: res.Members,
+		System: u.Role == pb.SystemRole_SYSTEM_ROLE_ADMIN, MeID: u.Id, Members: res.Members,
 	})
 }
 

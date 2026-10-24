@@ -7,9 +7,11 @@ package directory
 import (
 	"cmp"
 	"context"
+	"hash/fnv"
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthdm/hollywood/actor"
@@ -42,7 +44,7 @@ type Repo interface {
 	SetStatus(ctx context.Context, id gocql.UUID, status string, dndUntil time.Time) error
 	SetCustomStatus(ctx context.Context, id gocql.UUID, emoji, text string, until time.Time) error
 
-	CreateTeam(ctx context.Context, t *models.Team) error
+	CreateTeam(ctx context.Context, n *scylla.NewTeam) error
 	GetTeam(ctx context.Context, id gocql.UUID) (*models.Team, error)
 	GetTeamIDByName(ctx context.Context, name string) (gocql.UUID, error)
 	GetTeams(ctx context.Context, ids []gocql.UUID) ([]*models.Team, error)
@@ -88,6 +90,16 @@ type Deps struct {
 	Channels *actor.PID
 	Voice    *actor.PID
 	invited  *window.Counter
+	created  *window.Counter
+	// teamLocks serialize the changes to a team's admins, so the check
+	// that one stays and the change it allows happen together.
+	teamLocks [64]sync.Mutex
+}
+
+func (d *Deps) teamLock(teamID gocql.UUID) *sync.Mutex {
+	h := fnv.New32a()
+	_, _ = h.Write(teamID[:])
+	return &d.teamLocks[h.Sum32()%uint32(len(d.teamLocks))]
 }
 
 // The channels every team starts with and every member joins.
@@ -98,6 +110,7 @@ var defaultChannels = []struct{ name, display, purpose string }{
 
 func Pool(d *Deps) actor.Producer {
 	d.invited = window.New(d.Cfg.MaxInvites, d.Cfg.InviteTTL)
+	d.created = window.New(d.Cfg.MaxTeamsPerDay, 24*time.Hour)
 	return actors.NewPool(d.Cfg.Workers, func() actor.Receiver { return &worker{Deps: d} },
 		actor.WithMiddleware(actors.Recover(d.Logger)))
 }
@@ -229,28 +242,33 @@ func (w *worker) createTeam(ctx context.Context, msg CreateTeam) (*pb.Team, erro
 	if err != nil {
 		return nil, err
 	}
+	key := msg.P.UserID.String()
+	limited := msg.P.Role != models.SystemRoleAdmin
+	if limited && w.created.Blocked(key) {
+		return nil, ierrors.ResourceExhausted("you created too many teams today, try again tomorrow")
+	}
 	creator, err := w.Users.Get(ctx, msg.P.UserID)
 	if err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC()
 	team := &models.Team{ID: ids.New(), Name: name, DisplayName: display, Description: desc, CreatedBy: creator.ID, CreatedAt: now}
-	if err := w.Repo.CreateTeam(ctx, team); err != nil {
-		return nil, err
-	}
-	member := &models.TeamMember{TeamID: team.ID, UserID: creator.ID, Role: models.TeamRoleAdmin, JoinedAt: now}
-	if err := w.Repo.AddTeamMember(ctx, member, creator.Username, creator.DisplayName); err != nil {
-		return nil, err
+	n := &scylla.NewTeam{
+		Team:     team,
+		Creator:  &models.TeamMember{TeamID: team.ID, UserID: creator.ID, Role: models.TeamRoleAdmin, JoinedAt: now},
+		Username: creator.Username, DisplayName: creator.DisplayName,
 	}
 	for _, dc := range defaultChannels {
-		ch := &models.Channel{
+		n.Channels = append(n.Channels, &models.Channel{
 			ID: ids.New(), TeamID: team.ID, Name: dc.name, DisplayName: dc.display, Purpose: dc.purpose,
 			Kind: models.ChannelPublic, CreatedBy: creator.ID, CreatedAt: now,
-		}
-		cm := &models.ChannelMember{ChannelID: ch.ID, UserID: creator.ID, TeamID: team.ID, Role: models.ChannelRoleAdmin, JoinedAt: now}
-		if err := w.Repo.CreateChannel(ctx, ch, cm); err != nil {
-			return nil, err
-		}
+		})
+	}
+	if err := w.Repo.CreateTeam(ctx, n); err != nil {
+		return nil, err
+	}
+	if limited {
+		w.created.Add(key)
 	}
 	out := convert.Team(team, models.TeamRoleAdmin)
 	w.deliver(creator.ID, &pb.Event{Payload: &pb.Event_TeamJoined{TeamJoined: &pb.TeamJoined{Team: out}}})
@@ -398,8 +416,15 @@ func (w *worker) removeTeamMember(ctx context.Context, msg RemoveTeamMember) (Do
 	if err := w.manage(ctx, msg.P, teamID, authz.ActRemove); err != nil {
 		return Done{}, err
 	}
-	if _, err := w.membership(ctx, teamID, target); err != nil {
+	lock := w.teamLock(teamID)
+	lock.Lock()
+	defer lock.Unlock()
+	current, err := w.membership(ctx, teamID, target)
+	if err != nil {
 		return Done{}, ierrors.NotFound("not a member")
+	}
+	if err := w.mayChangeAdmin(ctx, msg.P, teamID, current); err != nil {
+		return Done{}, err
 	}
 	memberships, err := w.Repo.ListUserChannels(ctx, target, teamID)
 	if err != nil {
@@ -431,6 +456,9 @@ func (w *worker) updateTeamMemberRole(ctx context.Context, msg UpdateTeamMemberR
 	if err := w.manage(ctx, msg.P, teamID, authz.ActUpdateRole); err != nil {
 		return Done{}, err
 	}
+	lock := w.teamLock(teamID)
+	lock.Lock()
+	defer lock.Unlock()
 	current, err := w.membership(ctx, teamID, target)
 	if err != nil {
 		return Done{}, ierrors.NotFound("not a member")
@@ -438,22 +466,46 @@ func (w *worker) updateTeamMemberRole(ctx context.Context, msg UpdateTeamMemberR
 	if current.Role == msg.Role {
 		return Done{}, nil
 	}
-	if current.Role == models.TeamRoleAdmin {
-		entries, err := w.Repo.ListTeamMembers(ctx, teamID)
-		if err != nil {
-			return Done{}, err
-		}
-		admins := 0
-		for _, e := range entries {
-			if e.Role == models.TeamRoleAdmin {
-				admins++
-			}
-		}
-		if admins <= 1 {
-			return Done{}, ierrors.FailedPrecondition("a team needs at least one admin")
-		}
+	if err := w.mayChangeAdmin(ctx, msg.P, teamID, current); err != nil {
+		return Done{}, err
 	}
 	return Done{}, w.Repo.UpdateTeamMemberRole(ctx, teamID, target, msg.Role)
+}
+
+// mayChangeAdmin checks, under the team's lock, that p may demote or remove
+// target: an admin only the team's owner or a system admin may, the owner
+// only themself or a system admin, and never the last admin.
+func (w *worker) mayChangeAdmin(ctx context.Context, p *models.Principal, teamID gocql.UUID, target *models.TeamMember) error {
+	if target.Role != models.TeamRoleAdmin {
+		return nil
+	}
+	team, err := w.Repo.GetTeam(ctx, teamID)
+	if err != nil {
+		return err
+	}
+	if p.Role != models.SystemRoleAdmin {
+		owner := p.UserID == team.CreatedBy
+		switch {
+		case target.UserID == team.CreatedBy && !owner:
+			return ierrors.New(ierrors.CodePermissionDenied, "only the team's owner or a system admin can change the owner's role")
+		case !owner && target.UserID != p.UserID:
+			return ierrors.New(ierrors.CodePermissionDenied, "only the team's owner can demote or remove another admin")
+		}
+	}
+	entries, err := w.Repo.ListTeamMembers(ctx, teamID)
+	if err != nil {
+		return err
+	}
+	admins := 0
+	for _, e := range entries {
+		if e.Role == models.TeamRoleAdmin {
+			admins++
+		}
+	}
+	if admins <= 1 {
+		return ierrors.FailedPrecondition("a team needs at least one admin")
+	}
+	return nil
 }
 
 // inviter returns the team of rawID when p may manage its invites.
@@ -1040,18 +1092,6 @@ func (w *worker) me(ctx context.Context, p *models.Principal) (*MeResult, error)
 		return nil, err
 	}
 	return &MeResult{User: convert.User(u), Email: u.Email}, nil
-}
-
-func (w *worker) presence(ctx context.Context, msg Presence) (map[string]pb.Status, error) {
-	if len(msg.UserIDs) > 200 {
-		return nil, ierrors.InvalidArgument("too many users")
-	}
-	for _, id := range msg.UserIDs {
-		if _, ok := ids.Parse(id); !ok {
-			return nil, ierrors.InvalidArgument("invalid user id")
-		}
-	}
-	return actors.Ask[map[string]pb.Status](ctx, w.Engine, w.Hub, hub.Statuses{UserIDs: msg.UserIDs})
 }
 
 func (w *worker) listMuted(ctx context.Context, p *models.Principal) ([]string, error) {

@@ -30,6 +30,17 @@ type fakeRepo struct {
 	quotas    map[gocql.UUID]int64
 	inserted  []*models.Attachment
 	failWrite bool
+	deleted   []string
+}
+
+// fakeStorage records the objects deleted.
+type fakeStorage struct{ repo *fakeRepo }
+
+func (s fakeStorage) Delete(_ context.Context, key string) error {
+	s.repo.mu.Lock()
+	defer s.repo.mu.Unlock()
+	s.repo.deleted = append(s.repo.deleted, key)
+	return nil
 }
 
 func (f *fakeRepo) InsertAttachment(_ context.Context, a *models.Attachment) error {
@@ -85,11 +96,36 @@ func (f *fakeRepo) SetStorageQuota(_ context.Context, id gocql.UUID, quota int64
 func (f *fakeRepo) GetAttachment(context.Context, gocql.UUID) (*models.Attachment, error) {
 	return nil, ierrors.NotFound("not found")
 }
+
+func (f *fakeRepo) GetAttachments(_ context.Context, idList []gocql.UUID) ([]*models.Attachment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*models.Attachment
+	for _, a := range f.inserted {
+		for _, id := range idList {
+			if a.ID == id {
+				out = append(out, a)
+			}
+		}
+	}
+	return out, nil
+}
 func (f *fakeRepo) DeleteAttachment(context.Context, *models.Attachment) error { return nil }
 func (f *fakeRepo) ListPendingUploads(context.Context, int32) ([]*scylla.PendingUpload, error) {
 	return nil, nil
 }
-func (f *fakeRepo) DeleteOrphan(context.Context, gocql.UUID) (bool, error)     { return false, nil }
+func (f *fakeRepo) DeleteOrphan(_ context.Context, id gocql.UUID) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, a := range f.inserted {
+		if a.ID == id && ids.IsZero(a.MessageID) {
+			f.inserted = append(f.inserted[:i], f.inserted[i+1:]...)
+			f.used[a.UploaderID] -= a.Size
+			return true, nil
+		}
+	}
+	return false, nil
+}
 func (f *fakeRepo) ForgetPending(context.Context, *scylla.PendingUpload) error { return nil }
 
 // member answers every access check as a channel member.
@@ -117,7 +153,7 @@ func newFixture(t *testing.T, quota int64) *fixture {
 	repo := &fakeRepo{users: map[gocql.UUID]bool{}, used: map[gocql.UUID]int64{}, quotas: map[gocql.UUID]int64{}}
 	cfg := &Config{Workers: 2, OpTimeout: 5 * time.Second, MaxSize: 1 << 20, Quota: quota, MaxUploads: 4, MaxUserUploads: 2, OrphanAfter: time.Hour, JanitorInterval: time.Minute}
 	pid := engine.Spawn(Pool(&Deps{
-		Logger: zap.NewNop(), Cfg: cfg, Repo: repo, Authz: authztest.New(t), Engine: engine,
+		Logger: zap.NewNop(), Cfg: cfg, Repo: repo, Storage: fakeStorage{repo}, Authz: authztest.New(t), Engine: engine,
 		Channels: engine.Spawn(func() actor.Receiver { return member{} }, "channels"),
 	}), "files")
 	t.Cleanup(func() { <-engine.Poison(pid).Done() })
@@ -183,6 +219,36 @@ func TestFailedWriteReleasesItsCharge(t *testing.T) {
 	}
 	if used := f.repo.used[p.UserID]; used != 0 {
 		t.Fatalf("a failed upload kept %d bytes charged", used)
+	}
+}
+
+func TestDiscardDropsOnlyOwnUnpostedUploads(t *testing.T) {
+	f := newFixture(t, 1000)
+	p, other := principal(models.SystemRoleUser), principal(models.SystemRoleUser)
+	mine, err := f.upload(p, 300)
+	if err != nil {
+		t.Fatal(err)
+	}
+	posted, err := f.upload(p, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	theirs, err := f.upload(other, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.repo.inserted[1].MessageID = ids.New()
+	if _, err := ask[Done](f, Discard{P: p, AttachmentIDs: []string{mine.ID.String(), posted.ID.String(), theirs.ID.String()}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.repo.deleted) != 1 || f.repo.deleted[0] != mine.ObjectKey {
+		t.Fatalf("deleted %v, want only %s", f.repo.deleted, mine.ObjectKey)
+	}
+	if used := f.repo.used[p.UserID]; used != 100 {
+		t.Fatalf("the discarded upload is still charged: %d used", used)
+	}
+	if _, err := ask[Done](f, Discard{P: p, AttachmentIDs: []string{"nope"}}); !ierrors.Is(err, ierrors.CodeInvalidArgument) {
+		t.Fatalf("an invalid id: %v", err)
 	}
 }
 

@@ -214,6 +214,17 @@ func (s *fileService) GetStorageUsage(ctx context.Context, req *pb.GetStorageUsa
 	return &pb.GetStorageUsageResponse{Used: u.Used, Quota: u.Quota, Custom: u.Custom}, nil
 }
 
+func (s *fileService) DiscardUploads(ctx context.Context, req *pb.DiscardUploadsRequest) (*pb.DiscardUploadsResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := actors.Ask[files.Done](ctx, s.sys.Engine, s.sys.Files, files.Discard{P: p, AttachmentIDs: req.AttachmentIds}); err != nil {
+		return nil, err
+	}
+	return &pb.DiscardUploadsResponse{}, nil
+}
+
 func (s *fileService) Download(req *pb.DownloadRequest, stream pb.DRPCFileService_DownloadStream) error {
 	ctx := stream.Context()
 	p, err := Principal(ctx)
@@ -224,12 +235,27 @@ func (s *fileService) Download(req *pb.DownloadRequest, stream pb.DRPCFileServic
 	if err != nil {
 		return err
 	}
-	body, err := s.storage.Get(ctx, att.ObjectKey)
+	first, last, ok, err := files.Span(req.Range, att.Size)
+	if err != nil {
+		return err
+	}
+	header := &pb.DownloadResponse{Part: &pb.DownloadResponse_Header{Header: convert.Attachment(att)}}
+	if !ok {
+		header.Unsatisfiable = true
+		return stream.Send(header)
+	}
+	var body io.ReadCloser
+	if req.Range == nil {
+		body, err = s.storage.Get(ctx, att.ObjectKey)
+	} else {
+		header.Served = &pb.ByteRange{First: first, Last: last}
+		body, err = s.storage.GetRange(ctx, att.ObjectKey, first, last)
+	}
 	if err != nil {
 		return ierrors.Internal(err)
 	}
 	defer func() { _ = body.Close() }()
-	if err := stream.Send(&pb.DownloadResponse{Part: &pb.DownloadResponse_Header{Header: convert.Attachment(att)}}); err != nil {
+	if err := stream.Send(header); err != nil {
 		return err
 	}
 	buf := make([]byte, chunkSize)

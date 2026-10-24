@@ -214,8 +214,11 @@ Docker Compose. The `image` job publishes the image to
 signs in with runs nothing but [`deploy.sh`](deployments/docker/deploy.sh)
 there, which pulls exactly that image, applies the migrations and restarts
 the server and the web gateway with it. If they do not come up healthy, the
-script puts the image that ran before back and the job fails; the output of
-the migrations, the server and the gateway goes to the server's journal
+script puts the image that ran before back and the job fails. The voice
+server restarts after them, when `.env` sets `VOICE_SERVER_KEY`: if it
+fails, chat stays on the new image and the job fails, so voice alone never
+rolls a deploy back. The output of the migrations, the server, the gateway
+and the voice server goes to the server's journal
 (`journalctl -t gochat-deploy`), not to the public CI log. Scylla and MinIO
 keep running across deploys. The server needs to reach `ghcr.io`.
 

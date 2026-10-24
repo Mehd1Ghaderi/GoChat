@@ -499,3 +499,28 @@ func TestConfigNeedsALastSeenInterval(t *testing.T) {
 		t.Fatal("a last_seen_interval of 1s was accepted")
 	}
 }
+
+func TestIdleSessionsEnd(t *testing.T) {
+	f := newFixture(t, func(c *Config) { c.SessionCacheTTL = time.Nanosecond; c.SessionIdleTimeout = time.Hour })
+	bob := f.user("bob", models.SystemRoleUser)
+	_, token := f.login(bob, "10.0.0.2")
+	if _, err := ask[*models.Principal](f, Authenticate{Token: token, IP: "10.0.0.2"}); err != nil {
+		t.Fatal(err)
+	}
+	hash := secure.Hash(token)
+	f.repo.mu.Lock()
+	s := f.repo.sessions[string(hash)]
+	s.CreatedAt, s.LastSeen = s.CreatedAt.Add(-2*time.Hour), time.Now().Add(-61*time.Minute)
+	f.repo.mu.Unlock()
+	if _, err := ask[*models.Principal](f, Authenticate{Token: token, IP: "10.0.0.2"}); !ierrors.Is(err, ierrors.CodeUnauthenticated) {
+		t.Fatalf("an idle session was accepted: %v", err)
+	}
+	if _, err := f.repo.GetSession(context.Background(), hash); !ierrors.Is(err, ierrors.CodeNotFound) {
+		t.Fatal("the idle session was not deleted")
+	}
+	cfg := *f.deps.Cfg
+	cfg.SessionIdleTimeout = 5 * time.Minute
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("an idle timeout shorter than the use is recorded was accepted")
+	}
+}

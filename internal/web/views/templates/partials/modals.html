@@ -199,8 +199,8 @@
 <ul class="list">
   {{range .Members}}
   <li>
-    <div class="person">{{template "avatar" (dict "User" .User "Size" "sm")}}<span><strong>{{name .User}}</strong> <small class="muted">@{{.User.Username}}{{if eq .Role 2}} · admin{{end}}</small></span></div>
-    {{if and $.Admin (ne .User.Id $.MeID)}}
+    <div class="person">{{template "avatar" (dict "User" .User "Size" "sm")}}<span><strong>{{name .User}}</strong> <small class="muted">@{{.User.Username}}{{if eq .User.Id $.Team.OwnerId}} · owner{{else if eq .Role 2}} · admin{{end}}</small></span></div>
+    {{if $.CanChange .}}
     <div class="row">
       {{if eq .Role 2}}<button class="btn sm" hx-post="/t/{{$.Team.Name}}/members/{{.User.Id}}/role" hx-vals='{"role": "member"}' hx-target="#modal">Make member</button>
       {{else}}<button class="btn sm" hx-post="/t/{{$.Team.Name}}/members/{{.User.Id}}/role" hx-vals='{"role": "admin"}' hx-target="#modal">Make admin</button>{{end}}
