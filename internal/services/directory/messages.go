@@ -22,11 +22,13 @@ type GetTeam struct {
 	ID, Name string
 }
 
+// ListTeamMembers replies with a *pb.ListTeamMembersResponse.
 type ListTeamMembers struct {
 	P      *models.Principal
 	TeamID string
 	Query  string
 	Limit  int
+	After  string
 }
 
 type RemoveTeamMember struct {
@@ -50,9 +52,11 @@ type Invite struct {
 	ExpiresAt time.Time
 }
 
+// ListInvites replies with a *pb.ListInvitesResponse.
 type ListInvites struct {
 	P      *models.Principal
 	TeamID string
+	After  string
 }
 
 type RevokeInvite struct {

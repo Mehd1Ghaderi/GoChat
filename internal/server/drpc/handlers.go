@@ -324,13 +324,9 @@ func (s *teamService) ListTeamMembers(ctx context.Context, req *pb.ListTeamMembe
 	if err != nil {
 		return nil, err
 	}
-	members, err := actors.Ask[[]*pb.TeamMember](ctx, s.sys.Engine, s.sys.Directory, directory.ListTeamMembers{
-		P: p, TeamID: req.TeamId, Query: req.Query, Limit: int(req.Limit),
+	return actors.Ask[*pb.ListTeamMembersResponse](ctx, s.sys.Engine, s.sys.Directory, directory.ListTeamMembers{
+		P: p, TeamID: req.TeamId, Query: req.Query, Limit: int(req.Limit), After: req.After,
 	})
-	if err != nil {
-		return nil, err
-	}
-	return &pb.ListTeamMembersResponse{Members: members}, nil
 }
 
 func (s *teamService) RemoveTeamMember(ctx context.Context, req *pb.RemoveTeamMemberRequest) (*pb.RemoveTeamMemberResponse, error) {
@@ -398,11 +394,7 @@ func (s *teamService) ListInvites(ctx context.Context, req *pb.ListInvitesReques
 	if err != nil {
 		return nil, err
 	}
-	invs, err := actors.Ask[[]*pb.InviteSummary](ctx, s.sys.Engine, s.sys.Directory, directory.ListInvites{P: p, TeamID: req.TeamId})
-	if err != nil {
-		return nil, err
-	}
-	return &pb.ListInvitesResponse{Invites: invs}, nil
+	return actors.Ask[*pb.ListInvitesResponse](ctx, s.sys.Engine, s.sys.Directory, directory.ListInvites{P: p, TeamID: req.TeamId, After: req.After})
 }
 
 func (s *teamService) RevokeInvite(ctx context.Context, req *pb.RevokeInviteRequest) (*pb.RevokeInviteResponse, error) {

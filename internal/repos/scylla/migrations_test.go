@@ -3,6 +3,7 @@ package scylla
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -31,5 +32,16 @@ func TestMigrationsHaveNoCommentLedStatements(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestPendingTTLMatchesItsTable(t *testing.T) {
+	b, err := os.ReadFile("../../../migrations/scylla/0006_pending_uploads.cql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "default_time_to_live = " + strconv.Itoa(int(PendingTTL.Seconds()))
+	if !strings.Contains(string(b), want) {
+		t.Fatalf("pending_uploads has no %q", want)
 	}
 }

@@ -1,6 +1,7 @@
 package scylla
 
 import (
+	"bytes"
 	"context"
 	"slices"
 	"time"
@@ -201,17 +202,53 @@ func (r *Repository) GetInvite(ctx context.Context, hash []byte) (*models.Invite
 	return &inv, nil
 }
 
-// ListTeamInvites returns at most limit of the team's invites, newest first,
-// leaving out those used, expired or revoked.
-func (r *Repository) ListTeamInvites(ctx context.Context, teamID gocql.UUID, limit int) ([]*models.Invite, error) {
+const teamInviteColumns = "team_id, token_hash, created_by, created_at, expires_at"
+
+// ListTeamInvites returns the invites listed for the team and not expired,
+// in no order. Some may have been used: OpenInvites tells.
+func (r *Repository) ListTeamInvites(ctx context.Context, teamID gocql.UUID) ([]*models.Invite, error) {
 	var listed []*models.Invite
-	err := r.query(ctx, "SELECT team_id, token_hash, created_by, created_at, expires_at FROM team_invites WHERE team_id = ? LIMIT ?",
-		teamID, limit).SelectRelease(&listed)
+	err := r.query(ctx, "SELECT "+teamInviteColumns+" FROM team_invites WHERE team_id = ?", teamID).SelectRelease(&listed)
 	if err != nil {
 		return nil, wrap(err)
 	}
-	// The list is cleaned as invites are used, but the invites themselves
-	// decide what is open.
+	now := time.Now()
+	return slices.DeleteFunc(listed, func(inv *models.Invite) bool { return !now.Before(inv.ExpiresAt) }), nil
+}
+
+// FindTeamInvites returns the team's listed invites whose token hash starts
+// with prefix.
+func (r *Repository) FindTeamInvites(ctx context.Context, teamID gocql.UUID, prefix []byte) ([]*models.Invite, error) {
+	var listed []*models.Invite
+	q := "SELECT " + teamInviteColumns + " FROM team_invites WHERE team_id = ? AND token_hash >= ?"
+	args := []any{teamID, prefix}
+	if end := prefixEnd(prefix); end != nil {
+		q += " AND token_hash < ?"
+		args = append(args, end)
+	}
+	if err := r.query(ctx, q, args...).SelectRelease(&listed); err != nil {
+		return nil, wrap(err)
+	}
+	return slices.DeleteFunc(listed, func(inv *models.Invite) bool { return !bytes.HasPrefix(inv.TokenHash, prefix) }), nil
+}
+
+// prefixEnd is the first blob after every blob starting with prefix, nil
+// when there is none.
+func prefixEnd(prefix []byte) []byte {
+	end := bytes.Clone(prefix)
+	for i := len(end) - 1; i >= 0; i-- {
+		if end[i] < 0xff {
+			end[i]++
+			return end[:i+1]
+		}
+	}
+	return nil
+}
+
+// OpenInvites keeps the invites of teamID that are neither used, revoked
+// nor expired. The team's list is cleaned as invites are used, but the
+// invites themselves decide.
+func (r *Repository) OpenInvites(ctx context.Context, teamID gocql.UUID, listed []*models.Invite) ([]*models.Invite, error) {
 	open := make(map[string]bool, len(listed))
 	now := time.Now()
 	for chunk := range slices.Chunk(listed, 100) {
@@ -229,8 +266,12 @@ func (r *Repository) ListTeamInvites(ctx context.Context, teamID gocql.UUID, lim
 			}
 		}
 	}
-	out := slices.DeleteFunc(listed, func(inv *models.Invite) bool { return !open[string(inv.TokenHash)] })
-	slices.SortFunc(out, func(a, b *models.Invite) int { return b.CreatedAt.Compare(a.CreatedAt) })
+	out := make([]*models.Invite, 0, len(listed))
+	for _, inv := range listed {
+		if open[string(inv.TokenHash)] {
+			out = append(out, inv)
+		}
+	}
 	return out, nil
 }
 

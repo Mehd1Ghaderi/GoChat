@@ -304,3 +304,60 @@ func TestConfigRefusesNegativeQuota(t *testing.T) {
 		t.Fatal("a negative quota was accepted")
 	}
 }
+
+type pendingRepo struct {
+	Repo
+	pending map[int32][]*scylla.PendingUpload
+	listed  []int32
+	orphans []gocql.UUID
+}
+
+func (r *pendingRepo) ListPendingUploads(_ context.Context, day int32) ([]*scylla.PendingUpload, error) {
+	r.listed = append(r.listed, day)
+	return r.pending[day], nil
+}
+
+func (r *pendingRepo) DeleteOrphan(_ context.Context, id gocql.UUID) (bool, error) {
+	r.orphans = append(r.orphans, id)
+	return true, nil
+}
+
+func (r *pendingRepo) ForgetPending(context.Context, *scylla.PendingUpload) error { return nil }
+
+type objects struct{ deleted []string }
+
+func (o *objects) Delete(_ context.Context, key string) error {
+	o.deleted = append(o.deleted, key)
+	return nil
+}
+
+func TestJanitorReachesEveryPendingDay(t *testing.T) {
+	now := time.Now()
+	old := &scylla.PendingUpload{ID: ids.New(), ObjectKey: "old", CreatedAt: now.Add(-13 * 24 * time.Hour)}
+	fresh := &scylla.PendingUpload{ID: ids.New(), ObjectKey: "fresh", CreatedAt: now.Add(-time.Hour)}
+	repo := &pendingRepo{pending: map[int32][]*scylla.PendingUpload{
+		scylla.PendingDay(old.CreatedAt): {old}, scylla.PendingDay(fresh.CreatedAt): {fresh},
+	}}
+	store := &objects{}
+	j := &janitor{Deps: &Deps{Logger: zap.NewNop(), Cfg: &Config{OrphanAfter: 2 * time.Hour, JanitorInterval: time.Minute}, Repo: repo, Storage: store}}
+	j.sweep()
+	if len(store.deleted) != 1 || store.deleted[0] != "old" {
+		t.Fatalf("deleted %q", store.deleted)
+	}
+	if first := repo.listed[0]; first != scylla.PendingDay(now.Add(-scylla.PendingTTL)) {
+		t.Fatalf("the sweep started at day %d", first)
+	}
+}
+
+func TestOrphanAfterIsBounded(t *testing.T) {
+	c := Config{Workers: 1, MaxUploads: 1, MaxUserUploads: 1, OpTimeout: time.Second, MaxSize: 1 << 20, MaxVoiceDuration: time.Minute, MaxVoiceSize: 1 << 20, JanitorInterval: time.Minute}
+	for _, d := range []struct {
+		after time.Duration
+		ok    bool
+	}{{time.Hour, true}, {MaxOrphanAfter, true}, {MaxOrphanAfter + time.Hour, false}, {time.Minute, false}} {
+		c.OrphanAfter = d.after
+		if err := c.Validate(); (err == nil) != d.ok {
+			t.Errorf("orphan_after %v: %v", d.after, err)
+		}
+	}
+}

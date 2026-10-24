@@ -62,9 +62,17 @@ gateway:
   reconnect_min: 500ms
   reconnect_max: 15s
   read_limit: 65536
-  send_queue: 512
+  send_buffer: 1048576
+  recv_buffer: 262144
   write_timeout: 10s
   ping_interval: 25s
   max_per_user: 20
   frame_rate: 10
   frame_burst: 40
+  compress: true
+  compress_threshold: 4096
+  attach_rate: 200
+  attach_burst: 100
+  resync_rate: 50
+  resync_burst: 50
+  resync_jitter: 5s

@@ -480,6 +480,7 @@ kbd {
 .list li:last-child { border-bottom: 0; }
 .list li:has(> .row) { flex-wrap: wrap; row-gap: .5rem; }
 .list li > .person { flex: 1 1 12rem; }
+.list li.older { justify-content: center; }
 .list li > .row { flex-wrap: nowrap; margin-left: auto; }
 .person { display: flex; align-items: center; gap: .6rem; min-width: 0; }
 .person span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

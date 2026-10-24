@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/ssenerg/gochat/internal/client/drpc"
 	"github.com/ssenerg/gochat/internal/core/emoji"
 	ierrors "github.com/ssenerg/gochat/internal/errors"
+	"github.com/ssenerg/gochat/internal/web/gateway"
 	"github.com/ssenerg/gochat/internal/web/render"
 )
 
@@ -316,7 +318,7 @@ func (h *Handler) channelPage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		view.OpenThread = threadParam(r)
-		h.fragment(w, http.StatusOK, "channel", view)
+		h.fragment(w, r, http.StatusOK, "channel", view)
 		return
 	}
 
@@ -344,7 +346,7 @@ func (h *Handler) channelPage(w http.ResponseWriter, r *http.Request) {
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		var err error
-		lists, err = h.lists(gctx, team, chID)
+		lists, err = h.lists(gctx, u, team, chID)
 		return err
 	})
 	g.Go(func() error {
@@ -366,7 +368,9 @@ func (h *Handler) channelPage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) lists(ctx context.Context, team *pb.Team, active string) (*render.Lists, error) {
+// lists loads the sidebar of a page for u, and keeps it for the page's
+// socket.
+func (h *Handler) lists(ctx context.Context, u *pb.User, team *pb.Team, active string) (*render.Lists, error) {
 	res, err := h.client.Channels.ListChannels(ctx, &pb.ListChannelsRequest{TeamId: team.Id})
 	if err != nil {
 		return nil, err
@@ -388,6 +392,9 @@ func (h *Handler) lists(ctx context.Context, team *pb.Team, active string) (*ren
 		if vs, err := h.client.Voice.ListVoiceStates(ctx, &pb.ListVoiceStatesRequest{TeamId: team.Id}); err == nil {
 			lists.VoiceStates = render.VoiceStates(vs.Channels)
 		}
+	}
+	if h.gw.Sidebars != nil {
+		lists.Key = h.gw.Sidebars.Put(gateway.NewSidebar(u.Id, lists))
 	}
 	return lists, nil
 }
@@ -432,7 +439,7 @@ func (h *Handler) olderMessages(w http.ResponseWriter, r *http.Request) {
 	if n := len(msgs.Messages); n > 0 {
 		view.Oldest = msgs.Messages[n-1].Id
 	}
-	h.fragment(w, http.StatusOK, "older-page", view)
+	h.fragment(w, r, http.StatusOK, "older-page", view)
 }
 
 func (h *Handler) teamFor(w http.ResponseWriter, r *http.Request) (*pb.User, *pb.Team, context.Context, context.CancelFunc) {
@@ -456,7 +463,7 @@ func (h *Handler) newChannelModal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer cancel()
-	h.fragment(w, http.StatusOK, "new-channel", struct {
+	h.fragment(w, r, http.StatusOK, "new-channel", struct {
 		Team  *pb.Team
 		Voice bool
 	}{team, r.URL.Query().Get("type") == "voice"})
@@ -481,7 +488,7 @@ func (h *Handler) createChannel(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if msg, ok := formError(err); ok {
-			h.text(w, http.StatusOK, "error", msg)
+			h.text(w, r, http.StatusOK, "error", msg)
 			return
 		}
 		h.fail(w, r, err)
@@ -501,7 +508,7 @@ func (h *Handler) browseModal(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "browse", struct {
+	h.fragment(w, r, http.StatusOK, "browse", struct {
 		Team               *pb.Team
 		Channels, Archived []*pb.Channel
 	}{team, res.Channels, res.Archived})
@@ -591,7 +598,7 @@ func (h *Handler) peopleModal(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "dm-picker", peopleData{SearchURL: "/t/" + team.Name + "/people/search", ActionURL: "/t/" + team.Name + "/dm", Members: members})
+	h.fragment(w, r, http.StatusOK, "dm-picker", peopleData{SearchURL: "/t/" + team.Name + "/people/search", ActionURL: "/t/" + team.Name + "/dm", Members: members})
 }
 
 func (h *Handler) peopleSearch(w http.ResponseWriter, r *http.Request) {
@@ -605,7 +612,7 @@ func (h *Handler) peopleSearch(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "dm-results", peopleData{Members: members})
+	h.fragment(w, r, http.StatusOK, "dm-results", peopleData{Members: members})
 }
 
 // maxPicked bounds the people a conversation is started with.
@@ -636,15 +643,35 @@ func (h *Handler) openDirect(w http.ResponseWriter, r *http.Request) {
 type inviteListData struct {
 	Team    *pb.Team
 	Invites []*pb.InviteSummary
+	MoreURL string
 	OOB     bool
 }
 
-func (h *Handler) invites(ctx context.Context, team *pb.Team) (inviteListData, error) {
-	res, err := h.client.Teams.ListInvites(ctx, &pb.ListInvitesRequest{TeamId: team.Id})
+func (h *Handler) invites(ctx context.Context, team *pb.Team, after string) (inviteListData, error) {
+	res, err := h.client.Teams.ListInvites(ctx, &pb.ListInvitesRequest{TeamId: team.Id, After: after})
 	if err != nil {
 		return inviteListData{}, err
 	}
-	return inviteListData{Team: team, Invites: res.Invites}, nil
+	data := inviteListData{Team: team, Invites: res.Invites}
+	if res.Next != "" {
+		data.MoreURL = "/t/" + team.Name + "/invites?" + url.Values{"after": {res.Next}}.Encode()
+	}
+	return data, nil
+}
+
+// moreInvites continues the list of open invites.
+func (h *Handler) moreInvites(w http.ResponseWriter, r *http.Request) {
+	_, team, ctx, cancel := h.teamFor(w, r)
+	if team == nil {
+		return
+	}
+	defer cancel()
+	data, err := h.invites(ctx, team, r.URL.Query().Get("after"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	h.fragment(w, r, http.StatusOK, "invite-rows", data)
 }
 
 func (h *Handler) inviteModal(w http.ResponseWriter, r *http.Request) {
@@ -653,12 +680,12 @@ func (h *Handler) inviteModal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer cancel()
-	data, err := h.invites(ctx, team)
+	data, err := h.invites(ctx, team, "")
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "invite", data)
+	h.fragment(w, r, http.StatusOK, "invite", data)
 }
 
 // createInvite shows the new link, once, and refreshes the open invites.
@@ -679,7 +706,7 @@ func (h *Handler) createInvite(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt time.Time
 	}{h.cfg.PublicURL + "/join/" + res.Token, res.ExpiresAt.AsTime()})
 	if err == nil {
-		if data, lerr := h.invites(ctx, team); lerr == nil {
+		if data, lerr := h.invites(ctx, team, ""); lerr == nil {
 			data.OOB = true
 			err = h.render.Fragment(&out, "invite-list", data)
 		}
@@ -707,7 +734,7 @@ func (h *Handler) revokeInvite(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	data, lerr := h.invites(ctx, team)
+	data, lerr := h.invites(ctx, team, "")
 	if lerr != nil {
 		h.fail(w, r, lerr)
 		return
@@ -731,6 +758,7 @@ type teamMembersData struct {
 	System  bool
 	MeID    string
 	Members []*pb.TeamMember
+	MoreURL string
 }
 
 // CanChange reports whether the viewer may change m's role or remove them,
@@ -750,16 +778,29 @@ func (d teamMembersData) CanChange(m *pb.TeamMember) bool {
 	return true
 }
 
-func (h *Handler) renderTeamMembers(w http.ResponseWriter, r *http.Request, ctx context.Context, u *pb.User, team *pb.Team) {
-	res, err := h.client.Teams.ListTeamMembers(ctx, &pb.ListTeamMembersRequest{TeamId: team.Id, Limit: 200})
+// memberPage is how many members the team's list shows at once.
+const memberPage = 100
+
+// renderTeamMembers shows the team's members, or with after the next of
+// them.
+func (h *Handler) renderTeamMembers(w http.ResponseWriter, r *http.Request, ctx context.Context, u *pb.User, team *pb.Team, after string) {
+	res, err := h.client.Teams.ListTeamMembers(ctx, &pb.ListTeamMembersRequest{TeamId: team.Id, Limit: memberPage, After: after})
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "team-members", teamMembersData{
+	data := teamMembersData{
 		Team: team, Admin: team.Role == pb.TeamRole_TEAM_ROLE_ADMIN || u.Role == pb.SystemRole_SYSTEM_ROLE_ADMIN,
 		System: u.Role == pb.SystemRole_SYSTEM_ROLE_ADMIN, MeID: u.Id, Members: res.Members,
-	})
+	}
+	if res.Next != "" {
+		data.MoreURL = "/t/" + team.Name + "/members?" + url.Values{"after": {res.Next}}.Encode()
+	}
+	name := "team-members"
+	if after != "" {
+		name = "team-member-rows"
+	}
+	h.fragment(w, r, http.StatusOK, name, data)
 }
 
 func (h *Handler) teamMembers(w http.ResponseWriter, r *http.Request) {
@@ -768,7 +809,12 @@ func (h *Handler) teamMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer cancel()
-	h.renderTeamMembers(w, r, ctx, u, team)
+	after := r.URL.Query().Get("after")
+	if len(after) > 64 {
+		h.fail(w, r, ierrors.InvalidArgument("invalid cursor"))
+		return
+	}
+	h.renderTeamMembers(w, r, ctx, u, team, after)
 }
 
 func (h *Handler) removeTeamMember(w http.ResponseWriter, r *http.Request) {
@@ -798,7 +844,7 @@ func (h *Handler) teamMemberRole(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.renderTeamMembers(w, r, ctx, u, team)
+	h.renderTeamMembers(w, r, ctx, u, team, "")
 }
 
 type channelMembersData struct {
@@ -833,7 +879,7 @@ func (h *Handler) renderChannelMembers(w http.ResponseWriter, r *http.Request, c
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "channel-members", channelMembersData{
+	h.fragment(w, r, http.StatusOK, "channel-members", channelMembersData{
 		Team: team, ChannelID: chID, Members: members,
 		CanAdd:    !render.Conversation(ch),
 		CanRemove: !render.Conversation(ch) && moderator(u, team, ch),
@@ -869,7 +915,7 @@ func (h *Handler) addMemberModal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	base := "/t/" + team.Name + "/ch/" + chID
-	h.fragment(w, http.StatusOK, "people", peopleData{
+	h.fragment(w, r, http.StatusOK, "people", peopleData{
 		Heading: "Add people", SearchURL: base + "/add/search", ActionURL: base + "/members", ActionLabel: "Add", Members: members,
 	})
 }
@@ -889,7 +935,7 @@ func (h *Handler) addMemberSearch(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "people-results", peopleData{
+	h.fragment(w, r, http.StatusOK, "people-results", peopleData{
 		ActionURL: "/t/" + team.Name + "/ch/" + chID + "/members", ActionLabel: "Add", Members: members,
 	})
 }
@@ -965,7 +1011,7 @@ func (h *Handler) messageFragment(w http.ResponseWriter, r *http.Request) {
 	if m == nil {
 		return
 	}
-	h.fragment(w, http.StatusOK, "message", h.render.Message(m, u, false))
+	h.fragment(w, r, http.StatusOK, "message", h.render.Message(m, u, false))
 }
 
 func (h *Handler) editMessageForm(w http.ResponseWriter, r *http.Request) {
@@ -977,7 +1023,7 @@ func (h *Handler) editMessageForm(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, ierrors.PermissionDenied())
 		return
 	}
-	h.fragment(w, http.StatusOK, "message-edit", m)
+	h.fragment(w, r, http.StatusOK, "message-edit", m)
 }
 
 func (h *Handler) editMessage(w http.ResponseWriter, r *http.Request) {
@@ -996,7 +1042,7 @@ func (h *Handler) editMessage(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "message", h.render.Message(res.Message, u, false))
+	h.fragment(w, r, http.StatusOK, "message", h.render.Message(res.Message, u, false))
 }
 
 func (h *Handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
@@ -1083,7 +1129,7 @@ func (h *Handler) threadPanel(w http.ResponseWriter, r *http.Request) {
 		view.Oldest = thread.Replies[0].Id
 	}
 	if before != "" {
-		h.fragment(w, http.StatusOK, "older-replies-page", view)
+		h.fragment(w, r, http.StatusOK, "older-replies-page", view)
 		return
 	}
 	if thread.Following {
@@ -1091,7 +1137,7 @@ func (h *Handler) threadPanel(w http.ResponseWriter, r *http.Request) {
 			h.logger.Debug("failed to mark a thread read", zap.Error(err))
 		}
 	}
-	h.fragment(w, http.StatusOK, "thread", view)
+	h.fragment(w, r, http.StatusOK, "thread", view)
 }
 
 type suggestion struct {
@@ -1167,7 +1213,7 @@ func (h *Handler) mentionSuggestions(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	h.fragment(w, http.StatusOK, "suggest", items)
+	h.fragment(w, r, http.StatusOK, "suggest", items)
 }
 
 func (h *Handler) reactionPicker(w http.ResponseWriter, r *http.Request) {
@@ -1178,7 +1224,7 @@ func (h *Handler) reactionPicker(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	h.fragment(w, http.StatusOK, "emoji-picker", struct {
+	h.fragment(w, r, http.StatusOK, "emoji-picker", struct {
 		URL   string
 		Emoji []emoji.Emoji
 	}{render.ReactURL(chID, msgID, rootID), emoji.All})
@@ -1207,7 +1253,7 @@ func (h *Handler) react(w http.ResponseWriter, r *http.Request) {
 	if r.PostFormValue("picker") == "1" {
 		w.Header().Set("HX-Trigger", "closeModal")
 	}
-	h.fragment(w, http.StatusOK, "reactions", render.Reactions(chID, msgID, rootID, res.Reactions, u, true))
+	h.fragment(w, r, http.StatusOK, "reactions", render.Reactions(chID, msgID, rootID, res.Reactions, u, true))
 }
 
 // threadParam is the valid ?thread of a request, or empty.
@@ -1279,5 +1325,5 @@ func (h *Handler) muteChannel(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "mute-button", map[string]any{"Team": team.Name, "Channel": chID, "Muted": muted})
+	h.fragment(w, r, http.StatusOK, "mute-button", map[string]any{"Team": team.Name, "Channel": chID, "Muted": muted})
 }

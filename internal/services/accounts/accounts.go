@@ -20,6 +20,7 @@ import (
 	"github.com/ssenerg/gochat/internal/authz"
 	"github.com/ssenerg/gochat/internal/core/cache"
 	"github.com/ssenerg/gochat/internal/core/ids"
+	"github.com/ssenerg/gochat/internal/core/keylock"
 	"github.com/ssenerg/gochat/internal/core/models"
 	"github.com/ssenerg/gochat/internal/core/password"
 	"github.com/ssenerg/gochat/internal/core/secure"
@@ -97,6 +98,9 @@ type Deps struct {
 	failures        *window.Counter
 	// accountFailures counts failed sign-ins per account from every address.
 	accountFailures *window.Counter
+	// totp serializes each user's two-factor changes, so the recovery codes
+	// a confirmation shows are the ones it stored.
+	totp *keylock.Locks
 }
 
 func NewDeps(logger *zap.Logger, cfg *Config, repo Repo, userCache *users.Cache, az *authz.Authorizer, engine *actor.Engine, hubPID *actor.PID) (*Deps, error) {
@@ -122,6 +126,7 @@ func NewDeps(logger *zap.Logger, cfg *Config, repo Repo, userCache *users.Cache,
 		revokedSessions: cache.New[string, struct{}](cfg.SessionCacheSize, cfg.SessionCacheTTL+cfg.OpTimeout),
 		failures:        window.New(cfg.LoginFailures, cfg.LoginWindow),
 		accountFailures: window.New(cfg.LoginFailures*accountFailureFactor, cfg.LoginWindow),
+		totp:            keylock.New(),
 	}, nil
 }
 
@@ -168,11 +173,11 @@ func (w *worker) Receive(c *actor.Context) {
 	case ChangePassword:
 		out, err = w.changePassword(ctx, msg)
 	case BeginTOTP:
-		out, err = w.beginTOTP(ctx, msg)
+		out, err = lockTOTP(ctx, w, msg.P, msg, w.beginTOTP)
 	case ConfirmTOTP:
-		out, err = w.confirmTOTP(ctx, msg)
+		out, err = lockTOTP(ctx, w, msg.P, msg, w.confirmTOTP)
 	case DisableTOTP:
-		out, err = w.disableTOTP(ctx, msg)
+		out, err = lockTOTP(ctx, w, msg.P, msg, w.disableTOTP)
 	case ListSessions:
 		out, err = w.listSessions(ctx, msg)
 	case RevokeSession:
@@ -677,6 +682,17 @@ func (w *worker) changePassword(ctx context.Context, msg ChangePassword) (Done, 
 		return Done{}, err
 	}
 	return Done{}, nil
+}
+
+// lockTOTP runs fn holding the caller's two-factor settings.
+func lockTOTP[M, T any](ctx context.Context, w *worker, p *models.Principal, msg M, fn func(context.Context, M) (T, error)) (T, error) {
+	unlock, err := w.totp.Lock(ctx, p.UserID.String())
+	if err != nil {
+		var zero T
+		return zero, ierrors.Unavailable("busy, try again")
+	}
+	defer unlock()
+	return fn(ctx, msg)
 }
 
 func (w *worker) beginTOTP(ctx context.Context, msg BeginTOTP) (*TOTPSetup, error) {

@@ -15,7 +15,7 @@ func (h *Handler) statusModal(w http.ResponseWriter, r *http.Request) {
 	if u == nil {
 		return
 	}
-	h.fragment(w, http.StatusOK, "status-modal", render.NewStatusForm(u))
+	h.fragment(w, r, http.StatusOK, "status-modal", render.NewStatusForm(u))
 }
 
 // setStatus saves the availability and custom status the caller chose.
@@ -45,7 +45,7 @@ func (h *Handler) setStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("HX-Trigger", "closeModal")
-	h.fragment(w, http.StatusOK, "status-saved", res.User)
+	h.fragment(w, r, http.StatusOK, "status-saved", res.User)
 }
 
 // minutes reads one of the durations offered.

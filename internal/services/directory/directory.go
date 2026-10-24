@@ -7,11 +7,11 @@ package directory
 import (
 	"cmp"
 	"context"
-	"hash/fnv"
+	"encoding/hex"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/anthdm/hollywood/actor"
@@ -22,6 +22,7 @@ import (
 	"github.com/ssenerg/gochat/internal/actors"
 	"github.com/ssenerg/gochat/internal/authz"
 	"github.com/ssenerg/gochat/internal/core/ids"
+	"github.com/ssenerg/gochat/internal/core/keylock"
 	"github.com/ssenerg/gochat/internal/core/models"
 	"github.com/ssenerg/gochat/internal/core/secure"
 	"github.com/ssenerg/gochat/internal/core/validate"
@@ -56,7 +57,9 @@ type Repo interface {
 	RemoveTeamMember(ctx context.Context, teamID, userID gocql.UUID) error
 	UpdateTeamMemberRole(ctx context.Context, teamID, userID gocql.UUID, role models.TeamRole) error
 	CreateInvite(ctx context.Context, inv *models.Invite) error
-	ListTeamInvites(ctx context.Context, teamID gocql.UUID, limit int) ([]*models.Invite, error)
+	ListTeamInvites(ctx context.Context, teamID gocql.UUID) ([]*models.Invite, error)
+	FindTeamInvites(ctx context.Context, teamID gocql.UUID, prefix []byte) ([]*models.Invite, error)
+	OpenInvites(ctx context.Context, teamID gocql.UUID, listed []*models.Invite) ([]*models.Invite, error)
 	RevokeInvite(ctx context.Context, teamID gocql.UUID, hash []byte) (bool, error)
 	GetInvite(ctx context.Context, hash []byte) (*models.Invite, error)
 	ConsumeInvite(ctx context.Context, inv *models.Invite, userID gocql.UUID, now time.Time) (bool, error)
@@ -91,15 +94,9 @@ type Deps struct {
 	Voice    *actor.PID
 	invited  *window.Counter
 	created  *window.Counter
-	// teamLocks serialize the changes to a team's admins, so the check
-	// that one stays and the change it allows happen together.
-	teamLocks [64]sync.Mutex
-}
-
-func (d *Deps) teamLock(teamID gocql.UUID) *sync.Mutex {
-	h := fnv.New32a()
-	_, _ = h.Write(teamID[:])
-	return &d.teamLocks[h.Sum32()%uint32(len(d.teamLocks))]
+	// teamLocks serializes the changes that could leave a team without an
+	// admin.
+	teamLocks *keylock.Locks
 }
 
 // The channels every team starts with and every member joins.
@@ -111,6 +108,7 @@ var defaultChannels = []struct{ name, display, purpose string }{
 func Pool(d *Deps) actor.Producer {
 	d.invited = window.New(d.Cfg.MaxInvites, d.Cfg.InviteTTL)
 	d.created = window.New(d.Cfg.MaxTeamsPerDay, 24*time.Hour)
+	d.teamLocks = keylock.New()
 	return actors.NewPool(d.Cfg.Workers, func() actor.Receiver { return &worker{Deps: d} },
 		actor.WithMiddleware(actors.Recover(d.Logger)))
 }
@@ -337,7 +335,7 @@ func (w *worker) getTeam(ctx context.Context, msg GetTeam) (*pb.Team, error) {
 	return convert.Team(team, m.Role), nil
 }
 
-func (w *worker) listTeamMembers(ctx context.Context, msg ListTeamMembers) ([]*pb.TeamMember, error) {
+func (w *worker) listTeamMembers(ctx context.Context, msg ListTeamMembers) (*pb.ListTeamMembersResponse, error) {
 	teamID, err := parseID(msg.TeamID, "team")
 	if err != nil {
 		return nil, err
@@ -355,34 +353,42 @@ func (w *worker) listTeamMembers(ctx context.Context, msg ListTeamMembers) ([]*p
 		limit = 50
 	}
 	slices.SortFunc(entries, func(a, b *scylla.TeamMemberEntry) int { return cmp.Compare(a.Username, b.Username) })
-	out := make([]*pb.TeamMember, 0, min(limit, len(entries)))
-	for _, e := range entries {
+	// Usernames are unique, so the last one listed continues the listing.
+	start, found := slices.BinarySearchFunc(entries, msg.After, func(e *scylla.TeamMemberEntry, after string) int {
+		return cmp.Compare(e.Username, after)
+	})
+	if found {
+		start++
+	}
+	res := &pb.ListTeamMembersResponse{}
+	for _, e := range entries[start:] {
 		if query != "" && !strings.HasPrefix(e.Username, query) && !strings.HasPrefix(strings.ToLower(e.DisplayName), query) {
 			continue
 		}
-		out = append(out, &pb.TeamMember{
+		if len(res.Members) == limit {
+			res.Next = res.Members[limit-1].User.Username
+			break
+		}
+		res.Members = append(res.Members, &pb.TeamMember{
 			User:     &pb.User{Id: e.UserID.String(), Username: e.Username, DisplayName: e.DisplayName},
 			Role:     convert.TeamRole(e.Role),
 			JoinedAt: convert.Time(e.JoinedAt),
 		})
-		if len(out) >= limit {
-			break
-		}
 	}
-	userIDs := make([]gocql.UUID, 0, len(out))
-	for _, m := range out {
+	userIDs := make([]gocql.UUID, 0, len(res.Members))
+	for _, m := range res.Members {
 		if id, ok := ids.Parse(m.User.Id); ok {
 			userIDs = append(userIDs, id)
 		}
 	}
 	if found, err := w.Users.GetMany(ctx, userIDs); err == nil {
-		for _, m := range out {
+		for _, m := range res.Members {
 			if id, ok := ids.Parse(m.User.Id); ok && found[id] != nil {
 				m.User.Photo = found[id].Photo
 			}
 		}
 	}
-	return out, nil
+	return res, nil
 }
 
 // manage checks the caller may act on another member of teamID.
@@ -401,6 +407,30 @@ func (w *worker) manage(ctx context.Context, p *models.Principal, teamID gocql.U
 	return nil
 }
 
+// lockTeam holds the team's admin changes until the returned func is
+// called.
+func (w *worker) lockTeam(ctx context.Context, teamID gocql.UUID) (func(), error) {
+	unlock, err := w.teamLocks.Lock(ctx, teamID.String())
+	if err != nil {
+		return nil, ierrors.Unavailable("the team is busy, try again")
+	}
+	return unlock, nil
+}
+
+// keepAdmin fails when target is the team's only admin.
+func (w *worker) keepAdmin(ctx context.Context, teamID, target gocql.UUID) error {
+	entries, err := w.Repo.ListTeamMembers(ctx, teamID)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.Role == models.TeamRoleAdmin && e.UserID != target {
+			return nil
+		}
+	}
+	return ierrors.FailedPrecondition("a team needs at least one admin")
+}
+
 func (w *worker) removeTeamMember(ctx context.Context, msg RemoveTeamMember) (Done, error) {
 	teamID, err := parseID(msg.TeamID, "team")
 	if err != nil {
@@ -413,19 +443,11 @@ func (w *worker) removeTeamMember(ctx context.Context, msg RemoveTeamMember) (Do
 	if target == msg.P.UserID {
 		return Done{}, ierrors.FailedPrecondition("you cannot remove yourself")
 	}
-	if err := w.manage(ctx, msg.P, teamID, authz.ActRemove); err != nil {
+	if err := w.dropTeamMember(ctx, msg.P, teamID, target); err != nil {
 		return Done{}, err
 	}
-	lock := w.teamLock(teamID)
-	lock.Lock()
-	defer lock.Unlock()
-	current, err := w.membership(ctx, teamID, target)
-	if err != nil {
-		return Done{}, ierrors.NotFound("not a member")
-	}
-	if err := w.mayChangeAdmin(ctx, msg.P, teamID, current); err != nil {
-		return Done{}, err
-	}
+	// The channels go after the team: a join racing the removal then finds
+	// no team, or joined in time to be listed here.
 	memberships, err := w.Repo.ListUserChannels(ctx, target, teamID)
 	if err != nil {
 		return Done{}, err
@@ -436,12 +458,40 @@ func (w *worker) removeTeamMember(ctx context.Context, msg RemoveTeamMember) (Do
 			return Done{}, err
 		}
 	}
-	if err := w.Repo.RemoveTeamMember(ctx, teamID, target); err != nil {
-		return Done{}, err
-	}
 	w.Engine.Send(w.Voice, voice.DropUser{UserID: target, TeamID: teamID})
 	w.deliver(target, &pb.Event{Payload: &pb.Event_TeamLeft{TeamLeft: &pb.TeamLeft{TeamId: teamID.String()}}})
 	return Done{}, nil
+}
+
+// dropTeamMember removes target from the team, keeping it an admin. A
+// removal that stopped short of the channels may be finished.
+func (w *worker) dropTeamMember(ctx context.Context, p *models.Principal, teamID, target gocql.UUID) error {
+	unlock, err := w.lockTeam(ctx, teamID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := w.manage(ctx, p, teamID, authz.ActRemove); err != nil {
+		return err
+	}
+	m, err := w.membership(ctx, teamID, target)
+	if ierrors.Is(err, ierrors.CodeNotFound) {
+		in, err := w.Repo.ListUserChannels(ctx, target, teamID)
+		if err != nil {
+			return err
+		}
+		if len(in) == 0 {
+			return ierrors.NotFound("not a member")
+		}
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := w.mayChangeAdmin(ctx, p, teamID, m); err != nil {
+		return err
+	}
+	return w.Repo.RemoveTeamMember(ctx, teamID, target)
 }
 
 func (w *worker) updateTeamMemberRole(ctx context.Context, msg UpdateTeamMemberRole) (Done, error) {
@@ -453,12 +503,14 @@ func (w *worker) updateTeamMemberRole(ctx context.Context, msg UpdateTeamMemberR
 	if err != nil {
 		return Done{}, err
 	}
+	unlock, err := w.lockTeam(ctx, teamID)
+	if err != nil {
+		return Done{}, err
+	}
+	defer unlock()
 	if err := w.manage(ctx, msg.P, teamID, authz.ActUpdateRole); err != nil {
 		return Done{}, err
 	}
-	lock := w.teamLock(teamID)
-	lock.Lock()
-	defer lock.Unlock()
 	current, err := w.membership(ctx, teamID, target)
 	if err != nil {
 		return Done{}, ierrors.NotFound("not a member")
@@ -492,20 +544,7 @@ func (w *worker) mayChangeAdmin(ctx context.Context, p *models.Principal, teamID
 			return ierrors.New(ierrors.CodePermissionDenied, "only the team's owner can demote or remove another admin")
 		}
 	}
-	entries, err := w.Repo.ListTeamMembers(ctx, teamID)
-	if err != nil {
-		return err
-	}
-	admins := 0
-	for _, e := range entries {
-		if e.Role == models.TeamRoleAdmin {
-			admins++
-		}
-	}
-	if admins <= 1 {
-		return ierrors.FailedPrecondition("a team needs at least one admin")
-	}
-	return nil
+	return w.keepAdmin(ctx, teamID, target.UserID)
 }
 
 // inviter returns the team of rawID when p may manage its invites.
@@ -549,19 +588,87 @@ func (w *worker) createInvite(ctx context.Context, msg CreateInvite) (*Invite, e
 	return &Invite{Token: token, ExpiresAt: inv.ExpiresAt}, nil
 }
 
-const maxListedInvites = 200
+// invitePage is how many invites a listing shows at once.
+const invitePage = 50
 
-func (w *worker) listInvites(ctx context.Context, msg ListInvites) ([]*pb.InviteSummary, error) {
+// inviteKey orders invites newest first, and continues their listing.
+type inviteKey struct {
+	at int64
+	id string
+}
+
+func keyOf(inv *models.Invite) inviteKey {
+	return inviteKey{at: inv.CreatedAt.UnixMicro(), id: secure.PublicID(inv.TokenHash)}
+}
+
+func (k inviteKey) compare(o inviteKey) int {
+	if c := cmp.Compare(o.at, k.at); c != 0 {
+		return c
+	}
+	return cmp.Compare(k.id, o.id)
+}
+
+func (k inviteKey) String() string { return strconv.FormatInt(k.at, 10) + "." + k.id }
+
+var inviteCursorRe = regexp.MustCompile(`^(\d{1,19})\.([0-9a-f]{24})$`)
+
+func parseInviteKey(s string) (inviteKey, bool) {
+	m := inviteCursorRe.FindStringSubmatch(s)
+	if m == nil {
+		return inviteKey{}, false
+	}
+	at, err := strconv.ParseInt(m[1], 10, 64)
+	return inviteKey{at: at, id: m[2]}, err == nil
+}
+
+func (w *worker) listInvites(ctx context.Context, msg ListInvites) (*pb.ListInvitesResponse, error) {
 	teamID, err := w.inviter(ctx, msg.P, msg.TeamID)
 	if err != nil {
 		return nil, err
 	}
-	invs, err := w.Repo.ListTeamInvites(ctx, teamID, maxListedInvites)
+	var after inviteKey
+	if msg.After != "" {
+		var ok bool
+		if after, ok = parseInviteKey(msg.After); !ok {
+			return nil, ierrors.InvalidArgument("invalid invite cursor")
+		}
+	}
+	listed, err := w.Repo.ListTeamInvites(ctx, teamID)
 	if err != nil {
 		return nil, err
 	}
-	creatorIDs := make([]gocql.UUID, 0, len(invs))
-	for _, inv := range invs {
+	keys := make(map[*models.Invite]inviteKey, len(listed))
+	for _, inv := range listed {
+		keys[inv] = keyOf(inv)
+	}
+	slices.SortFunc(listed, func(a, b *models.Invite) int { return keys[a].compare(keys[b]) })
+	if msg.After != "" {
+		start, _ := slices.BinarySearchFunc(listed, after, func(inv *models.Invite, k inviteKey) int {
+			if c := keys[inv].compare(k); c != 0 {
+				return c
+			}
+			return -1
+		})
+		listed = listed[start:]
+	}
+	// One more than a page tells whether another follows.
+	var page []*models.Invite
+	for len(page) <= invitePage && len(listed) > 0 {
+		n := min(len(listed), invitePage+1-len(page))
+		open, err := w.Repo.OpenInvites(ctx, teamID, listed[:n])
+		if err != nil {
+			return nil, err
+		}
+		page = append(page, open...)
+		listed = listed[n:]
+	}
+	res := &pb.ListInvitesResponse{}
+	if len(page) > invitePage {
+		page = page[:invitePage]
+		res.Next = keys[page[invitePage-1]].String()
+	}
+	creatorIDs := make([]gocql.UUID, 0, len(page))
+	for _, inv := range page {
 		if !slices.Contains(creatorIDs, inv.CreatedBy) {
 			creatorIDs = append(creatorIDs, inv.CreatedBy)
 		}
@@ -578,18 +685,17 @@ func (w *worker) listInvites(ctx context.Context, msg ListInvites) ([]*pb.Invite
 		}
 		active[id] = ok
 	}
-	out := make([]*pb.InviteSummary, 0, len(invs))
-	for _, inv := range invs {
+	for _, inv := range page {
 		s := &pb.InviteSummary{
-			Id: secure.PublicID(inv.TokenHash), CreatedAt: convert.Time(inv.CreatedAt), ExpiresAt: convert.Time(inv.ExpiresAt),
+			Id: keys[inv].id, CreatedAt: convert.Time(inv.CreatedAt), ExpiresAt: convert.Time(inv.ExpiresAt),
 			Active: active[inv.CreatedBy],
 		}
 		if u := creators[inv.CreatedBy]; u != nil {
 			s.CreatedBy = convert.PublicUser(u)
 		}
-		out = append(out, s)
+		res.Invites = append(res.Invites, s)
 	}
-	return out, nil
+	return res, nil
 }
 
 var inviteIDRe = regexp.MustCompile(`^[0-9a-f]{24}$`)
@@ -602,7 +708,9 @@ func (w *worker) revokeInvite(ctx context.Context, msg RevokeInvite) (Done, erro
 	if !inviteIDRe.MatchString(msg.InviteID) {
 		return Done{}, ierrors.InvalidArgument("invalid invite id")
 	}
-	invs, err := w.Repo.ListTeamInvites(ctx, teamID, maxListedInvites)
+	// The id is the start of the token hash, which orders the team's list.
+	prefix, _ := hex.DecodeString(msg.InviteID)
+	invs, err := w.Repo.FindTeamInvites(ctx, teamID, prefix)
 	if err != nil {
 		return Done{}, err
 	}

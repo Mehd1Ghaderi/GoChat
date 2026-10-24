@@ -39,7 +39,7 @@ func (h *Handler) searchPanel(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	h.fragment(w, http.StatusOK, "search", view)
+	h.fragment(w, r, http.StatusOK, "search", view)
 }
 
 // searchMore answers with the next page of results.
@@ -59,7 +59,7 @@ func (h *Handler) searchMore(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "search-page", view)
+	h.fragment(w, r, http.StatusOK, "search-page", view)
 }
 
 // search fills view with a page of results; a search the server refuses

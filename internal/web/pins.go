@@ -37,7 +37,7 @@ func (h *Handler) pinMessage(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "message", h.render.Message(res.Message, u, r.PostFormValue("mod") == "1"))
+	h.fragment(w, r, http.StatusOK, "message", h.render.Message(res.Message, u, r.PostFormValue("mod") == "1"))
 }
 
 // saveMessage saves a message for the caller, or with saved=0 drops it.
@@ -59,7 +59,7 @@ func (h *Handler) saveMessage(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "message", h.render.Message(res.Message, u, r.PostFormValue("mod") == "1"))
+	h.fragment(w, r, http.StatusOK, "message", h.render.Message(res.Message, u, r.PostFormValue("mod") == "1"))
 }
 
 // pinsPanel shows a channel's pinned messages in the side pane, or with
@@ -103,7 +103,7 @@ func (h *Handler) pinsPanel(w http.ResponseWriter, r *http.Request) {
 		hits[i] = &pb.SearchHit{Message: m, Channel: ch}
 	}
 	view := keptView{Team: team, Channel: ch, Title: render.Title(ch), Hits: render.Hits(team, hits, nil)}
-	h.fragment(w, http.StatusOK, listOr(r, "pins"), view)
+	h.fragment(w, r, http.StatusOK, listOr(r, "pins"), view)
 }
 
 // savedPanel shows what the caller saved in the team and their
@@ -119,7 +119,7 @@ func (h *Handler) savedPanel(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, listOr(r, "saved"), keptView{Team: team, Hits: render.Hits(team, res.Hits, nil)})
+	h.fragment(w, r, http.StatusOK, listOr(r, "saved"), keptView{Team: team, Hits: render.Hits(team, res.Hits, nil)})
 }
 
 func listOr(r *http.Request, pane string) string {

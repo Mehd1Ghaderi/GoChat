@@ -33,3 +33,19 @@ func TestSealer(t *testing.T) {
 		t.Fatal("short key accepted")
 	}
 }
+
+func TestMaskToken(t *testing.T) {
+	tok := Token()
+	a, b := MaskToken(tok), MaskToken(tok)
+	if a == b || a == tok {
+		t.Fatal("masks repeat")
+	}
+	for _, m := range []string{a, b} {
+		if got, ok := UnmaskToken(m); !ok || got != tok {
+			t.Fatalf("unmasked %q, want %q", got, tok)
+		}
+	}
+	if _, ok := UnmaskToken(tok); ok {
+		t.Fatal("unmasked a bare token")
+	}
+}

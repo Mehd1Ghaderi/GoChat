@@ -54,10 +54,14 @@ message ListTeamMembersRequest {
   // Case-insensitive prefix of the username or display name; empty lists all.
   string query = 2;
   uint32 limit = 3;
+  // after continues a listing from a response's next.
+  string after = 4;
 }
 
 message ListTeamMembersResponse {
   repeated TeamMember members = 1;
+  // next continues the listing; empty at its end.
+  string next = 2;
 }
 
 message RemoveTeamMemberRequest {
@@ -104,6 +108,8 @@ message AcceptInviteResponse {
 
 message ListInvitesRequest {
   string team_id = 1;
+  // after continues a listing from a response's next.
+  string after = 2;
 }
 
 // InviteSummary describes an open invite without its token.
@@ -119,6 +125,8 @@ message InviteSummary {
 
 message ListInvitesResponse {
   repeated InviteSummary invites = 1;
+  // next continues the listing; empty at its end.
+  string next = 2;
 }
 
 message RevokeInviteRequest {

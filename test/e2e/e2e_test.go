@@ -15,6 +15,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -265,21 +267,35 @@ func (s *socket) refuse(within time.Duration, part string) {
 }
 
 var (
-	inviteRe    = regexp.MustCompile(`/join/([A-Za-z0-9_-]{43})`)
-	channelRe   = regexp.MustCompile(`/t/[a-z0-9-]+/ch/([0-9a-f-]{36})`)
-	attRe       = regexp.MustCompile(`name="attachment" value="([0-9a-f-]{36})"`)
-	secretRe    = regexp.MustCompile(`<code>([A-Z2-7]{16,})</code>`)
-	codeRe      = regexp.MustCompile(`<code>([a-z2-7]{5}-[a-z2-7]{5})</code>`)
-	teamIDRe    = regexp.MustCompile(`data-team="([0-9a-f-]{36})"`)
-	msgIDRe     = regexp.MustCompile(`id="msg-([0-9a-f-]{36})"`)
-	newestRe    = regexp.MustCompile(`data-newest="([0-9a-f-]{36})"`)
-	offTopicRe  = regexp.MustCompile(`data-channel="([0-9a-f-]{36})"(?s:[^<]*>.{0,600}?)<span class="label">Off-Topic</span>`)
-	photoRe     = regexp.MustCompile(`/photos/([ut])/([0-9a-f-]{36})/([0-9a-f]{16})`)
-	staticCSSRe = regexp.MustCompile(`/static/[0-9a-f]+/app\.css`)
-	pickRe      = regexp.MustCompile(`data-pick="([0-9a-f-]{36})"`)
-	adminUserRe = regexp.MustCompile(`/admin/users/([0-9a-f-]{36})/`)
-	sessionRe   = regexp.MustCompile(`/settings/sessions/([0-9a-f]{24})/revoke`)
+	inviteRe      = regexp.MustCompile(`/join/([A-Za-z0-9_-]{43})`)
+	channelRe     = regexp.MustCompile(`/t/[a-z0-9-]+/ch/([0-9a-f-]{36})`)
+	attRe         = regexp.MustCompile(`name="attachment" value="([0-9a-f-]{36})"`)
+	secretRe      = regexp.MustCompile(`<code>([A-Z2-7]{16,})</code>`)
+	codeRe        = regexp.MustCompile(`<code>([a-z2-7]{5}-[a-z2-7]{5})</code>`)
+	teamIDRe      = regexp.MustCompile(`data-team="([0-9a-f-]{36})"`)
+	msgIDRe       = regexp.MustCompile(`id="msg-([0-9a-f-]{36})"`)
+	newestRe      = regexp.MustCompile(`data-newest="([0-9a-f-]{36})"`)
+	offTopicRe    = regexp.MustCompile(`data-channel="([0-9a-f-]{36})"(?s:[^<]*>.{0,600}?)<span class="label">Off-Topic</span>`)
+	photoRe       = regexp.MustCompile(`/photos/([ut])/([0-9a-f-]{36})/([0-9a-f]{16})`)
+	staticCSSRe   = regexp.MustCompile(`/static/[0-9a-f]+/app\.css`)
+	pickRe        = regexp.MustCompile(`data-pick="([0-9a-f-]{36})"`)
+	adminUserRe   = regexp.MustCompile(`/admin/users/([0-9a-f-]{36})/`)
+	sessionRe     = regexp.MustCompile(`/settings/sessions/([0-9a-f]{24})/revoke`)
+	memberRe      = regexp.MustCompile(`<small class="muted">@([a-z0-9._-]+)( · admin| · owner)?</small>`)
+	moreMembersRe = regexp.MustCompile(`class="older" hx-get="(/t/[a-z0-9-]+/members\?after=[^"]+)"`)
+	pageTokenRe   = regexp.MustCompile(`hx-headers='\{"X-CSRF-Token": "([A-Za-z0-9_-]+)"\}'`)
 )
+
+// userIDOf finds a team member's id with c's people search.
+func userIDOf(t *testing.T, c *client, name string) string {
+	t.Helper()
+	_, list := c.do(http.MethodGet, "/t/"+teamName+"/people/search?q="+url.QueryEscape(name), nil, "", true)
+	m := pickRe.FindStringSubmatch(list)
+	if m == nil {
+		t.Fatalf("no one found for %q: %s", name, list)
+	}
+	return m[1]
+}
 
 // bootstrap sets a fresh server up with the admin and the team the tests use.
 func bootstrap(t *testing.T, admin *client) {
@@ -586,6 +602,37 @@ func TestEndToEnd(t *testing.T) {
 		adminWS.send(map[string]string{"op": "typing", "channel_id": town})
 		bobWS.expect(5*time.Second, "is typing")
 		adminWS.refuse(time.Second, "is typing")
+	})
+
+	t.Run("a channel is marked unread once until read", func(t *testing.T) {
+		_, page := bob.get("/t/" + teamName + "/ch/" + town)
+		offTopic := offTopicRe.FindStringSubmatch(page)[1]
+		// Reading it clears its mentions, which would show instead.
+		view(bobWS, offTopic)
+		view(bobWS, town)
+		time.Sleep(300 * time.Millisecond)
+		mark := `id="unread-` + offTopic + `" class="dot on"`
+		for i := range 3 {
+			adminWS.send(map[string]string{"op": "post", "channel_id": offTopic, "content": "chatter " + strconv.Itoa(i)})
+		}
+		if n := strings.Count(strings.Join(bobWS.collect(2*time.Second), "\n"), mark); n != 1 {
+			t.Fatalf("marked unread %d times", n)
+		}
+		view(bobWS, offTopic)
+		view(bobWS, town)
+		time.Sleep(300 * time.Millisecond)
+		adminWS.send(map[string]string{"op": "post", "channel_id": offTopic, "content": "more chatter"})
+		bobWS.expect(5*time.Second, mark)
+	})
+
+	t.Run("typing reaches only who shows the channel", func(t *testing.T) {
+		_, page := bob.get("/t/" + teamName + "/ch/" + town)
+		offTopic := offTopicRe.FindStringSubmatch(page)[1]
+		view(bobWS, offTopic)
+		defer view(bobWS, town)
+		time.Sleep(300 * time.Millisecond)
+		adminWS.send(map[string]string{"op": "typing", "channel_id": town})
+		bobWS.refuse(time.Second, "is typing")
 	})
 
 	t.Run("attachments upload, post and download", func(t *testing.T) {
@@ -1079,6 +1126,58 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
+	t.Run("pages and sockets compress", func(t *testing.T) {
+		get := func(path string) *http.Response {
+			req, _ := http.NewRequest(http.MethodGet, baseURL+path, nil)
+			req.Header.Set("Accept-Encoding", "gzip")
+			res, err := admin.http.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = res.Body.Close()
+			return res
+		}
+		_, page := admin.get("/t/" + teamName + "/ch/" + town)
+		if res := get("/t/" + teamName + "/ch/" + town); res.Header.Get("Content-Encoding") != "gzip" {
+			t.Fatalf("page encoding %q", res.Header.Get("Content-Encoding"))
+		}
+		if res := get(staticCSSRe.FindString(page)); res.Header.Get("Content-Encoding") != "gzip" {
+			t.Fatalf("stylesheet encoding %q", res.Header.Get("Content-Encoding"))
+		}
+		// The page's token is masked, and works.
+		m := pageTokenRe.FindStringSubmatch(page)
+		if m == nil || m[1] == admin.cookie("gochat_csrf") {
+			t.Fatalf("the page carries its token bare: %v", m)
+		}
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/t/"+teamName+"/ch/"+town+"/mute", strings.NewReader("muted=0"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", baseURL)
+		req.Header.Set("HX-Request", "true")
+		req.Header.Set("X-CSRF-Token", m[1])
+		res, err := admin.http.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("the masked token was refused: %d", res.StatusCode)
+		}
+		h := http.Header{}
+		h.Set("Origin", baseURL)
+		h.Set("Cookie", "gochat_session="+admin.cookie("gochat_session"))
+		u, _ := url.Parse(baseURL)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		conn, res, err := websocket.Dial(ctx, "ws://"+u.Host+"/ws", &websocket.DialOptions{HTTPHeader: h, CompressionMode: websocket.CompressionNoContextTakeover})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = conn.CloseNow() }()
+		if ext := res.Header.Get("Sec-WebSocket-Extensions"); !strings.Contains(ext, "permessage-deflate") {
+			t.Fatalf("socket extensions %q", ext)
+		}
+	})
+
 	t.Run("members cannot invite", func(t *testing.T) {
 		res, _ := bob.hx("/t/"+teamName+"/invites", url.Values{})
 		if res.StatusCode != http.StatusForbidden {
@@ -1218,6 +1317,84 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
+	// members lists the team's members page by page, and its admins.
+	members := func(t *testing.T) (names, admins []string) {
+		t.Helper()
+		next := "/t/" + teamName + "/members"
+		for pages := 0; next != ""; pages++ {
+			if pages > 100 {
+				t.Fatal("the member list does not end")
+			}
+			res, body := admin.do(http.MethodGet, next, nil, "", true)
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("%s: %d %s", next, res.StatusCode, body)
+			}
+			for _, m := range memberRe.FindAllStringSubmatch(body, -1) {
+				names = append(names, m[1])
+				if m[2] != "" {
+					admins = append(admins, m[1])
+				}
+			}
+			next = ""
+			if m := moreMembersRe.FindStringSubmatch(body); m != nil {
+				next = html.UnescapeString(m[1])
+			}
+		}
+		return names, admins
+	}
+
+	t.Run("members and invites page", func(t *testing.T) {
+		names, _ := members(t)
+		if !slices.IsSorted(names) || len(slices.Compact(slices.Clone(names))) != len(names) || !slices.Contains(names, bobName) {
+			t.Fatalf("members listed out of order, twice or not at all: %v", names)
+		}
+		// A listing continues after the name given.
+		_, rows := admin.do(http.MethodGet, "/t/"+teamName+"/members?after="+url.QueryEscape(adminName), nil, "", true)
+		after := memberRe.FindAllStringSubmatch(rows, -1)
+		if len(after) == 0 || after[0][1] <= adminName {
+			t.Fatalf("the rows after %s: %s", adminName, rows)
+		}
+		if res, _ := admin.do(http.MethodGet, "/t/"+teamName+"/invites?after=nonsense", nil, "", true); res.StatusCode != http.StatusBadRequest {
+			t.Fatalf("a bad invite cursor: %d", res.StatusCode)
+		}
+	})
+
+	t.Run("a team keeps an admin", func(t *testing.T) {
+		if _, admins := members(t); !slices.Equal(admins, []string{adminName}) {
+			t.Skipf("the team has other admins: %v", admins)
+		}
+		bobID, adminID := userIDOf(t, admin, bobName), userIDOf(t, bob, adminName)
+		if res, body := admin.hx("/t/"+teamName+"/members/"+adminID+"/role", url.Values{"role": {"member"}}); res.StatusCode == http.StatusOK || !strings.Contains(body+res.Header.Get("X-Error"), "at least one admin") {
+			t.Fatalf("the last admin stepped down: %d %s", res.StatusCode, body)
+		}
+		admin.hx("/t/"+teamName+"/members/"+bobID+"/role", url.Values{"role": {"admin"}})
+		// Both step down at once: one of them stays.
+		codes := make(chan int, 2)
+		for _, c := range []struct {
+			by     *client
+			target string
+		}{{admin, adminID}, {bob, bobID}} {
+			go func() {
+				res, _ := c.by.hx("/t/"+teamName+"/members/"+c.target+"/role", url.Values{"role": {"member"}})
+				codes <- res.StatusCode
+			}()
+		}
+		ok := 0
+		for range 2 {
+			if <-codes == http.StatusOK {
+				ok++
+			}
+		}
+		if ok != 1 {
+			t.Fatalf("%d demotions went through", ok)
+		}
+		// Put the roles back: admin an admin, bob a member.
+		bob.hx("/t/"+teamName+"/members/"+adminID+"/role", url.Values{"role": {"admin"}})
+		if res, _ := admin.hx("/t/"+teamName+"/members/"+bobID+"/role", url.Values{"role": {"member"}}); res.StatusCode != http.StatusOK {
+			t.Fatalf("restoring the roles: %d", res.StatusCode)
+		}
+	})
+
 	t.Run("profile and team photos", func(t *testing.T) {
 		pic := image.NewRGBA(image.Rect(0, 0, 400, 300))
 		for i := range pic.Pix {
@@ -1306,10 +1483,25 @@ func TestEndToEnd(t *testing.T) {
 			t.Fatalf("no secret: %s", body)
 		}
 		code, _ := totp.GenerateCode(m[1], time.Now())
-		_, body = bob.hx("/settings/totp/confirm", url.Values{"code": {code}})
-		codes := codeRe.FindAllStringSubmatch(body, -1)
+		// Submitted twice at once, one shows the codes.
+		bodies := make(chan string, 2)
+		for range 2 {
+			go func() {
+				_, body := bob.hx("/settings/totp/confirm", url.Values{"code": {code}})
+				bodies <- body
+			}()
+		}
+		var codes [][]string
+		for range 2 {
+			if found := codeRe.FindAllStringSubmatch(<-bodies, -1); found != nil {
+				if codes != nil {
+					t.Fatal("both confirmations showed codes")
+				}
+				codes = found
+			}
+		}
 		if len(codes) != 10 {
-			t.Fatalf("no recovery codes: %s", body)
+			t.Fatalf("no recovery codes: %v", codes)
 		}
 		fresh := newClient(t, "bob2")
 		res, _ := fresh.form("/login", url.Values{"login": {bobName}, "password": {bobPass}})

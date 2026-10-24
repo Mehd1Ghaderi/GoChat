@@ -41,7 +41,7 @@ func (h *Handler) channelSettings(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, ierrors.PermissionDenied())
 		return
 	}
-	h.fragment(w, http.StatusOK, "channel-settings", channelSettingsData{Team: team, Channel: res.Channel, TeamAdmin: teamAdmin(u, team)})
+	h.fragment(w, r, http.StatusOK, "channel-settings", channelSettingsData{Team: team, Channel: res.Channel, TeamAdmin: teamAdmin(u, team)})
 }
 
 func (h *Handler) updateChannel(w http.ResponseWriter, r *http.Request) {
@@ -68,10 +68,10 @@ func (h *Handler) updateChannel(w http.ResponseWriter, r *http.Request) {
 		if cur, gerr := h.client.Channels.GetChannel(ctx, &pb.GetChannelRequest{ChannelId: chID}); gerr == nil {
 			ch.Type = cur.Channel.Type
 		}
-		h.fragment(w, http.StatusOK, "channel-settings", channelSettingsData{Team: team, Channel: ch, TeamAdmin: teamAdmin(u, team), Error: msg})
+		h.fragment(w, r, http.StatusOK, "channel-settings", channelSettingsData{Team: team, Channel: ch, TeamAdmin: teamAdmin(u, team), Error: msg})
 		return
 	}
-	h.fragment(w, http.StatusOK, "channel-settings", channelSettingsData{Team: team, Channel: res.Channel, TeamAdmin: teamAdmin(u, team), Status: "Saved."})
+	h.fragment(w, r, http.StatusOK, "channel-settings", channelSettingsData{Team: team, Channel: res.Channel, TeamAdmin: teamAdmin(u, team), Status: "Saved."})
 }
 
 // setChannelVoice lets the channel take voice messages, or stops it.
@@ -90,7 +90,7 @@ func (h *Handler) setChannelVoice(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "channel-settings", channelSettingsData{Team: team, Channel: res.Channel, TeamAdmin: teamAdmin(u, team), Status: "Saved."})
+	h.fragment(w, r, http.StatusOK, "channel-settings", channelSettingsData{Team: team, Channel: res.Channel, TeamAdmin: teamAdmin(u, team), Status: "Saved."})
 }
 
 func (h *Handler) channelPrivacy(w http.ResponseWriter, r *http.Request) {
@@ -113,7 +113,7 @@ func (h *Handler) channelPrivacy(w http.ResponseWriter, r *http.Request) {
 	if private {
 		status = "The channel is private now."
 	}
-	h.fragment(w, http.StatusOK, "channel-settings", channelSettingsData{Team: team, Channel: res.Channel, TeamAdmin: teamAdmin(u, team), Status: status})
+	h.fragment(w, r, http.StatusOK, "channel-settings", channelSettingsData{Team: team, Channel: res.Channel, TeamAdmin: teamAdmin(u, team), Status: status})
 }
 
 // archiveChannel archives or restores a channel and shows it again.

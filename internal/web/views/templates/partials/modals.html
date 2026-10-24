@@ -197,20 +197,25 @@
 {{define "team-members"}}
 {{template "modal-start" "Team members"}}
 <ul class="list">
-  {{range .Members}}
-  <li>
-    <div class="person">{{template "avatar" (dict "User" .User "Size" "sm")}}<span><strong>{{name .User}}</strong> <small class="muted">@{{.User.Username}}{{if eq .User.Id $.Team.OwnerId}} · owner{{else if eq .Role 2}} · admin{{end}}</small></span></div>
-    {{if $.CanChange .}}
-    <div class="row">
-      {{if eq .Role 2}}<button class="btn sm" hx-post="/t/{{$.Team.Name}}/members/{{.User.Id}}/role" hx-vals='{"role": "member"}' hx-target="#modal">Make member</button>
-      {{else}}<button class="btn sm" hx-post="/t/{{$.Team.Name}}/members/{{.User.Id}}/role" hx-vals='{"role": "admin"}' hx-target="#modal">Make admin</button>{{end}}
-      <button class="btn sm danger" hx-post="/t/{{$.Team.Name}}/members/{{.User.Id}}/remove" hx-confirm="Remove {{name .User}} from the team?" hx-target="closest li" hx-swap="outerHTML">Remove</button>
-    </div>
-    {{end}}
-  </li>
-  {{end}}
+  {{template "team-member-rows" .}}
 </ul>
 {{template "modal-end"}}
+{{end}}
+
+{{define "team-member-rows"}}
+{{range .Members}}
+<li>
+  <div class="person">{{template "avatar" (dict "User" .User "Size" "sm")}}<span><strong>{{name .User}}</strong> <small class="muted">@{{.User.Username}}{{if eq .User.Id $.Team.OwnerId}} · owner{{else if eq .Role 2}} · admin{{end}}</small></span></div>
+  {{if $.CanChange .}}
+  <div class="row">
+    {{if eq .Role 2}}<button class="btn sm" hx-post="/t/{{$.Team.Name}}/members/{{.User.Id}}/role" hx-vals='{"role": "member"}' hx-target="#modal">Make member</button>
+    {{else}}<button class="btn sm" hx-post="/t/{{$.Team.Name}}/members/{{.User.Id}}/role" hx-vals='{"role": "admin"}' hx-target="#modal">Make admin</button>{{end}}
+    <button class="btn sm danger" hx-post="/t/{{$.Team.Name}}/members/{{.User.Id}}/remove" hx-confirm="Remove {{name .User}} from the team?" hx-target="closest li" hx-swap="outerHTML">Remove</button>
+  </div>
+  {{end}}
+</li>
+{{end}}
+{{with .MoreURL}}<li class="older" hx-get="{{.}}" hx-trigger="intersect once" hx-swap="outerHTML"><span class="spinner" aria-label="Loading more members"></span></li>{{end}}
 {{end}}
 
 {{define "invite"}}
@@ -227,21 +232,26 @@
 <div id="invite-list"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>
   {{if .Invites}}
   <ul class="list">
-    {{range .Invites}}
-    <li>
-      <div class="meta">
-        <span>{{with .CreatedBy}}{{name .}}{{else}}Someone{{end}}</span>
-        <small class="muted">Created {{date .CreatedAt.AsTime}} · expires {{date .ExpiresAt.AsTime}}</small>
-        {{if not .Active}}<small class="muted">Suspended: its creator can no longer invite.</small>{{end}}
-      </div>
-      <button class="btn sm danger" hx-post="/t/{{$.Team.Name}}/invites/{{.Id}}/revoke" hx-confirm="Revoke this invite? Its link stops working." hx-target="#invite-list" hx-swap="outerHTML">Revoke</button>
-    </li>
-    {{end}}
+    {{template "invite-rows" .}}
   </ul>
   {{else}}
   <p class="muted">No open invites.</p>
   {{end}}
 </div>
+{{end}}
+
+{{define "invite-rows"}}
+{{range .Invites}}
+<li>
+  <div class="meta">
+    <span>{{with .CreatedBy}}{{name .}}{{else}}Someone{{end}}</span>
+    <small class="muted">Created {{date .CreatedAt.AsTime}} · expires {{date .ExpiresAt.AsTime}}</small>
+    {{if not .Active}}<small class="muted">Suspended: its creator can no longer invite.</small>{{end}}
+  </div>
+  <button class="btn sm danger" hx-post="/t/{{$.Team.Name}}/invites/{{.Id}}/revoke" hx-confirm="Revoke this invite? Its link stops working." hx-target="#invite-list" hx-swap="outerHTML">Revoke</button>
+</li>
+{{end}}
+{{with .MoreURL}}<li class="older" hx-get="{{.}}" hx-trigger="intersect once" hx-swap="outerHTML"><span class="spinner" aria-label="Loading more invites"></span></li>{{end}}
 {{end}}
 
 {{define "invite-link"}}

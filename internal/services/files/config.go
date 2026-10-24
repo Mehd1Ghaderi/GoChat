@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/ssenerg/gochat/internal/config"
+	"github.com/ssenerg/gochat/internal/repos/scylla"
 )
 
 type Config struct {
@@ -29,6 +30,10 @@ type Config struct {
 	JanitorInterval time.Duration `mapstructure:"janitor_interval"`
 }
 
+// MaxOrphanAfter leaves the janitor a week to find an orphan before its
+// pending row expires.
+const MaxOrphanAfter = scylla.PendingTTL / 2
+
 var _ config.Config = (*Config)(nil)
 
 func (c *Config) Validate() error {
@@ -50,8 +55,8 @@ func (c *Config) Validate() error {
 	if c.MaxVoiceSize < 1024 {
 		return errors.New("max_voice_size must be at least 1KiB")
 	}
-	if c.OrphanAfter < time.Hour || c.JanitorInterval < time.Minute {
-		return errors.New("orphan_after must be at least 1h and janitor_interval at least 1m")
+	if c.OrphanAfter < time.Hour || c.OrphanAfter > MaxOrphanAfter || c.JanitorInterval < time.Minute {
+		return errors.New("orphan_after must be between 1h and 168h, and janitor_interval at least 1m")
 	}
 	return nil
 }

@@ -90,7 +90,7 @@ func (h *Handler) adminCard(w http.ResponseWriter, r *http.Request, me *pb.User,
 	} else {
 		found.Status = ok
 	}
-	h.fragment(w, http.StatusOK, "admin-user", found)
+	h.fragment(w, r, http.StatusOK, "admin-user", found)
 }
 
 func (h *Handler) adminTarget(w http.ResponseWriter, r *http.Request) *pb.User {

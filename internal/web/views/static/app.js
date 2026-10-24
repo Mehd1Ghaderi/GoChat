@@ -21,11 +21,20 @@
     if (socket) socket.send(JSON.stringify(msg));
   }
 
+  // The sidebar the page came with, which its socket takes once rather
+  // than load it again.
+  function sidebarKey() {
+    var nav = document.getElementById("channel-lists");
+    var key = nav ? nav.dataset.sidebar || "" : "";
+    if (key) delete nav.dataset.sidebar;
+    return key;
+  }
+
   // Tell the server what this tab shows, so it knows where new messages go
   // and what to mark read.
   function announce(resync) {
     var v = place();
-    if (!v) return;
+    if (!v || !socket) return;
     send({
       op: "view",
       team_id: v.dataset.team,
@@ -34,7 +43,8 @@
       last_id: v.dataset.newest || "",
       moderator: v.dataset.moderator ? "1" : "",
       anchored: v.dataset.anchored ? "1" : "",
-      resync: resync ? "1" : ""
+      resync: resync ? "1" : "",
+      sidebar: sidebarKey()
     });
   }
 
