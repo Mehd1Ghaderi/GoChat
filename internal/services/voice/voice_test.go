@@ -272,6 +272,25 @@ func TestPeerLeftNeedsTheSameSession(t *testing.T) {
 	}
 }
 
+// A channel whose talk ended and started again keeps counting up: pages
+// drop any state older than the one they show.
+func TestVersionsOutliveTheRoom(t *testing.T) {
+	r := newRig(t, 10, gocql.UUID{})
+	r.serverUp("vs1")
+	room, p, q := ids.New(), r.user(), r.user()
+	r.connect(p, room, "vs1")
+	if _, err := r.ask(Leave{UserID: p.UserID}); err != nil {
+		t.Fatal(err)
+	}
+	if s := r.hub.last(t, room, 2); len(s.States) != 0 {
+		t.Fatalf("still talking: %v", users(s))
+	}
+	r.connect(q, room, "vs1")
+	if s := r.hub.last(t, room, 3); s.Version != 3 || len(s.States) != 1 || s.States[0].User.Id != q.UserID.String() {
+		t.Fatalf("the new talk started over: version %d, %v", s.Version, users(s))
+	}
+}
+
 func TestMuteKickRevokeAndDrop(t *testing.T) {
 	r := newRig(t, 10, gocql.UUID{})
 	r.serverUp("vs1")
