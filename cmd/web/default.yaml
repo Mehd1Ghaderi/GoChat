@@ -69,3 +69,8 @@ gateway:
   max_per_user: 20
   frame_rate: 10
   frame_burst: 40
+  attach_rate: 200
+  attach_burst: 100
+  resync_rate: 50
+  resync_burst: 50
+  resync_jitter: 5s

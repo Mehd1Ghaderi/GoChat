@@ -12,6 +12,7 @@ import (
 
 	"github.com/anthdm/hollywood/actor"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
 	"github.com/ssenerg/gochat/internal/actors"
 	"github.com/ssenerg/gochat/internal/client/drpc"
@@ -59,7 +60,10 @@ func Run(parent context.Context, cfg *Config) error {
 	events := actors.LogEvents(engine, logger.Named("actors"))
 	router := engine.Spawn(gateway.NewRouter(logger.Named("router"), client, cfg.Gateway), "router", actor.WithID("main"),
 		actor.WithMiddleware(actors.Recover(logger)))
-	deps := &gateway.Deps{Logger: logger.Named("session"), Cfg: cfg.Gateway, Client: client, Render: renderer, Router: router}
+	deps := &gateway.Deps{
+		Logger: logger.Named("session"), Cfg: cfg.Gateway, Client: client, Render: renderer, Router: router,
+		Resyncs: rate.NewLimiter(rate.Limit(cfg.Gateway.ResyncRate), cfg.Gateway.ResyncBurst),
+	}
 
 	handler := web.NewHandler(logger, cfg.Web, client, renderer, engine, deps)
 	server := web.NewServer(logger, cfg.Web.HTTP, handler.Routes())

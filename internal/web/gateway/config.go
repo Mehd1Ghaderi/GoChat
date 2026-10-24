@@ -27,6 +27,14 @@ type Config struct {
 	// FrameRate and FrameBurst bound how fast a browser may send.
 	FrameRate  float64 `mapstructure:"frame_rate"`
 	FrameBurst int     `mapstructure:"frame_burst"`
+	// AttachRate and AttachBurst pace the sockets attached to the server,
+	// and the Resync settings the pages reloaded after their socket came
+	// back, so a restart does not bring every page back at once.
+	AttachRate   float64       `mapstructure:"attach_rate"`
+	AttachBurst  int           `mapstructure:"attach_burst"`
+	ResyncRate   float64       `mapstructure:"resync_rate"`
+	ResyncBurst  int           `mapstructure:"resync_burst"`
+	ResyncJitter time.Duration `mapstructure:"resync_jitter"`
 }
 
 var _ config.Config = (*Config)(nil)
@@ -57,6 +65,12 @@ func (c *Config) Validate() error {
 	}
 	if c.FrameRate <= 0 || c.FrameBurst < 1 {
 		return errors.New("frame_rate and frame_burst must be positive")
+	}
+	if c.AttachRate <= 0 || c.AttachBurst < 1 || c.ResyncRate <= 0 || c.ResyncBurst < 1 {
+		return errors.New("attach_rate, attach_burst, resync_rate and resync_burst must be positive")
+	}
+	if c.ResyncJitter < 0 || c.ResyncJitter > time.Minute {
+		return errors.New("resync_jitter must be between 0 and 1m")
 	}
 	return nil
 }

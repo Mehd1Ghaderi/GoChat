@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"math/rand/v2"
 	"regexp"
 	"slices"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/anthdm/hollywood/actor"
 	"github.com/coder/websocket"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
@@ -38,6 +40,8 @@ type Deps struct {
 	Client *drpc.Client
 	Render *render.Renderer
 	Router *actor.PID
+	// Resyncs paces the pages reloaded after their socket came back.
+	Resyncs *rate.Limiter
 }
 
 // Frame is one message a browser sent over its socket, admitted by the
@@ -62,6 +66,7 @@ type (
 	refetched struct{ m *pb.Message }
 	failed    struct{ text string }
 	expired   struct{}
+	resyncDue struct{}
 	// viewChecked carries the newest message of the channel a tab opened.
 	viewChecked struct{ channelID, last string }
 	leftChannel struct{ channelID string }
@@ -110,6 +115,8 @@ type session struct {
 	// inThreads is set while the tab shows the threads it follows.
 	inThreads bool
 	resynced  string
+	// resyncing is set while a resync waits its turn.
+	resyncing bool
 	posts     chan *pb.PostMessageRequest
 	reads     map[string]string
 	flushing  bool
@@ -178,7 +185,7 @@ func (s *session) Receive(c *actor.Context) {
 		}
 		s.early = nil
 		if msg.Again {
-			s.resync(c)
+			s.resyncLater(c)
 		}
 		s.rpc(c, func(ctx context.Context) any {
 			res, err := s.Client.Channels.ListMutedChannels(ctx, &pb.ListMutedChannelsRequest{})
@@ -207,6 +214,9 @@ func (s *session) Receive(c *actor.Context) {
 		s.redirect("/login")
 	case Revoked, expired:
 		s.redirect("/login")
+	case resyncDue:
+		s.resyncing = false
+		s.resync(c)
 	case Event:
 		if s.user != nil {
 			s.event(c, msg.Event)
@@ -418,6 +428,22 @@ func (s *session) channelURL() string {
 	return "/t/" + s.teamName + "/ch/" + s.channelID
 }
 
+// resyncLater resyncs the page in its turn, after a random while, so the
+// pages of a restart do not all reload at once.
+func (s *session) resyncLater(c *actor.Context) {
+	if s.resyncing {
+		return
+	}
+	s.resyncing = true
+	self, engine := c.PID(), c.Engine()
+	time.AfterFunc(resyncWait(s.Resyncs, s.Cfg.ResyncJitter), func() { engine.Send(self, resyncDue{}) })
+}
+
+// resyncWait is how long a resync waits: its turn, then up to jitter more.
+func resyncWait(turns *rate.Limiter, jitter time.Duration) time.Duration {
+	return turns.Reserve().Delay() + rand.N(jitter+1) //nolint:gosec // jitter needs no secrecy
+}
+
 func (s *session) resync(c *actor.Context) {
 	if s.channelID == "" || s.teamName == "" {
 		return
@@ -583,7 +609,7 @@ func (s *session) view(c *actor.Context, f *clientFrame) {
 		s.markRead(c, f.ChannelID, f.LastID)
 	}
 	if f.Resync == "1" {
-		s.resync(c)
+		s.resyncLater(c)
 		return
 	}
 	chID := f.ChannelID
