@@ -48,6 +48,17 @@
 {{end}}
 
 {{define "attachment"}}
+{{if .Voice}}
+<li class="file voice">
+  <div class="voice-player" data-duration="{{.DurationMs}}">
+    <button type="button" class="voice-play" aria-label="Play voice message"><span class="when-paused">{{icon "play"}}</span><span class="when-playing">{{icon "pause"}}</span></button>
+    <input type="range" class="voice-seek" min="0" max="1000" step="1" value="0" aria-label="Position in the voice message">
+    <span class="voice-time">{{clockMS .DurationMs}}</span>
+    <audio preload="none" src="/files/{{.Id}}/inline"></audio>
+  </div>
+  <a href="/files/{{.Id}}" class="icon-btn sm voice-download" download aria-label="Download the voice message" title="Download">{{icon "download"}}</a>
+</li>
+{{else}}
 <li class="file">
   {{if isImage .ContentType}}
   <a href="/files/{{.Id}}" class="thumb" target="_blank" rel="noopener"><img src="/files/{{.Id}}/inline" alt="{{.Name}}" loading="lazy" decoding="async"></a>
@@ -58,6 +69,7 @@
     <small>{{size .Size}}</small>
   </a>
 </li>
+{{end}}
 {{end}}
 
 {{define "avatar"}}{{$u := .User}}{{if and $u $u.Photo}}<span class="avatar {{.Size}} {{avatar $u}}" aria-hidden="true"><img src="/photos/u/{{$u.Id}}/{{$u.Photo}}" alt="" loading="lazy" decoding="async"></span>{{else}}<span class="avatar {{.Size}} {{avatar $u}}" aria-hidden="true">{{initials $u}}</span>{{end}}{{end}}

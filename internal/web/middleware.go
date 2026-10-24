@@ -42,7 +42,7 @@ func (h *Handler) headers(next http.Handler) http.Handler {
 		hd.Set("Referrer-Policy", "same-origin")
 		hd.Set("Cross-Origin-Opener-Policy", "same-origin")
 		hd.Set("Cross-Origin-Resource-Policy", "same-origin")
-		hd.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()")
+		hd.Set("Permissions-Policy", "camera=(), microphone=(self), geolocation=(), payment=(), usb=(), interest-cohort=()")
 		if h.secure {
 			hd.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
 		}

@@ -972,6 +972,7 @@ type threadView struct {
 	Oldest  string
 	Title   string
 	Member  bool
+	Voice   bool
 }
 
 // threadPanel shows a thread, or with ?before its older replies.
@@ -1023,6 +1024,7 @@ func (h *Handler) threadPanel(w http.ResponseWriter, r *http.Request) {
 		HasMore: thread.HasMore,
 		Title:   render.Title(ch),
 		Member:  ch.Role != pb.ChannelRole_CHANNEL_ROLE_UNSPECIFIED,
+		Voice:   ch.VoiceEnabled,
 	}
 	if len(thread.Replies) > 0 {
 		view.Oldest = thread.Replies[0].Id

@@ -61,6 +61,7 @@
         <input type="file" name="file" multiple class="visually-hidden">{{icon "attach"}}
       </label>
     </form>
+    {{template "voice-slot" (dict "Channel" .Channel.Id "Enabled" .Channel.VoiceEnabled)}}
     <form id="composer" class="composer" ws-send>
       <input type="hidden" name="op" value="post">
       <input type="hidden" name="channel_id" value="{{.Channel.Id}}">
@@ -69,14 +70,27 @@
       <button class="send" type="submit" aria-label="Send">{{icon "send"}}</button>
     </form>
   </div>
+  {{template "recorder"}}
   <progress class="upload-progress" max="100" value="0" hidden></progress>
 </div>
 {{end}}
 
+{{define "voice-slot"}}<span class="voice-slot" data-voice-for="{{.Channel}}"{{if .OOB}} hx-swap-oob="outerHTML:.voice-slot[data-voice-for='{{.Channel}}']"{{end}}>{{if .Enabled}}<button type="button" class="icon-btn voice-record" aria-label="Record a voice message" title="Record a voice message">{{icon "mic"}}</button>{{end}}</span>{{end}}
+
+{{define "recorder"}}
+<div class="recorder" hidden>
+  <button type="button" class="icon-btn recorder-cancel" aria-label="Discard the recording" title="Discard">{{icon "trash"}}</button>
+  <span class="rec-dot" aria-hidden="true"></span>
+  <span class="rec-time">0:00</span>
+  <span class="rec-label">Recording…</span>
+  <button type="button" class="send recorder-send" aria-label="Send the voice message" title="Send">{{icon "send"}}</button>
+</div>
+{{end}}
+
 {{define "chip"}}
-<span class="chip">
+<span class="chip{{if .Voice}} voice{{end}}">
   <input type="hidden" name="attachment" value="{{.Id}}" form="{{.Form}}">
-  <span class="chip-name">{{.Name}}</span><small>{{size .Size}}</small>
+  {{if .Voice}}<span class="chip-name">{{icon "mic"}} Voice message</span><small>{{clockMS .DurationMs}}</small>{{else}}<span class="chip-name">{{.Name}}</span><small>{{size .Size}}</small>{{end}}
   <button type="button" class="chip-remove" aria-label="Remove {{.Name}}">{{icon "close"}}</button>
 </span>
 {{end}}
@@ -110,6 +124,7 @@
           <input type="file" name="file" multiple class="visually-hidden">{{icon "attach"}}
         </label>
       </form>
+      {{template "voice-slot" (dict "Channel" .Root.ChannelId "Enabled" .Voice)}}
       <form id="reply-composer" class="composer" ws-send>
         <input type="hidden" name="op" value="post">
         <input type="hidden" name="channel_id" value="{{.Root.ChannelId}}">
@@ -118,6 +133,7 @@
         <button class="send" type="submit" aria-label="Send reply">{{icon "send"}}</button>
       </form>
     </div>
+    {{template "recorder"}}
     <progress class="upload-progress" max="100" value="0" hidden></progress>
   </div>
   {{end}}

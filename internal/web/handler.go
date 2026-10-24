@@ -78,6 +78,7 @@ func NewHandler(logger *zap.Logger, cfg *Config, client *drpc.Client, r *render.
 		"script-src 'self'",
 		"style-src 'self'",
 		"img-src 'self' data:",
+		"media-src 'self'",
 		"connect-src 'self' " + h.wsOrig,
 		"form-action 'self'",
 		"frame-ancestors 'none'",

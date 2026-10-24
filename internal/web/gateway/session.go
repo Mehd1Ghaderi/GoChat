@@ -643,6 +643,12 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 		if s.sidebar[p.ChannelMuted.ChannelId] {
 			s.loadSidebar(c, true)
 		}
+	case *pb.Event_ChannelUpdated:
+		// The composers of the channel on show offer voice only while it
+		// takes voice messages.
+		if d := p.ChannelUpdated; d.ChannelId == s.channelID {
+			s.fragment("voice-slot", map[string]any{"Channel": d.ChannelId, "Enabled": d.VoiceEnabled, "OOB": true})
+		}
 	case *pb.Event_ReactionsChanged:
 		d := p.ReactionsChanged
 		if (d.RootId == "" && d.ChannelId == s.channelID) || (d.RootId != "" && d.RootId == s.threadID) {

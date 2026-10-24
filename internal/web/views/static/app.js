@@ -46,6 +46,7 @@
     var pane = document.getElementById("thread");
     if (!pane || pane.innerHTML === "") return false;
     pane.innerHTML = "";
+    dropDetachedRecording();
     announceThread();
     return true;
   }
@@ -255,6 +256,241 @@
     ta.focus();
   }
 
+  // Voice messages: record from the microphone, upload the recording as a
+  // voice attachment and send it at once.
+  var maxVoiceMs = 10 * 60 * 1000; // the server's default files.max_voice_duration
+  var minVoiceMs = 500;
+  var rec = null;
+
+  function minutes(ms) {
+    var s = Math.max(0, Math.round(ms / 1000));
+    var m = Math.floor(s / 60);
+    s %= 60;
+    return m + ":" + (s < 10 ? "0" : "") + s;
+  }
+
+  function fail(text) {
+    toast(text, "error");
+    expireToasts();
+  }
+
+  // The first container the browser records voice in that the server takes:
+  // WebM or Ogg with Opus, or Safari's MP4.
+  function voiceType() {
+    if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) return "";
+    var types = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4", "audio/webm"];
+    for (var i = 0; i < types.length; i++) {
+      if (MediaRecorder.isTypeSupported(types[i])) return types[i];
+    }
+    return "";
+  }
+
+  function stopTracks(stream) {
+    if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
+  }
+
+  function startRecording(button) {
+    if (rec) return;
+    var wrap = button.closest(".composer-wrap");
+    var form = wrap && wrap.querySelector("form.composer");
+    var panel = wrap && wrap.querySelector(".recorder");
+    if (!form || !panel) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+      fail("This browser cannot record voice messages.");
+      return;
+    }
+    var state = { wrap: wrap, form: form, panel: panel, chunks: [], started: 0, cancelled: false };
+    rec = state;
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      // Cancelled while the browser asked for the microphone.
+      if (rec !== state) {
+        stopTracks(stream);
+        return;
+      }
+      state.stream = stream;
+      var type = voiceType();
+      try {
+        state.recorder = type ? new MediaRecorder(stream, { mimeType: type }) : new MediaRecorder(stream);
+      } catch (err) {
+        rec = null;
+        stopTracks(stream);
+        fail("This browser cannot record voice messages.");
+        return;
+      }
+      state.recorder.ondataavailable = function (e) {
+        if (e.data && e.data.size) state.chunks.push(e.data);
+      };
+      state.recorder.onstop = function () { finishRecording(state); };
+      state.recorder.start(1000);
+      state.started = Date.now();
+      wrap.classList.add("recording");
+      panel.hidden = false;
+      tickRecording(state);
+      state.timer = setInterval(function () { tickRecording(state); }, 250);
+      var send = panel.querySelector(".recorder-send");
+      if (send) send.focus();
+    }, function () {
+      if (rec === state) rec = null;
+      fail("Allow this site to use the microphone to record voice messages.");
+    });
+  }
+
+  function tickRecording(state) {
+    var ms = Date.now() - state.started;
+    var time = state.panel.querySelector(".rec-time");
+    if (time) time.textContent = minutes(ms);
+    if (ms >= maxVoiceMs) stopRecording(false);
+  }
+
+  // stopRecording ends the recording under way, sending it unless cancel.
+  function stopRecording(cancel) {
+    var state = rec;
+    if (!state) return;
+    rec = null;
+    state.cancelled = cancel;
+    state.duration = state.started ? Math.min(Date.now() - state.started, maxVoiceMs) : 0;
+    clearInterval(state.timer);
+    state.wrap.classList.remove("recording");
+    state.panel.hidden = true;
+    if (state.recorder && state.recorder.state !== "inactive") state.recorder.stop();
+    else stopTracks(state.stream);
+  }
+
+  // A recording whose composer left the page goes with it.
+  function dropDetachedRecording() {
+    if (rec && !document.body.contains(rec.wrap)) stopRecording(true);
+  }
+
+  function finishRecording(state) {
+    stopTracks(state.stream);
+    if (state.cancelled) return;
+    if (state.duration < minVoiceMs || !state.chunks.length) {
+      fail("The voice message is too short: hold on a little longer.");
+      return;
+    }
+    var type = (state.recorder.mimeType || state.chunks[0].type || "audio/webm").split(";")[0];
+    uploadVoice(state, new Blob(state.chunks, { type: type }));
+  }
+
+  function voiceName(type) {
+    if (type.indexOf("ogg") >= 0) return "voice-message.ogg";
+    if (type.indexOf("mp4") >= 0) return "voice-message.m4a";
+    return "voice-message.webm";
+  }
+
+  function uploadVoice(state, blob) {
+    var form = state.form;
+    var pending = state.wrap.querySelector(".pending");
+    var bar = state.wrap.querySelector(".upload-progress");
+    var headers = {};
+    try {
+      headers = JSON.parse(document.body.getAttribute("hx-headers") || "{}");
+    } catch (e) { /* no token: the server refuses the upload */ }
+    headers["HX-Request"] = "true";
+    var body = new FormData();
+    body.append("file", blob, voiceName(blob.type));
+    var url = "/upload?channel=" + encodeURIComponent(form.elements.channel_id.value) +
+      "&form=" + encodeURIComponent(form.id) + "&voice=1&duration=" + Math.round(state.duration);
+    if (bar) {
+      bar.hidden = false;
+      bar.removeAttribute("value");
+    }
+    fetch(url, { method: "POST", body: body, headers: headers, credentials: "same-origin" })
+      .then(function (r) {
+        if (r.status === 401) {
+          window.location.assign("/login");
+          return null;
+        }
+        if (!r.ok) throw new Error(r.headers.get("X-Error") || "The voice message could not be sent.");
+        return r.text();
+      })
+      .then(function (html) {
+        if (html === null || !document.body.contains(form)) return;
+        if (pending) pending.insertAdjacentHTML("beforeend", html);
+        form.requestSubmit();
+      })
+      .catch(function (err) {
+        fail(err instanceof TypeError ? "You appear to be offline." : err.message);
+      })
+      .then(function () {
+        if (bar) {
+          bar.hidden = true;
+          bar.value = 0;
+        }
+      });
+  }
+
+  // The player of a voice message: one plays at a time; its length comes
+  // from the recorder when the file does not say, as WebM from
+  // MediaRecorder does not.
+  function voiceLength(player, audio) {
+    var d = audio.duration;
+    if (isFinite(d) && d > 0) return d;
+    return (parseInt(player.dataset.duration, 10) || 0) / 1000;
+  }
+
+  function showVoice(player) {
+    var audio = player.querySelector("audio");
+    var seek = player.querySelector(".voice-seek");
+    var time = player.querySelector(".voice-time");
+    var total = voiceLength(player, audio);
+    var at = audio.currentTime || 0;
+    var playing = !audio.paused && !audio.ended;
+    player.classList.toggle("playing", playing);
+    var button = player.querySelector(".voice-play");
+    if (button) button.setAttribute("aria-label", playing ? "Pause voice message" : "Play voice message");
+    if (seek) {
+      var at1000 = total ? Math.min(1000, Math.round((at / total) * 1000)) : 0;
+      seek.value = String(at1000);
+      seek.style.setProperty("--at", at1000 / 10 + "%");
+    }
+    if (time) time.textContent = minutes((at > 0 ? at : total) * 1000);
+  }
+
+  function toggleVoice(button) {
+    var player = button.closest(".voice-player");
+    var audio = player && player.querySelector("audio");
+    if (!audio) return;
+    if (!audio.paused) {
+      audio.pause();
+      return;
+    }
+    var playing = audio.play();
+    if (playing && playing.catch) {
+      playing.catch(function (err) {
+        if (err && err.name === "NotSupportedError") fail("This browser cannot play this voice message: download it instead.");
+      });
+    }
+  }
+
+  function seekVoice(input) {
+    var player = input.closest(".voice-player");
+    var audio = player && player.querySelector("audio");
+    if (!audio) return;
+    var total = voiceLength(player, audio);
+    if (total && audio.seekable && audio.seekable.length) {
+      audio.currentTime = Math.min(total, (parseInt(input.value, 10) / 1000) * total);
+    }
+    showVoice(player);
+  }
+
+  // Media events do not bubble: they are caught on their way down.
+  ["play", "pause", "ended", "timeupdate", "loadedmetadata", "durationchange"].forEach(function (type) {
+    document.addEventListener(type, function (e) {
+      var audio = e.target;
+      if (!(audio instanceof HTMLAudioElement)) return;
+      var player = audio.closest(".voice-player");
+      if (!player) return;
+      if (type === "play") {
+        document.querySelectorAll(".voice-player audio").forEach(function (other) {
+          if (other !== audio && !other.paused) other.pause();
+        });
+      }
+      if (type === "ended") audio.currentTime = 0;
+      showVoice(player);
+    }, true);
+  });
+
   htmx.onLoad(function (elt) {
     localTimes(elt);
   });
@@ -285,6 +521,7 @@
   });
 
   document.body.addEventListener("htmx:afterSwap", function (e) {
+    dropDetachedRecording();
     if (e.detail.target && e.detail.target.id === "thread") {
       announceThread();
       scrollThread(true);
@@ -390,6 +627,24 @@
       closeModal();
       return;
     }
+    var record = target.closest(".voice-record");
+    if (record) {
+      startRecording(record);
+      return;
+    }
+    if (target.closest(".recorder-cancel")) {
+      stopRecording(true);
+      return;
+    }
+    if (target.closest(".recorder-send")) {
+      stopRecording(false);
+      return;
+    }
+    var play = target.closest(".voice-play");
+    if (play) {
+      toggleVoice(play);
+      return;
+    }
     var remove = target.closest(".chip-remove");
     if (remove) {
       remove.closest(".chip").remove();
@@ -437,6 +692,10 @@
 
   document.addEventListener("keydown", function (e) {
     var t = e.target;
+    if (rec && e.key === "Escape") {
+      stopRecording(true);
+      return;
+    }
     var box = t instanceof HTMLTextAreaElement && isComposer(t.form) ? suggestBox(t) : null;
     if (box && !box.hidden) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -475,6 +734,10 @@
   var lastTyping = 0;
   document.addEventListener("input", function (e) {
     var t = e.target;
+    if (t instanceof HTMLInputElement && t.classList.contains("voice-seek")) {
+      seekVoice(t);
+      return;
+    }
     if (!(t instanceof HTMLTextAreaElement) || !isComposer(t.form)) return;
     updateSuggest(t);
     t.style.height = "auto";

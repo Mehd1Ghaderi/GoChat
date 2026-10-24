@@ -32,6 +32,9 @@ var icons = map[string]string{
 	"bell-off": `<path d="M9 5.9A5.5 5.5 0 0 1 17.5 11v4M6.5 9.6V16.5L5 18h12M10 20.5a2.2 2.2 0 0 0 4 0M4 4l16 16"/>`,
 	"smile":    `<circle cx="12" cy="12" r="8.5"/><path d="M8.6 14.2a4.2 4.2 0 0 0 6.8 0"/><circle cx="9.3" cy="10" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.7" cy="10" r="1.1" fill="currentColor" stroke="none"/>`,
 	"reply":    `<path d="M10 7L5 12l5 5"/><path d="M5 12h8.5a5.5 5.5 0 0 1 5.5 5.5V19"/>`,
+	"mic":      `<rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5M9 20.5h6"/>`,
+	"play":     `<path d="M8.5 5.8v12.4a.8.8 0 0 0 1.2.7l9.6-6.2a.8.8 0 0 0 0-1.4L9.7 5.1a.8.8 0 0 0-1.2.7z" fill="currentColor"/>`,
+	"pause":    `<rect x="7" y="5.5" width="3.5" height="13" rx="1" fill="currentColor"/><rect x="13.5" y="5.5" width="3.5" height="13" rx="1" fill="currentColor"/>`,
 	"browse":   `<path d="M4 6h16M4 12h10M4 18h7"/><circle cx="17.5" cy="16.5" r="2.5"/><path d="M19.5 18.5L21 20"/>`,
 }
 
