@@ -83,6 +83,7 @@ jobs:
           STORAGE_MINIO_ACCESS_KEY=gochat
           STORAGE_MINIO_SECRET_KEY=$(openssl rand -hex 24)
           GATEWAY_KEY=$(openssl rand -hex 32)
+          VOICE_SERVER_KEY=$(openssl rand -hex 32)
           SERVICES_ACCOUNTS_SECRET_KEY=$(openssl rand -base64 32)
           SERVICES_ACCOUNTS_SETUP_TOKEN=$setup
           WEB_PUBLIC_URL=http://localhost:8080

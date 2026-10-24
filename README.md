@@ -138,7 +138,9 @@ A channel takes at most 25 people.
   encrypted in transit between each browser and the voice server
   (DTLS-SRTP); the voice server itself can hear it, as Discord's can.
 - Server API: every DRPC call carries the shared gateway key (checked in
-  constant time) and the user's session; errors returned to gateways never
+  constant time) and the user's session; voice servers hold a key of their
+  own, which opens only their link to the server, so the internet-facing
+  voice server never holds the key that acts for users; errors returned to gateways never
   carry internal causes. TLS and client certificates are supported on the DRPC
   link and on the Scylla connection.
 
@@ -154,7 +156,8 @@ cp .env.template .env
 ```
 
 Fill in `.env`: database and MinIO credentials, a `GATEWAY_KEY` of at least 32
-characters, a `SERVICES_ACCOUNTS_SECRET_KEY` from `openssl rand -base64 32` and
+characters, a different `VOICE_SERVER_KEY` for voice channels from
+`openssl rand -hex 32`, a `SERVICES_ACCOUNTS_SECRET_KEY` from `openssl rand -base64 32` and
 a `SERVICES_ACCOUNTS_SETUP_TOKEN` from `openssl rand -hex 24`.
 If Docker Hub is not reachable, set `DOCKER_REGISTRY` to a mirror such as
 `mirror.gcr.io/`.
@@ -291,7 +294,8 @@ doing so.
 
 ### Voice in production
 
-Voice needs the server to have a public IP address. Two things must reach the
+Voice needs the server to have a public IP address and a `VOICE_SERVER_KEY` in
+`.env` (`openssl rand -hex 32`, not the gateway key). Two things must reach the
 voice server:
 
 1. **The signaling websocket** (`VOICE_BIND:VOICE_PORT`, 127.0.0.1:8090),
@@ -357,7 +361,8 @@ Secrets that should come from the environment:
 | `DATABASE_SCYLLA_ADMIN_USERNAME`, `DATABASE_SCYLLA_ADMIN_PASSWORD` | migrate, scylla-init |
 | `STORAGE_MINIO_ACCESS_KEY`, `STORAGE_MINIO_SECRET_KEY` | server (the app's account) |
 | `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` | minio, minio-init |
-| `SERVER_DRPC_GATEWAY_KEY` / `CLIENT_DRPC_GATEWAY_KEY` | server / web and voice (same value) |
+| `SERVER_DRPC_GATEWAY_KEY` / `CLIENT_DRPC_GATEWAY_KEY` | server / web (same value) |
+| `SERVER_DRPC_VOICE_SERVER_KEY` / `CLIENT_DRPC_GATEWAY_KEY` | server / voice (same value, not the gateway key) |
 | `VOICE_ICE_TURN_SECRET` (optional) | voice |
 | `SERVICES_ACCOUNTS_SECRET_KEY` | server |
 | `SERVICES_ACCOUNTS_SETUP_TOKEN` (until the first account exists) | server |

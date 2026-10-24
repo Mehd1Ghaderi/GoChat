@@ -25,11 +25,14 @@ const (
 	MetaUserAgent  = "x-user-agent"
 )
 
+// voiceServerRPC is the one call voice servers make.
+const voiceServerRPC = "/gochat.v1.VoiceServerService/Connect"
+
 var streaming = map[string]bool{
-	"/gochat.v1.GatewayService/Connect":     true,
-	"/gochat.v1.VoiceServerService/Connect": true,
-	"/gochat.v1.FileService/Upload":         true,
-	"/gochat.v1.FileService/Download":       true,
+	"/gochat.v1.GatewayService/Connect": true,
+	voiceServerRPC:                      true,
+	"/gochat.v1.FileService/Upload":     true,
+	"/gochat.v1.FileService/Download":   true,
 }
 
 type principalKey struct{}
@@ -84,8 +87,8 @@ func Guard(logger *zap.Logger, cfg *Config, resolve Resolver) func(drpc.Handler)
 			}()
 			ctx := stream.Context()
 			md, _ := drpcmetadata.Get(ctx)
-			if !secure.Equal(md[MetaGatewayKey], cfg.GatewayKey) {
-				logger.Warn("call without a valid gateway key", zap.String("rpc", rpc))
+			if !keyAllows(cfg, rpc, md[MetaGatewayKey]) {
+				logger.Warn("call without a valid key", zap.String("rpc", rpc))
 				return ierrors.Unauthenticated()
 			}
 			ctx = context.WithValue(ctx, clientKey{}, Client{IP: md[MetaClientIP], UserAgent: md[MetaUserAgent]})
@@ -106,6 +109,18 @@ func Guard(logger *zap.Logger, cfg *Config, resolve Resolver) func(drpc.Handler)
 			return next.HandleRPC(&ctxStream{Stream: stream, ctx: ctx}, rpc)
 		})
 	}
+}
+
+// keyAllows reports whether sent is the key rpc takes: the voice servers'
+// for their link, the gateways' for every other call. Neither opens the
+// other's calls, so a voice server, which faces the internet, holds nothing
+// that acts for a user, and a gateway cannot pose as a voice server.
+func keyAllows(cfg *Config, rpc, sent string) bool {
+	want := cfg.GatewayKey
+	if rpc == voiceServerRPC {
+		want = cfg.VoiceServerKey
+	}
+	return want != "" && secure.Equal(sent, want)
 }
 
 type handlerFunc func(stream drpc.Stream, rpc string) error

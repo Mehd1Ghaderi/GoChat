@@ -11,7 +11,10 @@ import (
 type Config struct {
 	Address string `mapstructure:"address"`
 	// GatewayKey is the secret every web gateway presents on every call.
-	GatewayKey        string        `mapstructure:"gateway_key"`
+	GatewayKey string `mapstructure:"gateway_key"`
+	// VoiceServerKey is the secret voice servers present, which opens only
+	// their link and never a gateway's calls. Empty refuses voice servers.
+	VoiceServerKey    string        `mapstructure:"voice_server_key"`
 	TLS               *TLSConfig    `mapstructure:"tls"`
 	MaxMessageSize    int           `mapstructure:"max_message_size"`
 	MaxConnections    int           `mapstructure:"max_connections"`
@@ -39,6 +42,9 @@ func (c *Config) Validate() error {
 	}
 	if len(c.GatewayKey) < 32 {
 		return errors.New("gateway_key must be at least 32 characters")
+	}
+	if c.VoiceServerKey != "" && (len(c.VoiceServerKey) < 32 || c.VoiceServerKey == c.GatewayKey) {
+		return errors.New("voice_server_key must be at least 32 characters and differ from gateway_key")
 	}
 	if c.TLS == nil {
 		return errors.New("tls is required")

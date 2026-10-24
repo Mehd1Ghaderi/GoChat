@@ -76,9 +76,17 @@ func TestUnidentifiedConnectionsAreBounded(t *testing.T) {
 	if _, _, err := first.Read(ctx); websocket.CloseStatus(err) != closeIdentify {
 		t.Fatalf("not closed for want of identify: %v", err)
 	}
-	c, _, err := dial(ts, "http://chat.test")
-	if err != nil {
-		t.Fatalf("the place was not freed: %v", err)
+	// The place frees once the server's read returns, a moment after the
+	// browser sees the close.
+	for {
+		c, _, err := dial(ts, "http://chat.test")
+		if err == nil {
+			_ = c.CloseNow()
+			return
+		}
+		if ctx.Err() != nil {
+			t.Fatalf("the place was not freed: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	_ = c.CloseNow()
 }
