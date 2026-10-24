@@ -26,7 +26,22 @@
     <label class="inline"><input type="radio" name="type" value="public" checked> Public: anyone in the team</label>
     <label class="inline"><input type="radio" name="type" value="private"> Private: by invitation only</label>
   </fieldset>
+  <label class="inline"><input type="checkbox" name="voice" value="1" checked> Allow voice messages</label>
   <button class="btn primary" type="submit">Create</button>
+</form>
+{{template "modal-end"}}
+{{end}}
+
+{{define "channel-settings"}}
+{{template "modal-start" "Channel settings"}}
+<form hx-post="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/voice" hx-target="#modal" class="stack">
+  <fieldset class="choice">
+    <legend>Voice messages</legend>
+    <label class="inline"><input type="radio" name="enabled" value="1"{{if .Channel.VoiceEnabled}} checked{{end}}> On: members can record and send voice messages</label>
+    <label class="inline"><input type="radio" name="enabled" value="0"{{if not .Channel.VoiceEnabled}} checked{{end}}> Off: nobody can send new ones; those sent stay</label>
+  </fieldset>
+  {{if .Saved}}<p class="status ok" role="status">Saved.</p>{{end}}
+  <button class="btn primary" type="submit">Save</button>
 </form>
 {{template "modal-end"}}
 {{end}}

@@ -403,7 +403,7 @@ func (h *Handler) createChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := h.client.Channels.CreateChannel(ctx, &pb.CreateChannelRequest{
 		TeamId: team.Id, Name: r.PostFormValue("name"), DisplayName: r.PostFormValue("display_name"),
-		Purpose: r.PostFormValue("purpose"), Type: kind,
+		Purpose: r.PostFormValue("purpose"), Type: kind, VoiceDisabled: r.PostFormValue("voice") != "1",
 	})
 	if err != nil {
 		if msg, ok := formError(err); ok {
@@ -479,6 +479,55 @@ func (h *Handler) leaveChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.navigate(w, r, "/t/"+team.Name+"/ch/"+next, true)
+}
+
+type channelSettingsData struct {
+	Team    *pb.Team
+	Channel *pb.Channel
+	Saved   bool
+}
+
+// channelSettings shows the settings of a channel to those who may change
+// them.
+func (h *Handler) channelSettings(w http.ResponseWriter, r *http.Request) {
+	u, team, ctx, cancel := h.teamFor(w, r)
+	if team == nil {
+		return
+	}
+	defer cancel()
+	chID, ok := h.channelTarget(w, r)
+	if !ok {
+		return
+	}
+	res, err := h.client.Channels.GetChannel(ctx, &pb.GetChannelRequest{ChannelId: chID})
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	ch := res.Channel
+	if ch.TeamId != team.Id || ch.Role == pb.ChannelRole_CHANNEL_ROLE_UNSPECIFIED || !moderator(u, team, ch) {
+		h.fail(w, r, ierrors.PermissionDenied())
+		return
+	}
+	h.fragment(w, http.StatusOK, "channel-settings", channelSettingsData{Team: team, Channel: ch})
+}
+
+func (h *Handler) setChannelVoice(w http.ResponseWriter, r *http.Request) {
+	_, team, ctx, cancel := h.teamFor(w, r)
+	if team == nil {
+		return
+	}
+	defer cancel()
+	chID, ok := h.channelTarget(w, r)
+	if !ok {
+		return
+	}
+	res, err := h.client.Channels.SetChannelVoice(ctx, &pb.SetChannelVoiceRequest{ChannelId: chID, Enabled: r.PostFormValue("enabled") == "1"})
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	h.fragment(w, http.StatusOK, "channel-settings", channelSettingsData{Team: team, Channel: res.Channel, Saved: true})
 }
 
 type peopleData struct {

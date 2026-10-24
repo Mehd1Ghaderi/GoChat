@@ -9,6 +9,7 @@
     <div class="channel-actions">
       {{if .Member}}{{template "mute-button" (dict "Team" .Team.Name "Channel" .Channel.Id "Muted" .Channel.Muted)}}{{end}}
       {{if and .Member (not (isDirect .Channel))}}
+      {{if .Moderator}}<button class="icon-btn" hx-get="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/settings" hx-target="#modal" aria-label="Channel settings" title="Channel settings">{{icon "settings"}}</button>{{end}}
       <button class="icon-btn" hx-get="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/members" hx-target="#modal" aria-label="Members" title="Members">{{icon "members"}}</button>
       {{if ne .Channel.Name "town-square"}}
       <button class="icon-btn" hx-post="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/leave" hx-confirm="Leave this channel?" aria-label="Leave channel" title="Leave channel">{{icon "leave"}}</button>

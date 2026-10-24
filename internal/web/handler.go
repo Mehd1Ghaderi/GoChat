@@ -117,6 +117,8 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("POST /t/{team}/ch/{channel}/members/{user}/remove", h.csrf(http.HandlerFunc(h.removeMember)))
 	mux.Handle("POST /t/{team}/ch/{channel}/join", h.csrf(http.HandlerFunc(h.joinChannel)))
 	mux.Handle("POST /t/{team}/ch/{channel}/leave", h.csrf(http.HandlerFunc(h.leaveChannel)))
+	mux.HandleFunc("GET /t/{team}/ch/{channel}/settings", h.channelSettings)
+	mux.Handle("POST /t/{team}/ch/{channel}/voice", h.csrf(http.HandlerFunc(h.setChannelVoice)))
 	mux.HandleFunc("GET /t/{team}/channels/new", h.newChannelModal)
 	mux.Handle("POST /t/{team}/channels", h.csrf(http.HandlerFunc(h.createChannel)))
 	mux.HandleFunc("GET /t/{team}/channels/browse", h.browseModal)
