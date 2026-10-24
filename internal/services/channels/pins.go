@@ -73,12 +73,12 @@ func (a *channel) pin(msg Pin) (*pb.Message, error) {
 		return nil, err
 	}
 	mine := proto.CloneOf(out[0])
-	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessageEdited{MessageEdited: &pb.MessageEdited{Message: out[0]}}})
+	a.broadcast(&pb.Event{Payload: &pb.Event_MessageEdited{MessageEdited: &pb.MessageEdited{Message: out[0]}}})
 	return mine, a.markSaved(ctx, msg.P.UserID, []*pb.Message{mine})
 }
 
 func (a *channel) pinsChanged() {
-	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_PinsChanged{PinsChanged: &pb.PinsChanged{
+	a.broadcast(&pb.Event{Payload: &pb.Event_PinsChanged{PinsChanged: &pb.PinsChanged{
 		ChannelId: a.id.String(), Count: int32(a.pins), //nolint:gosec // at most maxPins
 	}}})
 }
@@ -147,7 +147,7 @@ func (a *channel) save(msg Save) (*pb.Message, error) {
 	if err := a.Repo.SetSaved(ctx, msg.P.UserID, m, a.ch.TeamID, msg.Saved); err != nil {
 		return nil, err
 	}
-	a.deliver([]string{msg.P.UserID.String()}, &pb.Event{Payload: &pb.Event_SavedChanged{SavedChanged: &pb.SavedChanged{
+	a.deliver(msg.P.UserID, &pb.Event{Payload: &pb.Event_SavedChanged{SavedChanged: &pb.SavedChanged{
 		ChannelId: a.id.String(), MessageId: m.ID.String(), RootId: convert.ID(m.RootID), Saved: msg.Saved,
 	}}})
 	out, err := a.render(ctx, []*models.Message{m})

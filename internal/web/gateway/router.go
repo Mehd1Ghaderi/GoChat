@@ -41,6 +41,18 @@ type register struct {
 
 type unregister struct{ connID uint64 }
 
+// viewing tells the router the channel a connection shows, empty for none.
+type viewing struct {
+	connID    uint64
+	channelID string
+}
+
+// watching tells the router whose presence and profile a connection shows.
+type watching struct {
+	connID uint64
+	users  []string
+}
+
 type streamUp struct {
 	gen    uint64
 	stream pb.DRPCGatewayService_ConnectClient
@@ -67,7 +79,9 @@ type conn struct {
 	sessionID string
 	attached  bool
 	// queued is set while the connection waits to attach.
-	queued bool
+	queued  bool
+	viewing string
+	watches []string
 }
 
 // opener opens a stream to the chat server, and returns how to close it.
@@ -79,9 +93,11 @@ type router struct {
 	cfg    *Config
 	conns  map[uint64]*conn
 	byUser map[string]map[uint64]struct{}
-	stream pb.DRPCGatewayService_ConnectClient
-	gen    uint64
-	cancel context.CancelFunc
+	// watchers holds the connections showing each user's presence.
+	watchers map[string]map[uint64]struct{}
+	stream   pb.DRPCGatewayService_ConnectClient
+	gen      uint64
+	cancel   context.CancelFunc
 	// fresh holds new connections and again those to attach after a
 	// reconnect; attaches paces both, fresh first.
 	fresh, again []uint64
@@ -101,6 +117,7 @@ func newRouter(logger *zap.Logger, open opener, cfg *Config) actor.Producer {
 			cfg:      cfg,
 			conns:    make(map[uint64]*conn),
 			byUser:   make(map[string]map[uint64]struct{}),
+			watchers: make(map[string]map[uint64]struct{}),
 			attaches: rate.NewLimiter(rate.Limit(cfg.AttachRate), cfg.AttachBurst),
 		}
 	}
@@ -145,9 +162,19 @@ func (r *router) Receive(c *actor.Context) {
 		if cn == nil {
 			return
 		}
-		delete(r.conns, msg.connID)
-		r.unindex(msg.connID, cn)
+		r.drop(msg.connID, cn)
 		r.write(&pb.ConnectRequest{Frame: &pb.ConnectRequest_Detach{Detach: &pb.Detach{ConnId: msg.connID}}})
+	case viewing:
+		if cn := r.conns[msg.connID]; cn != nil && cn.viewing != msg.channelID {
+			cn.viewing = msg.channelID
+			if cn.attached {
+				r.view(msg.connID, cn)
+			}
+		}
+	case watching:
+		if cn := r.conns[msg.connID]; cn != nil {
+			r.watch(msg.connID, cn, msg.users)
+		}
 	case streamUp:
 		r.gen, r.stream = msg.gen, msg.stream
 		r.logger.Info("connected to the chat server")
@@ -223,6 +250,49 @@ func (r *router) unindex(id uint64, cn *conn) {
 	}
 }
 
+// drop forgets a connection.
+func (r *router) drop(id uint64, cn *conn) {
+	delete(r.conns, id)
+	r.unindex(id, cn)
+	r.watch(id, cn, nil)
+}
+
+func (r *router) view(id uint64, cn *conn) {
+	r.write(&pb.ConnectRequest{Frame: &pb.ConnectRequest_View{View: &pb.View{ConnId: id, ChannelId: cn.viewing}}})
+}
+
+// watch replaces the users whose presence a connection shows.
+func (r *router) watch(id uint64, cn *conn, users []string) {
+	for _, u := range cn.watches {
+		if set := r.watchers[u]; set != nil {
+			if delete(set, id); len(set) == 0 {
+				delete(r.watchers, u)
+			}
+		}
+	}
+	cn.watches = users
+	for _, u := range users {
+		set := r.watchers[u]
+		if set == nil {
+			set = make(map[uint64]struct{})
+			r.watchers[u] = set
+		}
+		set[id] = struct{}{}
+	}
+}
+
+// subject is the user a broadcast event is about, whom only their own and
+// their watchers' connections show.
+func subject(ev *pb.Event) string {
+	switch p := ev.Payload.(type) {
+	case *pb.Event_Presence:
+		return p.Presence.GetUserId()
+	case *pb.Event_ProfileChanged:
+		return p.ProfileChanged.GetUser().GetId()
+	}
+	return ""
+}
+
 func (r *router) handle(c *actor.Context, resp *pb.ConnectResponse) {
 	switch f := resp.Frame.(type) {
 	case *pb.ConnectResponse_Attached:
@@ -234,7 +304,7 @@ func (r *router) handle(c *actor.Context, resp *pb.ConnectResponse) {
 		}
 		userID := f.Attached.User.GetId()
 		if !cn.attached && len(r.byUser[userID]) >= r.cfg.MaxPerUser {
-			delete(r.conns, id)
+			r.drop(id, cn)
 			r.write(&pb.ConnectRequest{Frame: &pb.ConnectRequest_Detach{Detach: &pb.Detach{ConnId: id}}})
 			c.Send(cn.pid, Rejected{TooMany: true})
 			return
@@ -249,16 +319,27 @@ func (r *router) handle(c *actor.Context, resp *pb.ConnectResponse) {
 			r.byUser[cn.userID] = set
 		}
 		set[id] = struct{}{}
+		if cn.viewing != "" {
+			r.view(id, cn)
+		}
 		c.Send(cn.pid, Ready{User: f.Attached.User, SessionID: cn.sessionID, ExpiresAt: f.Attached.GetExpiresAt().AsTime(), Again: again})
 	case *pb.ConnectResponse_AttachRejected:
 		if cn := r.conns[f.AttachRejected.ConnId]; cn != nil {
-			delete(r.conns, f.AttachRejected.ConnId)
-			r.unindex(f.AttachRejected.ConnId, cn)
+			r.drop(f.AttachRejected.ConnId, cn)
 			c.Send(cn.pid, Rejected{Retry: f.AttachRejected.Retry})
 		}
 	case *pb.ConnectResponse_Event:
 		ev := Event{Event: f.Event}
-		if f.Event.Broadcast {
+		if !f.Event.Broadcast {
+			for _, id := range f.Event.ConnIds {
+				if cn := r.conns[id]; cn != nil && cn.attached {
+					c.Send(cn.pid, ev)
+				}
+			}
+			return
+		}
+		about := subject(f.Event)
+		if about == "" {
 			for _, cn := range r.conns {
 				if cn.attached {
 					c.Send(cn.pid, ev)
@@ -266,9 +347,12 @@ func (r *router) handle(c *actor.Context, resp *pb.ConnectResponse) {
 			}
 			return
 		}
-		for _, uid := range f.Event.UserIds {
-			for id := range r.byUser[uid] {
-				c.Send(r.conns[id].pid, ev)
+		for id := range r.byUser[about] {
+			c.Send(r.conns[id].pid, ev)
+		}
+		for id := range r.watchers[about] {
+			if cn := r.conns[id]; cn.attached && cn.userID != about {
+				c.Send(cn.pid, ev)
 			}
 		}
 	case *pb.ConnectResponse_SessionsRevoked:
@@ -278,8 +362,7 @@ func (r *router) handle(c *actor.Context, resp *pb.ConnectResponse) {
 		}
 		for id, cn := range r.conns {
 			if revoked[cn.sessionID] {
-				delete(r.conns, id)
-				r.unindex(id, cn)
+				r.drop(id, cn)
 				r.write(&pb.ConnectRequest{Frame: &pb.ConnectRequest_Detach{Detach: &pb.Detach{ConnId: id}}})
 				c.Send(cn.pid, Revoked{})
 			}

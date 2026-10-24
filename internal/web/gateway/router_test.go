@@ -198,3 +198,75 @@ func TestResyncsArePacedAndSpread(t *testing.T) {
 		}
 	}
 }
+
+// attachAll registers a session per user on the stream and attaches it.
+func attachAll(t *testing.T, engine *actor.Engine, router *actor.PID, stream *fakeStream, users ...string) []*inbox {
+	t.Helper()
+	sessions := make([]*inbox, len(users))
+	for i, u := range users {
+		sessions[i] = newInbox(engine, "s")
+		engine.Send(router, register{connID: uint64(i + 1), token: "t", pid: sessions[i].pid})
+		a := next[*pb.ConnectRequest_Attach](t, stream, time.Second)
+		stream.recv <- attached(a.Attach.ConnId, u)
+		if _, ok := sessions[i].expect(t, time.Second).(Ready); !ok {
+			t.Fatal("not ready")
+		}
+	}
+	return sessions
+}
+
+func (in *inbox) none(t *testing.T) {
+	t.Helper()
+	select {
+	case m := <-in.got:
+		t.Fatalf("the session got %T", m)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func event(ev *pb.Event) *pb.ConnectResponse {
+	return &pb.ConnectResponse{Frame: &pb.ConnectResponse_Event{Event: ev}}
+}
+
+func TestEventsGoToTheirConnections(t *testing.T) {
+	stream := newFakeStream()
+	engine, router := startRouter(t, testConfig(), stream)
+	s := attachAll(t, engine, router, stream, "a", "a", "b")
+	stream.recv <- event(&pb.Event{ConnIds: []uint64{2, 3, 99}, Payload: &pb.Event_Typing{Typing: &pb.Typing{}}})
+	s[1].expect(t, time.Second)
+	s[2].expect(t, time.Second)
+	s[0].none(t)
+}
+
+func TestPresenceGoesToWatchers(t *testing.T) {
+	stream := newFakeStream()
+	engine, router := startRouter(t, testConfig(), stream)
+	s := attachAll(t, engine, router, stream, "a", "b", "c")
+	engine.Send(router, watching{connID: 2, users: []string{"a"}})
+	engine.Send(router, watching{connID: 3, users: []string{"a"}})
+	engine.Send(router, watching{connID: 3, users: []string{"x"}})
+	stream.recv <- event(&pb.Event{Broadcast: true, Payload: &pb.Event_Presence{Presence: &pb.Presence{UserId: "a"}}})
+	s[0].expect(t, time.Second)
+	s[1].expect(t, time.Second)
+	s[2].none(t)
+	stream.recv <- event(&pb.Event{Broadcast: true, Payload: &pb.Event_ProfileChanged{ProfileChanged: &pb.ProfileChanged{User: &pb.User{Id: "x"}}}})
+	s[2].expect(t, time.Second)
+	s[0].none(t)
+}
+
+func TestViewsReachTheServer(t *testing.T) {
+	first, second := newFakeStream(), newFakeStream()
+	engine, router := startRouter(t, testConfig(), first, second)
+	attachAll(t, engine, router, first, "a")
+	engine.Send(router, viewing{connID: 1, channelID: "ch"})
+	if v := next[*pb.ConnectRequest_View](t, first, time.Second); v.View.ConnId != 1 || v.View.ChannelId != "ch" {
+		t.Fatalf("view %+v", v.View)
+	}
+	// After a reconnect the view follows the attach.
+	_ = first.Close()
+	a := next[*pb.ConnectRequest_Attach](t, second, time.Second)
+	second.recv <- attached(a.Attach.ConnId, "a")
+	if v := next[*pb.ConnectRequest_View](t, second, time.Second); v.View.ChannelId != "ch" {
+		t.Fatalf("view after a reconnect %+v", v.View)
+	}
+}

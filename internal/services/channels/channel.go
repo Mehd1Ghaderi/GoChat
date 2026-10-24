@@ -33,21 +33,22 @@ type idleCheck struct{}
 
 type channel struct {
 	*Deps
-	id        gocql.UUID
-	ch        *models.Channel
-	members   map[gocql.UUID]models.ChannelRole
-	memberIDs []string
-	bucket    int32
-	hasBucket bool
-	typing    map[gocql.UUID]time.Time
-	posters   map[gocql.UUID]*rate.Limiter
-	pins      int
-	active    time.Time
-	loaded    bool
-	loadErr   error
-	asked     bool
-	handled   uint64
-	repeater  *actor.SendRepeater
+	id      gocql.UUID
+	ch      *models.Channel
+	members map[gocql.UUID]models.ChannelRole
+	// recipients is who the channel's events go to.
+	recipients hub.Members
+	bucket     int32
+	hasBucket  bool
+	typing     map[gocql.UUID]time.Time
+	posters    map[gocql.UUID]*rate.Limiter
+	pins       int
+	active     time.Time
+	loaded     bool
+	loadErr    error
+	asked      bool
+	handled    uint64
+	repeater   *actor.SendRepeater
 }
 
 func newChannel(d *Deps, id gocql.UUID) actor.Producer {
@@ -148,19 +149,25 @@ func (a *channel) load() {
 	a.snapshot()
 }
 
-// snapshot rebuilds the recipient list. Deliver messages share it, so it is
-// replaced, never modified.
+// snapshot rebuilds the recipients. Deliver messages share them, so they
+// are replaced, never modified.
 func (a *channel) snapshot() {
-	out := make([]string, 0, len(a.members))
+	out := make(hub.Members, len(a.members))
 	for id := range a.members {
-		out = append(out, id.String())
+		out[id.String()] = struct{}{}
 	}
-	a.memberIDs = out
+	a.recipients = out
 }
 
-func (a *channel) deliver(userIDs []string, ev *pb.Event) {
-	if len(userIDs) > 0 {
-		a.Engine.Send(a.Hub, hub.Deliver{UserIDs: userIDs, Event: ev})
+// deliver sends ev to one user.
+func (a *channel) deliver(userID gocql.UUID, ev *pb.Event) {
+	a.Engine.Send(a.Hub, hub.Deliver{UserIDs: []string{userID.String()}, Event: ev})
+}
+
+// broadcast sends ev to every member.
+func (a *channel) broadcast(ev *pb.Event) {
+	if len(a.recipients) > 0 {
+		a.Engine.Send(a.Hub, hub.Deliver{Members: a.recipients, Event: ev})
 	}
 }
 
@@ -351,7 +358,7 @@ func (a *channel) mute(msg Mute) (Done, error) {
 	if err := a.Repo.SetMuted(ctx, msg.P.UserID, a.id, msg.Muted); err != nil {
 		return Done{}, err
 	}
-	a.deliver([]string{msg.P.UserID.String()}, &pb.Event{Payload: &pb.Event_ChannelMuted{ChannelMuted: &pb.ChannelMuted{
+	a.deliver(msg.P.UserID, &pb.Event{Payload: &pb.Event_ChannelMuted{ChannelMuted: &pb.ChannelMuted{
 		ChannelId: a.id.String(), Muted: msg.Muted,
 	}}})
 	return Done{}, nil
@@ -491,7 +498,7 @@ func (a *channel) post(msg Post) (*pb.Message, error) {
 	delete(a.typing, msg.P.UserID)
 
 	out := convert.Message(m, convert.PublicUser(author), atts)
-	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessagePosted{MessagePosted: &pb.MessagePosted{Message: out}}})
+	a.broadcast(&pb.Event{Payload: &pb.Event_MessagePosted{MessagePosted: &pb.MessagePosted{Message: out}}})
 	a.recordMentions(m)
 	a.file(index.Add{Doc: a.doc(m)})
 	return out, nil
@@ -525,31 +532,29 @@ func (a *channel) recordMentions(m *models.Message) {
 	if !direct && len(found.Usernames) == 0 && !found.Channel && !found.Here {
 		return
 	}
-	members, author, teamID := a.memberIDs, m.UserID.String(), a.ch.TeamID
+	members, author, teamID := a.recipients, m.UserID.String(), a.ch.TeamID
 	go func() {
 		ctx, cancel := a.ctx()
 		defer cancel()
 		targets := map[string]bool{}
 		switch {
 		case direct || found.Channel:
-			for _, id := range members {
+			for id := range members {
 				targets[id] = true
 			}
 		case found.Here:
-			if online, err := actors.Ask[[]string](ctx, a.Engine, a.Hub, hub.Online{UserIDs: members}); err == nil {
+			if online, err := actors.Ask[[]string](ctx, a.Engine, a.Hub, hub.Online{Members: members}); err == nil {
 				for _, id := range online {
 					targets[id] = true
 				}
 			}
 		}
 		if !direct && len(found.Usernames) > 0 {
-			member := make(map[string]bool, len(members))
-			for _, id := range members {
-				member[id] = true
-			}
 			for _, name := range found.Usernames {
-				if id, err := a.Repo.GetUserIDByUsername(ctx, name); err == nil && member[id.String()] {
-					targets[id.String()] = true
+				if id, err := a.Repo.GetUserIDByUsername(ctx, name); err == nil {
+					if _, ok := members[id.String()]; ok {
+						targets[id.String()] = true
+					}
 				}
 			}
 		}
@@ -593,7 +598,7 @@ func (a *channel) reply(ctx context.Context, root, m *models.Message, author *mo
 		}
 	}
 	out := convert.Message(m, convert.PublicUser(author), atts)
-	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessagePosted{MessagePosted: &pb.MessagePosted{Message: out, ParticipantIds: notify}}})
+	a.broadcast(&pb.Event{Payload: &pb.Event_MessagePosted{MessagePosted: &pb.MessagePosted{Message: out, ParticipantIds: notify}}})
 	a.recordMentions(m)
 	a.file(index.Add{Doc: a.doc(m)})
 
@@ -617,7 +622,7 @@ func (a *channel) rootChanged(ctx context.Context, root *models.Message) {
 		a.Logger.Warn("failed to render a thread's root", zap.String("channel", a.id.String()), zap.Error(err))
 		return
 	}
-	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessageEdited{MessageEdited: &pb.MessageEdited{Message: out[0]}}})
+	a.broadcast(&pb.Event{Payload: &pb.Event_MessageEdited{MessageEdited: &pb.MessageEdited{Message: out[0]}}})
 }
 
 // unclaim returns attachments claimed for a message that was not written to
@@ -754,7 +759,7 @@ func (a *channel) edit(msg Edit) (*pb.Message, error) {
 	a.file(index.Update{Doc: a.doc(m), Old: old})
 	out := convert.Message(m, convert.PublicUser(author), orderAttachments(m.Attachments, atts))
 	mine := proto.CloneOf(out)
-	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessageEdited{MessageEdited: &pb.MessageEdited{Message: out}}})
+	a.broadcast(&pb.Event{Payload: &pb.Event_MessageEdited{MessageEdited: &pb.MessageEdited{Message: out}}})
 	return mine, a.markSaved(ctx, msg.P.UserID, []*pb.Message{mine})
 }
 
@@ -804,7 +809,7 @@ func (a *channel) delete(msg Delete) (Done, error) {
 			a.Logger.Warn("failed to drop a thread's follows", zap.String("channel", a.id.String()), zap.Error(err))
 		}
 	}
-	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessageDeleted{MessageDeleted: &pb.MessageDeleted{
+	a.broadcast(&pb.Event{Payload: &pb.Event_MessageDeleted{MessageDeleted: &pb.MessageDeleted{
 		ChannelId: a.id.String(), MessageId: m.ID.String(),
 	}}})
 	return Done{}, nil
@@ -818,7 +823,7 @@ func (a *channel) deleteReply(ctx context.Context, m *models.Message) error {
 	a.unpinGone(ctx, m)
 	a.dropReactions(ctx, m.ID)
 	a.dropAttachments(m.Attachments)
-	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessageDeleted{MessageDeleted: &pb.MessageDeleted{
+	a.broadcast(&pb.Event{Payload: &pb.Event_MessageDeleted{MessageDeleted: &pb.MessageDeleted{
 		ChannelId: a.id.String(), MessageId: m.ID.String(), RootId: m.RootID.String(),
 	}}})
 	root, err := a.Repo.GetMessage(ctx, a.id, m.RootID)
@@ -916,7 +921,7 @@ func (a *channel) react(msg React) ([]*pb.Reaction, error) {
 		return nil, err
 	}
 	out := groupReactions(rows)[m.ID]
-	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_ReactionsChanged{ReactionsChanged: &pb.ReactionsChanged{
+	a.broadcast(&pb.Event{Payload: &pb.Event_ReactionsChanged{ReactionsChanged: &pb.ReactionsChanged{
 		ChannelId: a.id.String(), MessageId: m.ID.String(), RootId: convert.ID(m.RootID), Reactions: out,
 	}}})
 	return out, nil
@@ -1190,14 +1195,11 @@ func (a *channel) typingEvent(msg Typing) (Done, error) {
 	if err != nil {
 		return Done{}, err
 	}
-	self := msg.P.UserID.String()
-	others := make([]string, 0, len(a.memberIDs))
-	for _, id := range a.memberIDs {
-		if id != self {
-			others = append(others, id)
-		}
-	}
-	a.deliver(others, &pb.Event{Payload: &pb.Event_Typing{Typing: &pb.Typing{ChannelId: a.id.String(), User: convert.PublicUser(u)}}})
+	// Only the members showing the channel see who types.
+	a.Engine.Send(a.Hub, hub.Deliver{
+		Members: a.recipients, Viewing: a.id.String(), Except: msg.P.UserID.String(),
+		Event: &pb.Event{Payload: &pb.Event_Typing{Typing: &pb.Typing{ChannelId: a.id.String(), User: convert.PublicUser(u)}}},
+	})
 	return Done{}, nil
 }
 
@@ -1247,12 +1249,12 @@ func (a *channel) joined(userID gocql.UUID, role models.ChannelRole) (*pb.Channe
 	if err != nil {
 		return nil, err
 	}
-	a.deliver([]string{userID.String()}, &pb.Event{Payload: &pb.Event_ChannelJoined{ChannelJoined: &pb.ChannelJoined{Channel: view}}})
+	a.deliver(userID, &pb.Event{Payload: &pb.Event_ChannelJoined{ChannelJoined: &pb.ChannelJoined{Channel: view}}})
 	return view, nil
 }
 
 func (a *channel) left(userID gocql.UUID, own bool) {
-	a.deliver([]string{userID.String()}, &pb.Event{Payload: &pb.Event_ChannelLeft{ChannelLeft: &pb.ChannelLeft{
+	a.deliver(userID, &pb.Event{Payload: &pb.Event_ChannelLeft{ChannelLeft: &pb.ChannelLeft{
 		ChannelId: a.id.String(), TeamId: convert.ID(a.ch.TeamID), Own: own,
 	}}})
 }

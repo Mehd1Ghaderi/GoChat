@@ -15,6 +15,7 @@ import (
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
 	"github.com/ssenerg/gochat/internal/actors"
 	"github.com/ssenerg/gochat/internal/core/audio"
+	"github.com/ssenerg/gochat/internal/core/ids"
 	"github.com/ssenerg/gochat/internal/core/models"
 	"github.com/ssenerg/gochat/internal/core/secure"
 	ierrors "github.com/ssenerg/gochat/internal/errors"
@@ -316,6 +317,12 @@ func (s *gatewayService) Connect(stream pb.DRPCGatewayService_ConnectStream) err
 			s.attach(ctx, key, f.Attach)
 		case *pb.ConnectRequest_Detach:
 			s.sys.Engine.Send(s.sys.Hub, hub.Detach{GatewayID: key, ConnID: f.Detach.ConnId})
+		case *pb.ConnectRequest_View:
+			var ch string
+			if id, ok := ids.Parse(f.View.ChannelId); ok {
+				ch = id.String()
+			}
+			s.sys.Engine.Send(s.sys.Hub, hub.View{GatewayID: key, ConnID: f.View.ConnId, ChannelID: ch})
 		}
 	}
 }
