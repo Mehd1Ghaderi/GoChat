@@ -129,6 +129,19 @@ type ThreadsResult struct {
 	Next int
 }
 
+// ListSaved replies with *SavedResult; with IDsOnly, the ids of all the
+// caller saved, in any team.
+type ListSaved struct {
+	P       *models.Principal
+	TeamID  string
+	IDsOnly bool
+}
+
+type SavedResult struct {
+	Hits []*pb.SearchHit
+	IDs  []string
+}
+
 type GetUser struct {
 	P      *models.Principal
 	UserID string

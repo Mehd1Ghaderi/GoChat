@@ -18,6 +18,9 @@
       <span class="glyph" aria-hidden="true">{{icon "reply"}}</span><span class="label">Threads</span>
       <span id="threads-unread" class="dot{{if .ThreadsUnread}} on{{end}}" aria-hidden="true"></span>
     </a></li>
+    <li><button type="button" class="sb-link" hx-get="/t/{{.Team.Name}}/saved" hx-target="#thread">
+      <span class="glyph" aria-hidden="true">{{icon "bookmark"}}</span><span class="label">Saved</span>
+    </button></li>
   </ul>
   <section>
     <h2><span>Channels</span>

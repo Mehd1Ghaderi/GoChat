@@ -143,8 +143,8 @@ func (a *channel) archive(msg Archive) (*pb.Channel, error) {
 
 // changed tells the members about the channel's new state and answers p.
 func (a *channel) changed(p *models.Principal) (*pb.Channel, error) {
-	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_ChannelUpdated{ChannelUpdated: &pb.ChannelUpdated{
-		Channel: convert.Channel(a.ch, "", gocql.UUID{}, nil),
-	}}})
+	ch := convert.Channel(a.ch, "", gocql.UUID{}, nil)
+	ch.PinnedCount = int32(a.pins) //nolint:gosec // at most maxPins
+	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_ChannelUpdated{ChannelUpdated: &pb.ChannelUpdated{Channel: ch}}})
 	return a.channelFor(p.UserID, a.members[p.UserID])
 }

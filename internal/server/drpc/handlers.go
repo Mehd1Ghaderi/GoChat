@@ -700,6 +700,60 @@ func (s *messageService) ListThreads(ctx context.Context, req *pb.ListThreadsReq
 	return &pb.ListThreadsResponse{Threads: res.Threads, UnreadCount: uint32(res.Unread), NextOffset: uint32(res.Next)}, nil //nolint:gosec // bounded counts
 }
 
+func (s *messageService) PinMessage(ctx context.Context, req *pb.PinMessageRequest) (*pb.PinMessageResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	out, err := actors.Ask[*pb.Message](ctx, s.sys.Engine, s.sys.Channels, channels.Pin{
+		Target: t, MessageID: req.MessageId, RootID: req.RootId, Pinned: req.Pinned,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.PinMessageResponse{Message: out}, nil
+}
+
+func (s *messageService) ListPinned(ctx context.Context, req *pb.ListPinnedRequest) (*pb.ListPinnedResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	out, err := actors.Ask[[]*pb.Message](ctx, s.sys.Engine, s.sys.Channels, channels.Pins{Target: t})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ListPinnedResponse{Messages: out}, nil
+}
+
+func (s *messageService) SaveMessage(ctx context.Context, req *pb.SaveMessageRequest) (*pb.SaveMessageResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	out, err := actors.Ask[*pb.Message](ctx, s.sys.Engine, s.sys.Channels, channels.Save{
+		Target: t, MessageID: req.MessageId, RootID: req.RootId, Saved: req.Saved,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.SaveMessageResponse{Message: out}, nil
+}
+
+func (s *messageService) ListSaved(ctx context.Context, req *pb.ListSavedRequest) (*pb.ListSavedResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	res, err := actors.Ask[*directory.SavedResult](ctx, s.sys.Engine, s.sys.Directory, directory.ListSaved{
+		P: p, TeamID: req.TeamId, IDsOnly: req.IdsOnly,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ListSavedResponse{Hits: res.Hits, MessageIds: res.IDs}, nil
+}
+
 func (s *messageService) MarkThreadRead(ctx context.Context, req *pb.MarkThreadReadRequest) (*pb.MarkThreadReadResponse, error) {
 	t, err := channelTarget(ctx, req.ChannelId)
 	if err != nil {

@@ -784,6 +784,52 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
+	t.Run("pins are shared and saves are private", func(t *testing.T) {
+		adminWS.send(map[string]string{"op": "post", "channel_id": town, "content": "pin me " + random(3)})
+		id := msgIDRe.FindStringSubmatch(bobWS.expect(5*time.Second, "pin me", `hx-swap-oob="afterbegin"`))[1]
+		if res, body := bob.hx("/m/"+town+"/"+id+"/pin", url.Values{"pinned": {"1"}}); res.StatusCode != http.StatusOK || !strings.Contains(body, "Pinned</span>") {
+			t.Fatalf("pin: %d %s", res.StatusCode, body)
+		}
+		adminWS.expect(5*time.Second, `id="pins-btn-`+town+`"`, `class="count"`)
+		adminWS.expect(5*time.Second, `id="msg-`+id+`"`, "Pinned</span>")
+		pins := func() string {
+			_, body := admin.do(http.MethodGet, "/t/"+teamName+"/ch/"+town+"/pins", nil, "", true)
+			return body
+		}
+		if list := pins(); !strings.Contains(list, "?msg="+id) {
+			t.Fatalf("pinned list: %s", list)
+		}
+		if res, body := admin.hx("/m/"+town+"/"+id+"/save", url.Values{"saved": {"1"}}); res.StatusCode != http.StatusOK || !strings.Contains(body, `flag saved`) {
+			t.Fatalf("save: %d %s", res.StatusCode, body)
+		}
+		adminWS.expect(5*time.Second, `id="saved-changed"`)
+		saved := func(c *client) string {
+			_, body := c.do(http.MethodGet, "/t/"+teamName+"/saved", nil, "", true)
+			return body
+		}
+		if list := saved(admin); !strings.Contains(list, "?msg="+id) {
+			t.Fatalf("admin's saved: %s", list)
+		}
+		if list := saved(bob); strings.Contains(list, "?msg="+id) {
+			t.Fatal("a save showed to someone else")
+		}
+		_, page := admin.do(http.MethodGet, "/t/"+teamName+"/ch/"+town, nil, "", true)
+		if !regexp.MustCompile(`id="msg-` + id + `"(?s:.*?)flag saved`).MatchString(page) {
+			t.Fatal("the channel does not show the save to its saver")
+		}
+		if _, page := bob.do(http.MethodGet, "/t/"+teamName+"/ch/"+town, nil, "", true); strings.Contains(page, "flag saved") {
+			t.Fatal("the channel shows another person's save")
+		}
+		admin.hx("/m/"+town+"/"+id+"/delete", url.Values{})
+		adminWS.expect(5*time.Second, `id="pins-btn-`+town+`"`)
+		if list := pins(); strings.Contains(list, id) {
+			t.Fatal("a deleted message stayed pinned")
+		}
+		if list := saved(admin); strings.Contains(list, id) {
+			t.Fatal("a deleted message stayed saved")
+		}
+	})
+
 	t.Run("csrf and origin are enforced", func(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodPost, baseURL+"/t/"+teamName+"/invites", nil)
 		req.Header.Set("HX-Request", "true")

@@ -31,6 +31,8 @@ var icons = map[string]string{
 	"bell":     `<path d="M6.5 16.5V11a5.5 5.5 0 0 1 11 0v5.5l1.5 1.5H5l1.5-1.5zM10 20.5a2.2 2.2 0 0 0 4 0"/>`,
 	"bell-off": `<path d="M9 5.9A5.5 5.5 0 0 1 17.5 11v4M6.5 9.6V16.5L5 18h12M10 20.5a2.2 2.2 0 0 0 4 0M4 4l16 16"/>`,
 	"smile":    `<circle cx="12" cy="12" r="8.5"/><path d="M8.6 14.2a4.2 4.2 0 0 0 6.8 0"/><circle cx="9.3" cy="10" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.7" cy="10" r="1.1" fill="currentColor" stroke="none"/>`,
+	"pin":      `<path d="M9 3.5h6M10 3.5l-.7 5.6L6 12.5V14h12v-1.5l-3.3-3.4L14 3.5M12 14v6.5"/>`,
+	"bookmark": `<path d="M7 3.5h10a1 1 0 0 1 1 1V20.5l-6-4.2-6 4.2V4.5a1 1 0 0 1 1-1z"/>`,
 	"reply":    `<path d="M10 7L5 12l5 5"/><path d="M5 12h8.5a5.5 5.5 0 0 1 5.5 5.5V19"/>`,
 	"browse":   `<path d="M4 6h16M4 12h10M4 18h7"/><circle cx="17.5" cy="16.5" r="2.5"/><path d="M19.5 18.5L21 20"/>`,
 }

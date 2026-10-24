@@ -28,6 +28,7 @@
   </div>
   <div class="channel-actions">
     <button class="icon-btn" hx-get="/t/{{.Team.Name}}/search" hx-target="#thread" aria-label="Search messages" title="Search (Ctrl+Shift+F)">{{icon "search"}}</button>
+    {{if .Member}}{{template "pins-button" (dict "Team" .Team.Name "Channel" .Channel.Id "Count" .Channel.PinnedCount)}}{{end}}
     {{if .Member}}{{template "mute-button" (dict "Team" .Team.Name "Channel" .Channel.Id "Muted" .Channel.Muted)}}{{end}}
     {{if and .Manage (not .Archived)}}<button class="icon-btn" hx-get="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/settings" hx-target="#modal" aria-label="Channel settings" title="Channel settings">{{icon "settings"}}</button>{{end}}
     {{if and .Member (not (isDirect .Channel))}}

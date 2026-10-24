@@ -50,6 +50,10 @@ type DRPCMessageServiceClient interface {
 	ListThreads(ctx context.Context, in *ListThreadsRequest) (*ListThreadsResponse, error)
 	MarkThreadRead(ctx context.Context, in *MarkThreadReadRequest) (*MarkThreadReadResponse, error)
 	FollowThread(ctx context.Context, in *FollowThreadRequest) (*FollowThreadResponse, error)
+	PinMessage(ctx context.Context, in *PinMessageRequest) (*PinMessageResponse, error)
+	ListPinned(ctx context.Context, in *ListPinnedRequest) (*ListPinnedResponse, error)
+	SaveMessage(ctx context.Context, in *SaveMessageRequest) (*SaveMessageResponse, error)
+	ListSaved(ctx context.Context, in *ListSavedRequest) (*ListSavedResponse, error)
 }
 
 type drpcMessageServiceClient struct {
@@ -170,6 +174,42 @@ func (c *drpcMessageServiceClient) FollowThread(ctx context.Context, in *FollowT
 	return out, nil
 }
 
+func (c *drpcMessageServiceClient) PinMessage(ctx context.Context, in *PinMessageRequest) (*PinMessageResponse, error) {
+	out := new(PinMessageResponse)
+	err := c.cc.Invoke(ctx, "/gochat.v1.MessageService/PinMessage", drpcEncoding_File_gochat_v1_messages_proto{}, in, out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *drpcMessageServiceClient) ListPinned(ctx context.Context, in *ListPinnedRequest) (*ListPinnedResponse, error) {
+	out := new(ListPinnedResponse)
+	err := c.cc.Invoke(ctx, "/gochat.v1.MessageService/ListPinned", drpcEncoding_File_gochat_v1_messages_proto{}, in, out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *drpcMessageServiceClient) SaveMessage(ctx context.Context, in *SaveMessageRequest) (*SaveMessageResponse, error) {
+	out := new(SaveMessageResponse)
+	err := c.cc.Invoke(ctx, "/gochat.v1.MessageService/SaveMessage", drpcEncoding_File_gochat_v1_messages_proto{}, in, out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *drpcMessageServiceClient) ListSaved(ctx context.Context, in *ListSavedRequest) (*ListSavedResponse, error) {
+	out := new(ListSavedResponse)
+	err := c.cc.Invoke(ctx, "/gochat.v1.MessageService/ListSaved", drpcEncoding_File_gochat_v1_messages_proto{}, in, out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 type DRPCMessageServiceServer interface {
 	PostMessage(context.Context, *PostMessageRequest) (*PostMessageResponse, error)
 	EditMessage(context.Context, *EditMessageRequest) (*EditMessageResponse, error)
@@ -183,6 +223,10 @@ type DRPCMessageServiceServer interface {
 	ListThreads(context.Context, *ListThreadsRequest) (*ListThreadsResponse, error)
 	MarkThreadRead(context.Context, *MarkThreadReadRequest) (*MarkThreadReadResponse, error)
 	FollowThread(context.Context, *FollowThreadRequest) (*FollowThreadResponse, error)
+	PinMessage(context.Context, *PinMessageRequest) (*PinMessageResponse, error)
+	ListPinned(context.Context, *ListPinnedRequest) (*ListPinnedResponse, error)
+	SaveMessage(context.Context, *SaveMessageRequest) (*SaveMessageResponse, error)
+	ListSaved(context.Context, *ListSavedRequest) (*ListSavedResponse, error)
 }
 
 type DRPCMessageServiceUnimplementedServer struct{}
@@ -235,9 +279,25 @@ func (s *DRPCMessageServiceUnimplementedServer) FollowThread(context.Context, *F
 	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
 }
 
+func (s *DRPCMessageServiceUnimplementedServer) PinMessage(context.Context, *PinMessageRequest) (*PinMessageResponse, error) {
+	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
+}
+
+func (s *DRPCMessageServiceUnimplementedServer) ListPinned(context.Context, *ListPinnedRequest) (*ListPinnedResponse, error) {
+	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
+}
+
+func (s *DRPCMessageServiceUnimplementedServer) SaveMessage(context.Context, *SaveMessageRequest) (*SaveMessageResponse, error) {
+	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
+}
+
+func (s *DRPCMessageServiceUnimplementedServer) ListSaved(context.Context, *ListSavedRequest) (*ListSavedResponse, error) {
+	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
+}
+
 type DRPCMessageServiceDescription struct{}
 
-func (DRPCMessageServiceDescription) NumMethods() int { return 12 }
+func (DRPCMessageServiceDescription) NumMethods() int { return 16 }
 
 func (DRPCMessageServiceDescription) Method(n int) (string, drpc.Encoding, drpc.Receiver, interface{}, bool) {
 	switch n {
@@ -349,6 +409,42 @@ func (DRPCMessageServiceDescription) Method(n int) (string, drpc.Encoding, drpc.
 						in1.(*FollowThreadRequest),
 					)
 			}, DRPCMessageServiceServer.FollowThread, true
+	case 12:
+		return "/gochat.v1.MessageService/PinMessage", drpcEncoding_File_gochat_v1_messages_proto{},
+			func(srv interface{}, ctx context.Context, in1, in2 interface{}) (drpc.Message, error) {
+				return srv.(DRPCMessageServiceServer).
+					PinMessage(
+						ctx,
+						in1.(*PinMessageRequest),
+					)
+			}, DRPCMessageServiceServer.PinMessage, true
+	case 13:
+		return "/gochat.v1.MessageService/ListPinned", drpcEncoding_File_gochat_v1_messages_proto{},
+			func(srv interface{}, ctx context.Context, in1, in2 interface{}) (drpc.Message, error) {
+				return srv.(DRPCMessageServiceServer).
+					ListPinned(
+						ctx,
+						in1.(*ListPinnedRequest),
+					)
+			}, DRPCMessageServiceServer.ListPinned, true
+	case 14:
+		return "/gochat.v1.MessageService/SaveMessage", drpcEncoding_File_gochat_v1_messages_proto{},
+			func(srv interface{}, ctx context.Context, in1, in2 interface{}) (drpc.Message, error) {
+				return srv.(DRPCMessageServiceServer).
+					SaveMessage(
+						ctx,
+						in1.(*SaveMessageRequest),
+					)
+			}, DRPCMessageServiceServer.SaveMessage, true
+	case 15:
+		return "/gochat.v1.MessageService/ListSaved", drpcEncoding_File_gochat_v1_messages_proto{},
+			func(srv interface{}, ctx context.Context, in1, in2 interface{}) (drpc.Message, error) {
+				return srv.(DRPCMessageServiceServer).
+					ListSaved(
+						ctx,
+						in1.(*ListSavedRequest),
+					)
+			}, DRPCMessageServiceServer.ListSaved, true
 	default:
 		return "", nil, nil, nil, false
 	}
@@ -592,6 +688,86 @@ func (x *drpcMessageService_FollowThreadStream) GetStream() drpc.Stream {
 }
 
 func (x *drpcMessageService_FollowThreadStream) SendAndClose(m *FollowThreadResponse) error {
+	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_messages_proto{}); err != nil {
+		return err
+	}
+	return x.CloseSend()
+}
+
+type DRPCMessageService_PinMessageStream interface {
+	drpc.Stream
+	SendAndClose(*PinMessageResponse) error
+}
+
+type drpcMessageService_PinMessageStream struct {
+	drpc.Stream
+}
+
+func (x *drpcMessageService_PinMessageStream) GetStream() drpc.Stream {
+	return x.Stream
+}
+
+func (x *drpcMessageService_PinMessageStream) SendAndClose(m *PinMessageResponse) error {
+	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_messages_proto{}); err != nil {
+		return err
+	}
+	return x.CloseSend()
+}
+
+type DRPCMessageService_ListPinnedStream interface {
+	drpc.Stream
+	SendAndClose(*ListPinnedResponse) error
+}
+
+type drpcMessageService_ListPinnedStream struct {
+	drpc.Stream
+}
+
+func (x *drpcMessageService_ListPinnedStream) GetStream() drpc.Stream {
+	return x.Stream
+}
+
+func (x *drpcMessageService_ListPinnedStream) SendAndClose(m *ListPinnedResponse) error {
+	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_messages_proto{}); err != nil {
+		return err
+	}
+	return x.CloseSend()
+}
+
+type DRPCMessageService_SaveMessageStream interface {
+	drpc.Stream
+	SendAndClose(*SaveMessageResponse) error
+}
+
+type drpcMessageService_SaveMessageStream struct {
+	drpc.Stream
+}
+
+func (x *drpcMessageService_SaveMessageStream) GetStream() drpc.Stream {
+	return x.Stream
+}
+
+func (x *drpcMessageService_SaveMessageStream) SendAndClose(m *SaveMessageResponse) error {
+	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_messages_proto{}); err != nil {
+		return err
+	}
+	return x.CloseSend()
+}
+
+type DRPCMessageService_ListSavedStream interface {
+	drpc.Stream
+	SendAndClose(*ListSavedResponse) error
+}
+
+type drpcMessageService_ListSavedStream struct {
+	drpc.Stream
+}
+
+func (x *drpcMessageService_ListSavedStream) GetStream() drpc.Stream {
+	return x.Stream
+}
+
+func (x *drpcMessageService_ListSavedStream) SendAndClose(m *ListSavedResponse) error {
 	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_messages_proto{}); err != nil {
 		return err
 	}

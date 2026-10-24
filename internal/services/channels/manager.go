@@ -29,6 +29,11 @@ type Repo interface {
 	MarkThreadRead(ctx context.Context, userID, channelID, rootID gocql.UUID, at time.Time) error
 	GetThreadFollow(ctx context.Context, userID, channelID, rootID gocql.UUID) (bool, error)
 	UnfollowThreads(ctx context.Context, userIDs []gocql.UUID, channelID, rootID gocql.UUID) error
+	SetPinned(ctx context.Context, m *models.Message, pinned bool, by gocql.UUID) error
+	Unpin(ctx context.Context, channelID, messageID gocql.UUID) error
+	ListPins(ctx context.Context, channelID gocql.UUID, limit int) ([]*scylla.Pin, error)
+	SetSaved(ctx context.Context, userID gocql.UUID, m *models.Message, teamID gocql.UUID, saved bool) error
+	SavedAmong(ctx context.Context, userID gocql.UUID, messageIDs []gocql.UUID) (map[gocql.UUID]bool, error)
 	ListChannelMembers(ctx context.Context, channelID gocql.UUID) ([]*models.ChannelMember, error)
 	AddChannelMember(ctx context.Context, m *models.ChannelMember) error
 	RemoveChannelMember(ctx context.Context, m *models.ChannelMember) error

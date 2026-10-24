@@ -22,6 +22,55 @@ service MessageService {
   rpc ListThreads(ListThreadsRequest) returns (ListThreadsResponse);
   rpc MarkThreadRead(MarkThreadReadRequest) returns (MarkThreadReadResponse);
   rpc FollowThread(FollowThreadRequest) returns (FollowThreadResponse);
+  // PinMessage pins a message in its channel for everyone, or unpins it.
+  rpc PinMessage(PinMessageRequest) returns (PinMessageResponse);
+  rpc ListPinned(ListPinnedRequest) returns (ListPinnedResponse);
+  // SaveMessage keeps a message in the caller's own list, or drops it.
+  rpc SaveMessage(SaveMessageRequest) returns (SaveMessageResponse);
+  rpc ListSaved(ListSavedRequest) returns (ListSavedResponse);
+}
+
+message PinMessageRequest {
+  string channel_id = 1;
+  string message_id = 2;
+  string root_id = 3;
+  bool pinned = 4;
+}
+
+message PinMessageResponse {
+  Message message = 1;
+}
+
+message ListPinnedRequest {
+  string channel_id = 1;
+}
+
+message ListPinnedResponse {
+  // Newest first.
+  repeated Message messages = 1;
+}
+
+message SaveMessageRequest {
+  string channel_id = 1;
+  string message_id = 2;
+  string root_id = 3;
+  bool saved = 4;
+}
+
+message SaveMessageResponse {
+  Message message = 1;
+}
+
+message ListSavedRequest {
+  // The team whose channels, and the conversations, to list saves from.
+  string team_id = 1;
+  // Only the ids of every message the caller saved.
+  bool ids_only = 2;
+}
+
+message ListSavedResponse {
+  repeated SearchHit hits = 1;
+  repeated string message_ids = 2;
 }
 
 message ListThreadsRequest {

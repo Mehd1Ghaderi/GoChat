@@ -88,6 +88,7 @@ message Channel {
   repeated User peers = 14;
   // Set while the channel is archived: read only.
   google.protobuf.Timestamp archived_at = 15;
+  int32 pinned_count = 16;
 }
 
 message ChannelMember {
@@ -116,6 +117,9 @@ message Message {
   int32 reply_count = 9;
   google.protobuf.Timestamp last_reply_at = 10;
   repeated Reaction reactions = 11;
+  bool pinned = 12;
+  // Whether the caller saved the message.
+  bool saved = 13;
 }
 
 // Reaction is one emoji on a message and who reacted with it.

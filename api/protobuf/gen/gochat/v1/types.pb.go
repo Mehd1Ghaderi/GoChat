@@ -562,6 +562,7 @@ type Channel struct {
 	Peers []*User `protobuf:"bytes,14,rep,name=peers,proto3" json:"peers,omitempty"`
 	// Set while the channel is archived: read only.
 	ArchivedAt    *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=archived_at,json=archivedAt,proto3" json:"archived_at,omitempty"`
+	PinnedCount   int32                  `protobuf:"varint,16,opt,name=pinned_count,json=pinnedCount,proto3" json:"pinned_count,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -699,6 +700,13 @@ func (x *Channel) GetArchivedAt() *timestamppb.Timestamp {
 		return x.ArchivedAt
 	}
 	return nil
+}
+
+func (x *Channel) GetPinnedCount() int32 {
+	if x != nil {
+		return x.PinnedCount
+	}
+	return 0
 }
 
 type ChannelMember struct {
@@ -839,10 +847,13 @@ type Message struct {
 	CreatedAt   *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	EditedAt    *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=edited_at,json=editedAt,proto3" json:"edited_at,omitempty"`
 	// A reply names its thread's root; a root counts its replies.
-	RootId        string                 `protobuf:"bytes,8,opt,name=root_id,json=rootId,proto3" json:"root_id,omitempty"`
-	ReplyCount    int32                  `protobuf:"varint,9,opt,name=reply_count,json=replyCount,proto3" json:"reply_count,omitempty"`
-	LastReplyAt   *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=last_reply_at,json=lastReplyAt,proto3" json:"last_reply_at,omitempty"`
-	Reactions     []*Reaction            `protobuf:"bytes,11,rep,name=reactions,proto3" json:"reactions,omitempty"`
+	RootId      string                 `protobuf:"bytes,8,opt,name=root_id,json=rootId,proto3" json:"root_id,omitempty"`
+	ReplyCount  int32                  `protobuf:"varint,9,opt,name=reply_count,json=replyCount,proto3" json:"reply_count,omitempty"`
+	LastReplyAt *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=last_reply_at,json=lastReplyAt,proto3" json:"last_reply_at,omitempty"`
+	Reactions   []*Reaction            `protobuf:"bytes,11,rep,name=reactions,proto3" json:"reactions,omitempty"`
+	Pinned      bool                   `protobuf:"varint,12,opt,name=pinned,proto3" json:"pinned,omitempty"`
+	// Whether the caller saved the message.
+	Saved         bool `protobuf:"varint,13,opt,name=saved,proto3" json:"saved,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -954,6 +965,20 @@ func (x *Message) GetReactions() []*Reaction {
 	return nil
 }
 
+func (x *Message) GetPinned() bool {
+	if x != nil {
+		return x.Pinned
+	}
+	return false
+}
+
+func (x *Message) GetSaved() bool {
+	if x != nil {
+		return x.Saved
+	}
+	return false
+}
+
 // Reaction is one emoji on a message and who reacted with it.
 type Reaction struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1040,7 +1065,7 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"TeamMember\x12#\n" +
 	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user\x12'\n" +
 	"\x04role\x18\x02 \x01(\x0e2\x13.gochat.v1.TeamRoleR\x04role\x127\n" +
-	"\tjoined_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bjoinedAt\"\xa4\x04\n" +
+	"\tjoined_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bjoinedAt\"\xc7\x04\n" +
 	"\aChannel\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
 	"\ateam_id\x18\x02 \x01(\tR\x06teamId\x12\x12\n" +
@@ -1060,7 +1085,8 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"\x05muted\x18\r \x01(\bR\x05muted\x12%\n" +
 	"\x05peers\x18\x0e \x03(\v2\x0f.gochat.v1.UserR\x05peers\x12;\n" +
 	"\varchived_at\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"archivedAt\"\x99\x01\n" +
+	"archivedAt\x12!\n" +
+	"\fpinned_count\x18\x10 \x01(\x05R\vpinnedCount\"\x99\x01\n" +
 	"\rChannelMember\x12#\n" +
 	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user\x12*\n" +
 	"\x04role\x18\x02 \x01(\x0e2\x16.gochat.v1.ChannelRoleR\x04role\x127\n" +
@@ -1070,7 +1096,7 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12!\n" +
 	"\fcontent_type\x18\x03 \x01(\tR\vcontentType\x12\x12\n" +
-	"\x04size\x18\x04 \x01(\x03R\x04size\"\xd5\x03\n" +
+	"\x04size\x18\x04 \x01(\x03R\x04size\"\x83\x04\n" +
 	"\aMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -1086,7 +1112,9 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"replyCount\x12>\n" +
 	"\rlast_reply_at\x18\n" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\vlastReplyAt\x121\n" +
-	"\treactions\x18\v \x03(\v2\x13.gochat.v1.ReactionR\treactions\";\n" +
+	"\treactions\x18\v \x03(\v2\x13.gochat.v1.ReactionR\treactions\x12\x16\n" +
+	"\x06pinned\x18\f \x01(\bR\x06pinned\x12\x14\n" +
+	"\x05saved\x18\r \x01(\bR\x05saved\";\n" +
 	"\bReaction\x12\x14\n" +
 	"\x05emoji\x18\x01 \x01(\tR\x05emoji\x12\x19\n" +
 	"\buser_ids\x18\x02 \x03(\tR\auserIds*V\n" +

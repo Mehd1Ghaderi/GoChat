@@ -9,6 +9,7 @@ import (
 	"github.com/gocql/gocql"
 	"go.uber.org/zap"
 	"golang.org/x/time/rate"
+	"google.golang.org/protobuf/proto"
 
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
 	"github.com/ssenerg/gochat/internal/actors"
@@ -40,6 +41,7 @@ type channel struct {
 	hasBucket bool
 	typing    map[gocql.UUID]time.Time
 	posters   map[gocql.UUID]*rate.Limiter
+	pins      int
 	active    time.Time
 	loaded    bool
 	loadErr   error
@@ -130,6 +132,13 @@ func (a *channel) load() {
 		a.loadErr = ierrors.Unavailable("channel is unavailable, try again")
 		return
 	}
+	pins, err := a.Repo.ListPins(ctx, a.id, maxPins)
+	if err != nil {
+		a.Logger.Error("failed to load channel pins", zap.String("channel", a.id.String()), zap.Error(err))
+		a.loadErr = ierrors.Unavailable("channel is unavailable, try again")
+		return
+	}
+	a.pins = len(pins)
 	a.ch = ch
 	a.bucket, a.hasBucket = bucket, has
 	a.members = make(map[gocql.UUID]models.ChannelRole, len(members))
@@ -192,6 +201,12 @@ func (a *channel) handle(c *actor.Context, req Request) {
 		out, err = a.archive(msg)
 	case ThreadRead:
 		err = a.threadRead(c, msg)
+	case Pin:
+		out, err = a.pin(msg)
+	case Pins:
+		err = a.listPins(c, msg)
+	case Save:
+		out, err = a.save(msg)
 	case Follow:
 		out, err = a.follow(msg)
 	case MarkRead:
@@ -292,7 +307,9 @@ func (a *channel) mute(msg Mute) (Done, error) {
 // channelFor renders the channel as userID sees it.
 func (a *channel) channelFor(userID gocql.UUID, role models.ChannelRole) (*pb.Channel, error) {
 	if !a.ch.Kind.Conversation() {
-		return convert.Channel(a.ch, role, gocql.UUID{}, nil), nil
+		out := convert.Channel(a.ch, role, gocql.UUID{}, nil)
+		out.PinnedCount = int32(a.pins) //nolint:gosec // at most maxPins
+		return out, nil
 	}
 	ctx, cancel := a.ctx()
 	defer cancel()
@@ -300,7 +317,9 @@ func (a *channel) channelFor(userID gocql.UUID, role models.ChannelRole) (*pb.Ch
 	if err != nil {
 		return nil, err
 	}
-	return convert.Conversation(a.ch, role, gocql.UUID{}, userID, people), nil
+	out := convert.Conversation(a.ch, role, gocql.UUID{}, userID, people)
+	out.PinnedCount = int32(a.pins) //nolint:gosec // at most maxPins
+	return out, nil
 }
 
 func (a *channel) poster(userID gocql.UUID) *rate.Limiter {
@@ -656,8 +675,9 @@ func (a *channel) edit(msg Edit) (*pb.Message, error) {
 	m.Content, m.EditedAt = content, now
 	a.file(index.Update{Doc: a.doc(m), Old: old})
 	out := convert.Message(m, convert.PublicUser(author), orderAttachments(m.Attachments, atts))
+	mine := proto.CloneOf(out)
 	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessageEdited{MessageEdited: &pb.MessageEdited{Message: out}}})
-	return out, nil
+	return mine, a.markSaved(ctx, msg.P.UserID, []*pb.Message{mine})
 }
 
 func (a *channel) delete(msg Delete) (Done, error) {
@@ -691,6 +711,7 @@ func (a *channel) delete(msg Delete) (Done, error) {
 		return Done{}, err
 	}
 	a.file(index.Remove{Doc: a.doc(m)})
+	a.unpinGone(ctx, m)
 	a.dropReactions(ctx, m.ID)
 	if m.ID == a.ch.LastMessageID {
 		a.rewindLast(ctx)
@@ -713,6 +734,7 @@ func (a *channel) deleteReply(ctx context.Context, m *models.Message) error {
 		return err
 	}
 	a.file(index.Remove{Doc: a.doc(m)})
+	a.unpinGone(ctx, m)
 	a.dropReactions(ctx, m.ID)
 	a.dropAttachments(m.Attachments)
 	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessageDeleted{MessageDeleted: &pb.MessageDeleted{
@@ -754,6 +776,7 @@ func (a *channel) dropThread(ctx context.Context, rootID gocql.UUID) {
 	var atts []gocql.UUID
 	for _, m := range replies {
 		a.file(index.Remove{Doc: a.doc(m)})
+		a.unpinGone(ctx, m)
 		a.dropReactions(ctx, m.ID)
 		atts = append(atts, m.Attachments...)
 	}
@@ -939,6 +962,7 @@ func (a *channel) history(c *actor.Context, msg History) error {
 	if limit <= 0 || limit > a.Cfg.HistoryLimit {
 		limit = a.Cfg.HistoryLimit
 	}
+	userID := msg.P.UserID
 	a.async(c, func(ctx context.Context) (any, error) {
 		var (
 			list []*models.Message
@@ -957,7 +981,7 @@ func (a *channel) history(c *actor.Context, msg History) error {
 		if err != nil {
 			return nil, err
 		}
-		return &HistoryResult{Messages: out, HasMore: more}, nil
+		return &HistoryResult{Messages: out, HasMore: more}, a.markSaved(ctx, userID, out)
 	})
 	return nil
 }
@@ -975,7 +999,7 @@ func (a *channel) getMessage(c *actor.Context, msg GetMessage) error {
 		if err != nil {
 			return nil, err
 		}
-		return out[0], nil
+		return out[0], a.markSaved(ctx, msg.P.UserID, out)
 	})
 	return nil
 }
@@ -1014,7 +1038,7 @@ func (a *channel) thread(c *actor.Context, msg Thread) error {
 		if err != nil {
 			return nil, err
 		}
-		return &ThreadResult{Root: out[0], Replies: out[1:], HasMore: more, Following: following}, nil
+		return &ThreadResult{Root: out[0], Replies: out[1:], HasMore: more, Following: following}, a.markSaved(ctx, msg.P.UserID, out)
 	})
 	return nil
 }

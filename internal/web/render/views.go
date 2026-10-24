@@ -24,7 +24,9 @@ type Message struct {
 	Mentioned bool
 	Focus     bool
 	OOB       bool
-	bar       ReactionsView
+	// Saved is whether the reader saved the message.
+	Saved bool
+	bar   ReactionsView
 }
 
 // Message prepares m for the viewer meID; moderators may delete any message.
@@ -38,6 +40,7 @@ func (r *Renderer) Message(m *pb.Message, me *pb.User, moderator bool) *Message 
 		Mine:      mine,
 		CanDelete: mine || moderator,
 		Mentioned: !mine && Mentions(m, me),
+		Saved:     m.GetSaved(),
 		bar:       Reactions(m.GetChannelId(), m.GetId(), m.GetRootId(), m.GetReactions(), me, false),
 	}
 }

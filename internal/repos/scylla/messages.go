@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	messageColumns = "channel_id, bucket, id, user_id, content, attachments, edited_at, reply_count, last_reply_at, participants"
-	replyColumns   = "channel_id, root_id, id, user_id, content, attachments, edited_at"
+	messageColumns = "channel_id, bucket, id, user_id, content, attachments, edited_at, reply_count, last_reply_at, participants, pinned"
+	replyColumns   = "channel_id, root_id, id, user_id, content, attachments, edited_at, pinned"
 )
 
 // InsertMessage writes m, and the bucket it opens when newBucket is set.

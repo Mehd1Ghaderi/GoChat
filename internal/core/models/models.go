@@ -132,6 +132,7 @@ type Message struct {
 	ReplyCount   int          `db:"reply_count"`
 	LastReplyAt  time.Time    `db:"last_reply_at"`
 	Participants []gocql.UUID `db:"participants"`
+	Pinned       bool         `db:"pinned"`
 }
 
 type Attachment struct {

@@ -63,8 +63,11 @@ type (
 	}
 	railReady  struct{ rail *render.Rail }
 	mutedReady struct{ ids []string }
-	failed     struct{ text string }
-	expired    struct{}
+	savedReady struct{ ids []string }
+	// refetched is a message read again to show it as it now is.
+	refetched struct{ m *pb.Message }
+	failed    struct{ text string }
+	expired   struct{}
 	// viewChecked carries the newest message of the channel a tab opened.
 	viewChecked struct{ channelID, last string }
 	leftChannel struct{ channelID string }
@@ -92,8 +95,10 @@ type session struct {
 	peers    map[string]bool
 	directs  map[string]bool
 	// muted holds the channels the user muted, names the sidebar's titles.
-	muted     map[string]bool
-	names     map[string]string
+	muted map[string]bool
+	names map[string]string
+	// saved holds the messages the user saved.
+	saved     map[string]bool
 	typingSeq uint64
 	// typer is who the typing line names, and shown the newest message on
 	// the page.
@@ -128,6 +133,7 @@ func NewSession(d *Deps, connID uint64, call drpc.Call, ws *websocket.Conn) acto
 			sidebar:  make(map[string]bool),
 			mentions: make(map[string]int),
 			muted:    make(map[string]bool),
+			saved:    make(map[string]bool),
 			names:    make(map[string]string),
 			peers:    make(map[string]bool),
 			reads:    make(map[string]string),
@@ -177,6 +183,13 @@ func (s *session) Receive(c *actor.Context) {
 				return nil
 			}
 			return mutedReady{ids: res.ChannelIds}
+		})
+		s.rpc(c, func(ctx context.Context) any {
+			res, err := s.Client.Messages.ListSaved(ctx, &pb.ListSavedRequest{IdsOnly: true})
+			if err != nil {
+				return nil
+			}
+			return savedReady{ids: res.MessageIds}
 		})
 	case Rejected:
 		if msg.Retry {
@@ -273,6 +286,16 @@ func (s *session) Receive(c *actor.Context) {
 		for _, id := range msg.ids {
 			s.muted[id] = true
 		}
+	case savedReady:
+		for _, id := range msg.ids {
+			s.saved[id] = true
+		}
+	case refetched:
+		if s.inView(msg.m.ChannelId, msg.m.RootId) {
+			view := s.show(msg.m)
+			view.OOB = true
+			s.message("message", view)
+		}
 	case failed:
 		s.toast("error", msg.text)
 	}
@@ -366,6 +389,22 @@ func (s *session) message(name string, m *render.Message) {
 		return
 	}
 	s.send(b)
+}
+
+// show prepares m for this tab, as its reader saved it.
+func (s *session) show(m *pb.Message) *render.Message {
+	view := s.Render.Message(m, s.user, s.moderator)
+	view.Saved = s.saved[m.Id]
+	return view
+}
+
+// inView reports whether the tab shows the message of channelID, a reply
+// when rootID is set.
+func (s *session) inView(channelID, rootID string) bool {
+	if rootID == "" {
+		return channelID == s.channelID
+	}
+	return rootID == s.threadID
 }
 
 func (s *session) toast(kind, text string) {
@@ -642,7 +681,7 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 		}
 		if m.RootId != "" {
 			if m.RootId == s.threadID {
-				s.message("reply-new", s.Render.Message(m, s.user, s.moderator))
+				s.message("reply-new", s.show(m))
 				if !mine {
 					s.readThread(c)
 				}
@@ -661,7 +700,7 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 			if s.anchored {
 				return
 			}
-			s.message("message-new", s.Render.Message(m, s.user, s.moderator))
+			s.message("message-new", s.show(m))
 			if render.Newer(m.Id, s.shown) {
 				s.shown = m.Id
 			}
@@ -681,8 +720,8 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 		}
 	case *pb.Event_MessageEdited:
 		m := p.MessageEdited.Message
-		if (m.RootId == "" && m.ChannelId == s.channelID) || (m.RootId != "" && m.RootId == s.threadID) {
-			view := s.Render.Message(m, s.user, s.moderator)
+		if s.inView(m.ChannelId, m.RootId) {
+			view := s.show(m)
 			view.OOB = true
 			s.message("message", view)
 		}
@@ -692,7 +731,7 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 			s.threadID = ""
 			s.fragment("thread-closed", nil)
 		}
-		if (d.RootId == "" && d.ChannelId == s.channelID) || (d.RootId != "" && d.RootId == s.threadID) {
+		if s.inView(d.ChannelId, d.RootId) {
 			s.fragment("message-deleted", d.MessageId)
 		}
 	case *pb.Event_ChannelUpdated:
@@ -710,6 +749,28 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 			s.fragment("channel-header", view)
 			s.fragment("composer-area", view)
 		}
+	case *pb.Event_SavedChanged:
+		d := p.SavedChanged
+		if d.Saved {
+			s.saved[d.MessageId] = true
+		} else {
+			delete(s.saved, d.MessageId)
+		}
+		s.fragment("saved-changed", nil)
+		if s.inView(d.ChannelId, d.RootId) {
+			req := &pb.GetMessageRequest{ChannelId: d.ChannelId, MessageId: d.MessageId, RootId: d.RootId}
+			s.rpc(c, func(ctx context.Context) any {
+				res, err := s.Client.Messages.GetMessage(ctx, req)
+				if err != nil {
+					return nil
+				}
+				return refetched{m: res.Message}
+			})
+		}
+	case *pb.Event_PinsChanged:
+		if d := p.PinsChanged; d.ChannelId == s.channelID {
+			s.fragment("pins-button", map[string]any{"Team": s.teamName, "Channel": d.ChannelId, "Count": d.Count, "OOB": true})
+		}
 	case *pb.Event_ChannelMuted:
 		s.muted[p.ChannelMuted.ChannelId] = p.ChannelMuted.Muted
 		if s.sidebar[p.ChannelMuted.ChannelId] {
@@ -717,7 +778,7 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 		}
 	case *pb.Event_ReactionsChanged:
 		d := p.ReactionsChanged
-		if (d.RootId == "" && d.ChannelId == s.channelID) || (d.RootId != "" && d.RootId == s.threadID) {
+		if s.inView(d.ChannelId, d.RootId) {
 			s.fragment("reactions", render.Reactions(d.ChannelId, d.MessageId, d.RootId, d.Reactions, s.user, true))
 		}
 	case *pb.Event_Typing:

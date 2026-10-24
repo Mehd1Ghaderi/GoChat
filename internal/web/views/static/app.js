@@ -384,6 +384,8 @@
 
   document.body.addEventListener("htmx:afterSwap", function (e) {
     if (e.detail.target && e.detail.target.id === "thread") {
+      var toggle = document.getElementById("nav-toggle");
+      if (toggle) toggle.checked = false;
       announceThread();
       var input = document.querySelector("[data-search-input]");
       if (input) {
@@ -402,7 +404,7 @@
     }
     if (e.detail.target && e.detail.target.id === "main") {
       if (document.getElementById("switcher")) closeModal();
-      if (!(roomy.matches && document.getElementById("search-view"))) closeThread();
+      if (!(roomy.matches && document.querySelector("#thread [data-keep]"))) closeThread();
       markActive();
       announce(false);
       openLinkedThread();
@@ -423,6 +425,10 @@
     if (t.id.indexOf("replies-") === 0) scrollThread(false);
     if (t.id === "notify") showNotice(t.dataset);
     if (t.id === "channel-lists" || t.id.indexOf("unread-") === 0) updateTitle();
+    // A pin or save elsewhere refreshes the list showing it.
+    var list = t.id.indexOf("pins-btn-") === 0 ? document.querySelector('[data-pins="' + t.id.slice(9) + '"]')
+      : t.id === "saved-changed" ? document.getElementById("saved-list") : null;
+    if (list) htmx.trigger(list, "refresh");
   });
 
   document.body.addEventListener("closeModal", closeModal);
