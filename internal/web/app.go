@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -636,15 +637,35 @@ func (h *Handler) openDirect(w http.ResponseWriter, r *http.Request) {
 type inviteListData struct {
 	Team    *pb.Team
 	Invites []*pb.InviteSummary
+	MoreURL string
 	OOB     bool
 }
 
-func (h *Handler) invites(ctx context.Context, team *pb.Team) (inviteListData, error) {
-	res, err := h.client.Teams.ListInvites(ctx, &pb.ListInvitesRequest{TeamId: team.Id})
+func (h *Handler) invites(ctx context.Context, team *pb.Team, after string) (inviteListData, error) {
+	res, err := h.client.Teams.ListInvites(ctx, &pb.ListInvitesRequest{TeamId: team.Id, After: after})
 	if err != nil {
 		return inviteListData{}, err
 	}
-	return inviteListData{Team: team, Invites: res.Invites}, nil
+	data := inviteListData{Team: team, Invites: res.Invites}
+	if res.Next != "" {
+		data.MoreURL = "/t/" + team.Name + "/invites?" + url.Values{"after": {res.Next}}.Encode()
+	}
+	return data, nil
+}
+
+// moreInvites continues the list of open invites.
+func (h *Handler) moreInvites(w http.ResponseWriter, r *http.Request) {
+	_, team, ctx, cancel := h.teamFor(w, r)
+	if team == nil {
+		return
+	}
+	defer cancel()
+	data, err := h.invites(ctx, team, r.URL.Query().Get("after"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	h.fragment(w, http.StatusOK, "invite-rows", data)
 }
 
 func (h *Handler) inviteModal(w http.ResponseWriter, r *http.Request) {
@@ -653,7 +674,7 @@ func (h *Handler) inviteModal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer cancel()
-	data, err := h.invites(ctx, team)
+	data, err := h.invites(ctx, team, "")
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -679,7 +700,7 @@ func (h *Handler) createInvite(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt time.Time
 	}{h.cfg.PublicURL + "/join/" + res.Token, res.ExpiresAt.AsTime()})
 	if err == nil {
-		if data, lerr := h.invites(ctx, team); lerr == nil {
+		if data, lerr := h.invites(ctx, team, ""); lerr == nil {
 			data.OOB = true
 			err = h.render.Fragment(&out, "invite-list", data)
 		}
@@ -707,7 +728,7 @@ func (h *Handler) revokeInvite(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	data, lerr := h.invites(ctx, team)
+	data, lerr := h.invites(ctx, team, "")
 	if lerr != nil {
 		h.fail(w, r, lerr)
 		return
@@ -731,6 +752,7 @@ type teamMembersData struct {
 	System  bool
 	MeID    string
 	Members []*pb.TeamMember
+	MoreURL string
 }
 
 // CanChange reports whether the viewer may change m's role or remove them,
@@ -750,16 +772,29 @@ func (d teamMembersData) CanChange(m *pb.TeamMember) bool {
 	return true
 }
 
-func (h *Handler) renderTeamMembers(w http.ResponseWriter, r *http.Request, ctx context.Context, u *pb.User, team *pb.Team) {
-	res, err := h.client.Teams.ListTeamMembers(ctx, &pb.ListTeamMembersRequest{TeamId: team.Id, Limit: 200})
+// memberPage is how many members the team's list shows at once.
+const memberPage = 100
+
+// renderTeamMembers shows the team's members, or with after the next of
+// them.
+func (h *Handler) renderTeamMembers(w http.ResponseWriter, r *http.Request, ctx context.Context, u *pb.User, team *pb.Team, after string) {
+	res, err := h.client.Teams.ListTeamMembers(ctx, &pb.ListTeamMembersRequest{TeamId: team.Id, Limit: memberPage, After: after})
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "team-members", teamMembersData{
+	data := teamMembersData{
 		Team: team, Admin: team.Role == pb.TeamRole_TEAM_ROLE_ADMIN || u.Role == pb.SystemRole_SYSTEM_ROLE_ADMIN,
 		System: u.Role == pb.SystemRole_SYSTEM_ROLE_ADMIN, MeID: u.Id, Members: res.Members,
-	})
+	}
+	if res.Next != "" {
+		data.MoreURL = "/t/" + team.Name + "/members?" + url.Values{"after": {res.Next}}.Encode()
+	}
+	name := "team-members"
+	if after != "" {
+		name = "team-member-rows"
+	}
+	h.fragment(w, http.StatusOK, name, data)
 }
 
 func (h *Handler) teamMembers(w http.ResponseWriter, r *http.Request) {
@@ -768,7 +803,12 @@ func (h *Handler) teamMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer cancel()
-	h.renderTeamMembers(w, r, ctx, u, team)
+	after := r.URL.Query().Get("after")
+	if len(after) > 64 {
+		h.fail(w, r, ierrors.InvalidArgument("invalid cursor"))
+		return
+	}
+	h.renderTeamMembers(w, r, ctx, u, team, after)
 }
 
 func (h *Handler) removeTeamMember(w http.ResponseWriter, r *http.Request) {
@@ -798,7 +838,7 @@ func (h *Handler) teamMemberRole(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.renderTeamMembers(w, r, ctx, u, team)
+	h.renderTeamMembers(w, r, ctx, u, team, "")
 }
 
 type channelMembersData struct {

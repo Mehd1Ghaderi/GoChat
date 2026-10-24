@@ -1279,10 +1279,30 @@ func (a *channel) join(msg Join) (*pb.Channel, error) {
 	if !msg.System && !a.Authz.Can(authz.ObjChannel, authz.ActJoin, string(tr), string(msg.P.Role)) {
 		return nil, ierrors.PermissionDenied()
 	}
-	if err := a.addLocal(ctx, msg.P.UserID, models.ChannelRoleMember); err != nil {
+	if err := a.addTeamMember(ctx, msg.P.UserID); err != nil {
 		return nil, err
 	}
 	return a.joined(msg.P.UserID, models.ChannelRoleMember)
+}
+
+// addTeamMember adds a member of the channel's team, checking again once
+// added: a removal from the team lists the channels after it, so a join it
+// missed is undone here.
+func (a *channel) addTeamMember(ctx context.Context, userID gocql.UUID) error {
+	if err := a.addLocal(ctx, userID, models.ChannelRoleMember); err != nil {
+		return err
+	}
+	tr, err := a.teamRole(ctx, userID)
+	if err == nil && tr != "" {
+		return nil
+	}
+	if rerr := a.removeLocal(ctx, userID); rerr != nil {
+		a.Logger.Error("failed to undo a join", zap.String("channel", a.id.String()), zap.Error(rerr))
+	}
+	if err != nil {
+		return err
+	}
+	return ierrors.NotFound("channel not found")
 }
 
 func (a *channel) leave(msg Leave) (Done, error) {
@@ -1334,7 +1354,10 @@ func (a *channel) addMember(msg AddMember) (Done, error) {
 	if tr == "" {
 		return Done{}, ierrors.InvalidArgument("only team members can be added")
 	}
-	if err := a.addLocal(ctx, target, models.ChannelRoleMember); err != nil {
+	if err := a.addTeamMember(ctx, target); err != nil {
+		if ierrors.Is(err, ierrors.CodeNotFound) {
+			return Done{}, ierrors.InvalidArgument("only team members can be added")
+		}
 		return Done{}, err
 	}
 	if _, err := a.joined(target, models.ChannelRoleMember); err != nil {

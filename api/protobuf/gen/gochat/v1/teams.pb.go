@@ -336,8 +336,10 @@ type ListTeamMembersRequest struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	TeamId string                 `protobuf:"bytes,1,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
 	// Case-insensitive prefix of the username or display name; empty lists all.
-	Query         string `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
-	Limit         uint32 `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	Query string `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
+	Limit uint32 `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	// after continues a listing from a response's next.
+	After         string `protobuf:"bytes,4,opt,name=after,proto3" json:"after,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -393,9 +395,18 @@ func (x *ListTeamMembersRequest) GetLimit() uint32 {
 	return 0
 }
 
+func (x *ListTeamMembersRequest) GetAfter() string {
+	if x != nil {
+		return x.After
+	}
+	return ""
+}
+
 type ListTeamMembersResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Members       []*TeamMember          `protobuf:"bytes,1,rep,name=members,proto3" json:"members,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Members []*TeamMember          `protobuf:"bytes,1,rep,name=members,proto3" json:"members,omitempty"`
+	// next continues the listing; empty at its end.
+	Next          string `protobuf:"bytes,2,opt,name=next,proto3" json:"next,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -435,6 +446,13 @@ func (x *ListTeamMembersResponse) GetMembers() []*TeamMember {
 		return x.Members
 	}
 	return nil
+}
+
+func (x *ListTeamMembersResponse) GetNext() string {
+	if x != nil {
+		return x.Next
+	}
+	return ""
 }
 
 type RemoveTeamMemberRequest struct {
@@ -903,8 +921,10 @@ func (x *AcceptInviteResponse) GetTeam() *Team {
 }
 
 type ListInvitesRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TeamId        string                 `protobuf:"bytes,1,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	TeamId string                 `protobuf:"bytes,1,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	// after continues a listing from a response's next.
+	After         string `protobuf:"bytes,2,opt,name=after,proto3" json:"after,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -942,6 +962,13 @@ func (*ListInvitesRequest) Descriptor() ([]byte, []int) {
 func (x *ListInvitesRequest) GetTeamId() string {
 	if x != nil {
 		return x.TeamId
+	}
+	return ""
+}
+
+func (x *ListInvitesRequest) GetAfter() string {
+	if x != nil {
+		return x.After
 	}
 	return ""
 }
@@ -1026,8 +1053,10 @@ func (x *InviteSummary) GetActive() bool {
 }
 
 type ListInvitesResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Invites       []*InviteSummary       `protobuf:"bytes,1,rep,name=invites,proto3" json:"invites,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Invites []*InviteSummary       `protobuf:"bytes,1,rep,name=invites,proto3" json:"invites,omitempty"`
+	// next continues the listing; empty at its end.
+	Next          string `protobuf:"bytes,2,opt,name=next,proto3" json:"next,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1067,6 +1096,13 @@ func (x *ListInvitesResponse) GetInvites() []*InviteSummary {
 		return x.Invites
 	}
 	return nil
+}
+
+func (x *ListInvitesResponse) GetNext() string {
+	if x != nil {
+		return x.Next
+	}
+	return ""
 }
 
 type RevokeInviteRequest struct {
@@ -1360,13 +1396,15 @@ const file_gochat_v1_teams_proto_rawDesc = "" +
 	"\x04name\x18\x02 \x01(\tH\x00R\x04nameB\x05\n" +
 	"\x03key\"6\n" +
 	"\x0fGetTeamResponse\x12#\n" +
-	"\x04team\x18\x01 \x01(\v2\x0f.gochat.v1.TeamR\x04team\"]\n" +
+	"\x04team\x18\x01 \x01(\v2\x0f.gochat.v1.TeamR\x04team\"s\n" +
 	"\x16ListTeamMembersRequest\x12\x17\n" +
 	"\ateam_id\x18\x01 \x01(\tR\x06teamId\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\x12\x14\n" +
-	"\x05limit\x18\x03 \x01(\rR\x05limit\"J\n" +
+	"\x05limit\x18\x03 \x01(\rR\x05limit\x12\x14\n" +
+	"\x05after\x18\x04 \x01(\tR\x05after\"^\n" +
 	"\x17ListTeamMembersResponse\x12/\n" +
-	"\amembers\x18\x01 \x03(\v2\x15.gochat.v1.TeamMemberR\amembers\"K\n" +
+	"\amembers\x18\x01 \x03(\v2\x15.gochat.v1.TeamMemberR\amembers\x12\x12\n" +
+	"\x04next\x18\x02 \x01(\tR\x04next\"K\n" +
 	"\x17RemoveTeamMemberRequest\x12\x17\n" +
 	"\ateam_id\x18\x01 \x01(\tR\x06teamId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\"\x1a\n" +
@@ -1390,9 +1428,10 @@ const file_gochat_v1_teams_proto_rawDesc = "" +
 	"\x13AcceptInviteRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\";\n" +
 	"\x14AcceptInviteResponse\x12#\n" +
-	"\x04team\x18\x01 \x01(\v2\x0f.gochat.v1.TeamR\x04team\"-\n" +
+	"\x04team\x18\x01 \x01(\v2\x0f.gochat.v1.TeamR\x04team\"C\n" +
 	"\x12ListInvitesRequest\x12\x17\n" +
-	"\ateam_id\x18\x01 \x01(\tR\x06teamId\"\xdd\x01\n" +
+	"\ateam_id\x18\x01 \x01(\tR\x06teamId\x12\x14\n" +
+	"\x05after\x18\x02 \x01(\tR\x05after\"\xdd\x01\n" +
 	"\rInviteSummary\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12.\n" +
 	"\n" +
@@ -1401,9 +1440,10 @@ const file_gochat_v1_teams_proto_rawDesc = "" +
 	"created_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
 	"expires_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\x12\x16\n" +
-	"\x06active\x18\x05 \x01(\bR\x06active\"I\n" +
+	"\x06active\x18\x05 \x01(\bR\x06active\"]\n" +
 	"\x13ListInvitesResponse\x122\n" +
-	"\ainvites\x18\x01 \x03(\v2\x18.gochat.v1.InviteSummaryR\ainvites\"K\n" +
+	"\ainvites\x18\x01 \x03(\v2\x18.gochat.v1.InviteSummaryR\ainvites\x12\x12\n" +
+	"\x04next\x18\x02 \x01(\tR\x04next\"K\n" +
 	"\x13RevokeInviteRequest\x12\x17\n" +
 	"\ateam_id\x18\x01 \x01(\tR\x06teamId\x12\x1b\n" +
 	"\tinvite_id\x18\x02 \x01(\tR\binviteId\"\x16\n" +
