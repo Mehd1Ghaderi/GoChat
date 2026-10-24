@@ -34,6 +34,9 @@ const (
 	ChannelPublic  ChannelKind = "public"
 	ChannelPrivate ChannelKind = "private"
 	ChannelDirect  ChannelKind = "direct"
+	// ChannelVoice is a room to talk in. Everyone in its team may join the
+	// talk; it carries no messages.
+	ChannelVoice ChannelKind = "voice"
 )
 
 type User struct {

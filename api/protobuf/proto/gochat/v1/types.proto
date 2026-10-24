@@ -27,6 +27,8 @@ enum ChannelType {
   CHANNEL_TYPE_PUBLIC = 1;
   CHANNEL_TYPE_PRIVATE = 2;
   CHANNEL_TYPE_DIRECT = 3;
+  // A voice channel carries no messages: its members talk live.
+  CHANNEL_TYPE_VOICE = 4;
 }
 
 message User {

@@ -176,6 +176,8 @@ const (
 	ChannelType_CHANNEL_TYPE_PUBLIC      ChannelType = 1
 	ChannelType_CHANNEL_TYPE_PRIVATE     ChannelType = 2
 	ChannelType_CHANNEL_TYPE_DIRECT      ChannelType = 3
+	// A voice channel carries no messages: its members talk live.
+	ChannelType_CHANNEL_TYPE_VOICE ChannelType = 4
 )
 
 // Enum value maps for ChannelType.
@@ -185,12 +187,14 @@ var (
 		1: "CHANNEL_TYPE_PUBLIC",
 		2: "CHANNEL_TYPE_PRIVATE",
 		3: "CHANNEL_TYPE_DIRECT",
+		4: "CHANNEL_TYPE_VOICE",
 	}
 	ChannelType_value = map[string]int32{
 		"CHANNEL_TYPE_UNSPECIFIED": 0,
 		"CHANNEL_TYPE_PUBLIC":      1,
 		"CHANNEL_TYPE_PRIVATE":     2,
 		"CHANNEL_TYPE_DIRECT":      3,
+		"CHANNEL_TYPE_VOICE":       4,
 	}
 )
 
@@ -1110,12 +1114,13 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"\vChannelRole\x12\x1c\n" +
 	"\x18CHANNEL_ROLE_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13CHANNEL_ROLE_MEMBER\x10\x01\x12\x16\n" +
-	"\x12CHANNEL_ROLE_ADMIN\x10\x02*w\n" +
+	"\x12CHANNEL_ROLE_ADMIN\x10\x02*\x8f\x01\n" +
 	"\vChannelType\x12\x1c\n" +
 	"\x18CHANNEL_TYPE_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13CHANNEL_TYPE_PUBLIC\x10\x01\x12\x18\n" +
 	"\x14CHANNEL_TYPE_PRIVATE\x10\x02\x12\x17\n" +
-	"\x13CHANNEL_TYPE_DIRECT\x10\x03B\x9f\x01\n" +
+	"\x13CHANNEL_TYPE_DIRECT\x10\x03\x12\x16\n" +
+	"\x12CHANNEL_TYPE_VOICE\x10\x04B\x9f\x01\n" +
 	"\rcom.gochat.v1B\n" +
 	"TypesProtoP\x01Z=github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1;gochatv1\xa2\x02\x03GXX\xaa\x02\tGochat.V1\xca\x02\tGochat\\V1\xe2\x02\x15Gochat\\V1\\GPBMetadata\xea\x02\n" +
 	"Gochat::V1b\x06proto3"

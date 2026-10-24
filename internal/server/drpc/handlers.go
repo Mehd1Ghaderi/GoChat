@@ -402,8 +402,10 @@ func (s *channelService) CreateChannel(ctx context.Context, req *pb.CreateChanne
 		kind = models.ChannelPublic
 	case pb.ChannelType_CHANNEL_TYPE_PRIVATE:
 		kind = models.ChannelPrivate
+	case pb.ChannelType_CHANNEL_TYPE_VOICE:
+		kind = models.ChannelVoice
 	default:
-		return nil, ierrors.InvalidArgument("channel type must be public or private")
+		return nil, ierrors.InvalidArgument("channel type must be public, private or voice")
 	}
 	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Directory, directory.CreateChannel{
 		P: p, TeamID: req.TeamId, Name: req.Name, DisplayName: req.DisplayName, Purpose: req.Purpose, Kind: kind,

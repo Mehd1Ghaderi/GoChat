@@ -28,6 +28,16 @@ type AccessResult struct {
 	Role models.ChannelRole
 }
 
+// VoiceAccess replies with *VoiceAccessResult: whether the caller may talk
+// in the voice channel, and disconnect others from it.
+type VoiceAccess struct{ Target }
+
+type VoiceAccessResult struct {
+	Channel     *models.Channel
+	CanConnect  bool
+	CanModerate bool
+}
+
 // View replies with the caller's *pb.Channel.
 type View struct{ Target }
 

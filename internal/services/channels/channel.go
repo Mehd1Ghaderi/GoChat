@@ -159,7 +159,13 @@ func (a *channel) handle(c *actor.Context, req Request) {
 		out any
 		err error
 	)
+	if err := a.voiceRefuses(req); err != nil {
+		actors.Reply(c, err)
+		return
+	}
 	switch msg := req.(type) {
+	case VoiceAccess:
+		out, err = a.voiceAccess(msg.P)
 	case Access:
 		ch := *a.ch
 		out = &AccessResult{Channel: &ch, Role: a.members[msg.P.UserID]}
@@ -212,6 +218,49 @@ func (a *channel) handle(c *actor.Context, req Request) {
 	}
 }
 
+// voiceRefuses refuses in a voice channel what only text channels do.
+func (a *channel) voiceRefuses(req Request) error {
+	if a.ch.Kind != models.ChannelVoice {
+		return nil
+	}
+	switch req.(type) {
+	case Post, Edit, Delete, History, GetMessage, Thread, Typing, React, Mute, MarkRead, SetVoice:
+		return ierrors.FailedPrecondition("voice channels carry no messages")
+	case Join, AddMember:
+		return ierrors.FailedPrecondition("everyone in the team may talk in a voice channel: join the talk instead")
+	}
+	return nil
+}
+
+// voiceAccess tells what the caller may do in the talk of a voice channel:
+// members of its team connect, its moderators disconnect others.
+func (a *channel) voiceAccess(p *models.Principal) (*VoiceAccessResult, error) {
+	if a.ch.Kind != models.ChannelVoice {
+		return nil, ierrors.NotFound("voice channel not found")
+	}
+	ctx, cancel := a.ctx()
+	defer cancel()
+	tr, err := a.teamRole(ctx, p.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if tr == "" && p.Role != models.SystemRoleAdmin {
+		return nil, ierrors.NotFound("voice channel not found")
+	}
+	ch := *a.ch
+	return &VoiceAccessResult{
+		Channel:     &ch,
+		CanConnect:  a.Authz.Can(authz.ObjVoice, authz.ActConnect, string(tr), string(p.Role)),
+		CanModerate: a.Authz.Can(authz.ObjVoice, authz.ActMove, string(a.members[p.UserID]), string(tr), string(p.Role)),
+	}, nil
+}
+
+// open reports whether the team's members may see the channel without
+// belonging to it.
+func (a *channel) open() bool {
+	return a.ch.Kind == models.ChannelPublic || a.ch.Kind == models.ChannelVoice
+}
+
 func (a *channel) member(p *models.Principal) (models.ChannelRole, error) {
 	role, ok := a.members[p.UserID]
 	if !ok {
@@ -239,7 +288,7 @@ func (a *channel) teamRole(ctx context.Context, userID gocql.UUID) (models.TeamR
 
 func (a *channel) view(p *models.Principal) (*pb.Channel, error) {
 	role, ok := a.members[p.UserID]
-	if !ok && a.ch.Kind != models.ChannelPublic {
+	if !ok && !a.open() {
 		return nil, ierrors.NotFound("channel not found")
 	}
 	if !ok {

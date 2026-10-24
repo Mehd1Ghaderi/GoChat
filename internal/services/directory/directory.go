@@ -682,10 +682,13 @@ func peerOf(ch *models.Channel, self gocql.UUID) (gocql.UUID, bool) {
 }
 
 func (w *worker) listChannels(ctx context.Context, msg ListChannels) ([]*pb.Channel, error) {
-	var memberships []*models.ChannelMember
+	var (
+		memberships []*models.ChannelMember
+		teamID      gocql.UUID
+	)
 	if msg.TeamID != "" {
-		teamID, err := parseID(msg.TeamID, "team")
-		if err != nil {
+		var err error
+		if teamID, err = parseID(msg.TeamID, "team"); err != nil {
 			return nil, err
 		}
 		if _, err := w.membership(ctx, teamID, msg.P.UserID); err != nil {
@@ -705,6 +708,18 @@ func (w *worker) listChannels(ctx context.Context, msg ListChannels) ([]*pb.Chan
 	for _, m := range memberships {
 		roles[m.ChannelID] = m.Role
 		chIDs = append(chIDs, m.ChannelID)
+	}
+	// Every member of a team sees its voice channels, as rooms to talk in.
+	if msg.TeamID != "" {
+		listed, err := w.Repo.ListTeamChannels(ctx, teamID)
+		if err != nil {
+			return nil, err
+		}
+		for _, tc := range listed {
+			if _, mine := roles[tc.ChannelID]; tc.Kind == models.ChannelVoice && !mine {
+				chIDs = append(chIDs, tc.ChannelID)
+			}
+		}
 	}
 	reads, err := w.Repo.ListLastReads(ctx, msg.P.UserID)
 	if err != nil {
@@ -825,8 +840,10 @@ func (w *worker) createChannel(ctx context.Context, msg CreateChannel) (*pb.Chan
 	case models.ChannelPublic:
 	case models.ChannelPrivate:
 		act = authz.ActCreatePrivate
+	case models.ChannelVoice:
+		act = authz.ActCreateVoice
 	default:
-		return nil, ierrors.InvalidArgument("channel type must be public or private")
+		return nil, ierrors.InvalidArgument("channel type must be public, private or voice")
 	}
 	if !w.Authz.Can(authz.ObjChannel, act, string(m.Role), string(msg.P.Role)) {
 		return nil, ierrors.PermissionDenied()
