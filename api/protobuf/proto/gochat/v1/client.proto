@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package gochat.v1;
+
+import "gochat/v1/gateway.proto";
+import "gochat/v1/types.proto";
+import "google/protobuf/timestamp.proto";
+
+// The client API is what native apps use, at /api/v1 of the web gateway.
+// They authenticate every request with the session token of Login,
+// VerifyMFA or SignUp, in "Authorization: Bearer <token>"; cookies are
+// never read.
+//
+// POST /api/v1/rpc/<service>/<method>, such as
+// /api/v1/rpc/gochat.v1.ChannelService/GetChannel, makes one call of the
+// chat API. Its body is the request, in protobuf (Content-Type
+// application/proto) or JSON (application/json); the answer is the response
+// in the same encoding, or an ApiError with the HTTP status of its code.
+//
+// GET /api/v1/gateway opens the event socket: it sends one binary
+// ClientFrame per message, a ClientReady first. A socket that ends with a
+// close code of 4000 or more says why:
+//   4000  the chat server could not attach it: reconnect later
+//   4001  the token is not a valid session: sign in again
+//   4003  the session was revoked or expired: sign in again
+//   4008  the person holds too many sockets open
+//   4009  the app fell too far behind its events: reconnect and resync
+//
+// POST /api/v1/files?channel_id=&name=[&voice=1&duration_ms=] uploads its
+// body as one attachment and answers the Attachment; GET
+// /api/v1/files/<id> downloads one. GET /api/v1/photos/<u|t>/<id>/<version>
+// serves a person's or a team's photo, and POST /api/v1/photo sets the
+// caller's own from any JPEG, PNG or GIF picture, answering their User.
+
+// ApiError is a failed call of the client API.
+message ApiError {
+  // The chat API's error code: 3 invalid argument, 5 not found, 6 already
+  // exists, 7 permission denied, 8 resource exhausted, 9 failed
+  // precondition, 13 internal, 14 unavailable, 16 unauthenticated.
+  uint32 code = 1;
+  // Why, in words a person may read.
+  string message = 2;
+}
+
+// ClientFrame is one message of the event socket.
+message ClientFrame {
+  oneof frame {
+    ClientReady ready = 1;
+    Event event = 2;
+  }
+}
+
+// ClientReady says the socket receives the caller's events from now on.
+message ClientReady {
+  User user = 1;
+  string session_id = 2;
+  // When the session, and the socket with it, ends.
+  google.protobuf.Timestamp expires_at = 3;
+  // Set when events may have been lost since the last ClientReady of this
+  // socket: the app should load what it shows again.
+  bool resync = 4;
+}

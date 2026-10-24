@@ -596,6 +596,10 @@ func TestEndToEnd(t *testing.T) {
 		testVoiceChannels(t, admin, bob, adminWS, bobWS)
 	})
 
+	t.Run("the client API serves native apps", func(t *testing.T) {
+		testClientAPI(t, bobName, bobPass, town)
+	})
+
 	t.Run("private channels stay private", func(t *testing.T) {
 		name := "secret-" + random(3)
 		res, body := admin.hx("/t/"+teamName+"/channels", url.Values{"name": {name}, "display_name": {"Secret"}, "type": {"private"}})

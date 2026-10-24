@@ -168,8 +168,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("POST /upload", h.csrfMultipart(http.HandlerFunc(h.upload)))
 	mux.HandleFunc("GET /files/{id}", h.download)
 	mux.HandleFunc("GET /files/{id}/inline", h.download)
-	mux.HandleFunc("GET /photos/u/{id}/{version}", h.servePhoto)
-	mux.HandleFunc("GET /photos/t/{id}/{version}", h.servePhoto)
+	mux.HandleFunc("GET /photos/{kind}/{id}/{version}", h.servePhoto)
 
 	mux.HandleFunc("GET /settings", h.settingsPage)
 	mux.Handle("POST /settings/profile", h.csrf(http.HandlerFunc(h.updateProfile)))
@@ -183,6 +182,14 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("POST /settings/totp/disable", h.csrf(http.HandlerFunc(h.disableTOTP)))
 
 	mux.HandleFunc("GET /ws", h.websocket)
+
+	// The client API, for native apps; see client.proto.
+	mux.HandleFunc("POST /api/v1/rpc/{service}/{method}", h.apiRPC)
+	mux.HandleFunc("GET /api/v1/gateway", h.apiGateway)
+	mux.HandleFunc("POST /api/v1/files", h.apiUpload)
+	mux.HandleFunc("GET /api/v1/files/{id}", h.apiDownload)
+	mux.HandleFunc("GET /api/v1/photos/{kind}/{id}/{version}", h.apiPhoto)
+	mux.HandleFunc("POST /api/v1/photo", h.apiSetPhoto)
 
 	return h.recover(h.headers(h.throttle(mux)))
 }

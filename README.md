@@ -13,7 +13,8 @@ by [htmx](https://htmx.org) over a WebSocket.
 ```
  browser ──HTTPS/WS──▶ gochat web ──DRPC (protobuf)──▶ gochat server ──▶ ScyllaDB
   (htmx)               gateway actors                    service actors    MinIO
-    │                                                         ▲
+ apps ──/api/v1──────▶    ▲                                   ▲
+ (Android, iOS)                                               │
     │ signaling WS + WebRTC (Opus over UDP/TCP)               │ DRPC stream
     └──────────────────────────────────────────▶ gochat voice ┘
                                                   SFU actors
@@ -72,6 +73,30 @@ tab, disconnects the earlier connection. Mute and deafen are the person's own
 and show to the others. A channel's admins and the team's can disconnect
 anyone. Leaving the team, signing out or the sign-in expiring ends the talk.
 A channel takes at most 25 people.
+
+### Client API for native apps
+
+The web gateway also serves the [mobile apps](mobile) at `/api/v1`, the way
+Discord's apps use its REST API and gateway. It forwards calls of the same
+chat API the pages use, so the server checks every one as it does for the
+web:
+
+- `POST /api/v1/rpc/<service>/<method>` makes one call, such as
+  `/api/v1/rpc/gochat.v1.ChannelService/GetChannel`, with the request as
+  protobuf (`application/proto`) or JSON (`application/json`) and the
+  answer in the same encoding, or an `ApiError`.
+- `GET /api/v1/gateway` is the event socket: binary `ClientFrame`s carrying
+  the person's events as the server sends them.
+- `POST /api/v1/files`, `GET /api/v1/files/<id>`, `GET /api/v1/photos/...`
+  and `POST /api/v1/photo` move attachments and photos.
+
+Apps sign in with `AuthService/Login` (and `VerifyMFA` for two-factor
+accounts) and send the session token as `Authorization: Bearer <token>`. The
+API never reads cookies, so no page can make a browser call it for a
+signed-in person, and it opens only the calls people make: not the gateways'
+streams, nor the photo calls that expect a picture the gateway has already
+processed. [client.proto](api/protobuf/proto/gochat/v1/client.proto)
+documents it, close codes included.
 
 ### Storage
 
@@ -361,7 +386,8 @@ just test
 The end-to-end suite in [test/e2e](test/e2e) drives a running stack through the
 web gateway: invites, real-time delivery, typing, attachments, voice messages
 and their channel setting, voice channels (with Pion peers that talk through
-the voice server), private channel isolation, CSRF, TOTP with recovery codes and session revocation. It needs an
+the voice server), the client API the apps use, private channel isolation,
+CSRF, TOTP with recovery codes and session revocation. It needs an
 existing admin account and team:
 
 ```bash

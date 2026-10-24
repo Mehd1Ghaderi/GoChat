@@ -106,8 +106,10 @@ func (h *Handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	}{Page: Page{Title: heading, CSRF: h.csrfToken(w, r)}, Heading: heading, Message: e.Message})
 }
 
+var errNoPage = ierrors.NotFound("This page does not exist.")
+
 func (h *Handler) notFound(w http.ResponseWriter, r *http.Request) {
-	h.fail(w, r, ierrors.NotFound("This page does not exist."))
+	h.fail(w, r, errNoPage)
 }
 
 func statusOf(c ierrors.Code) int {
