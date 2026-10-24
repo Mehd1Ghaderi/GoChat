@@ -99,6 +99,9 @@ type Channel struct {
 	CreatedBy     gocql.UUID  `db:"created_by"`
 	CreatedAt     time.Time   `db:"created_at"`
 	LastMessageID gocql.UUID  `db:"last_message_id"`
+	// VoiceDisabled stops members posting voice messages; channels allow
+	// them unless set.
+	VoiceDisabled bool `db:"voice_disabled"`
 }
 
 type ChannelMember struct {
@@ -135,6 +138,9 @@ type Attachment struct {
 	ObjectKey   string     `db:"object_key"`
 	MessageID   gocql.UUID `db:"message_id"`
 	CreatedAt   time.Time  `db:"created_at"`
+	// Voice marks a voice message, DurationMS its length as recorded.
+	Voice      bool `db:"voice"`
+	DurationMS int  `db:"duration_ms"`
 }
 
 type Invite struct {
