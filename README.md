@@ -51,8 +51,9 @@ one process. Scylla and MinIO scale independently.
 - **Voice messages** are attachments marked as voice. The browser records
   them with `MediaRecorder` and uploads them with their length; the server
   takes them only in channels that allow voice, only up to
-  `services.files.max_voice_duration` (10 minutes by default), and only when
-  their first bytes are a WebM, Ogg or MP4 recording. Each channel allows
+  `services.files.max_voice_duration` (10 minutes by default) and
+  `services.files.max_voice_size` (16 MiB), and only when their first bytes
+  are a WebM, Ogg or MP4 recording. Each channel allows
   voice unless its admins, or the team's, turn it off in the channel's
   settings (or when creating it); direct conversations always allow it.
   Turning it off keeps the voice messages already sent.

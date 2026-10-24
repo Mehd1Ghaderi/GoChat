@@ -63,7 +63,10 @@ func (s *fileService) Upload(stream pb.DRPCFileService_UploadStream) error {
 		return ierrors.ResourceExhausted("the server is busy, try again")
 	}
 
-	maxSize := s.cfg.Files.MaxSize
+	maxSize, tooLarge := s.cfg.Files.MaxSize, ierrors.InvalidArgument("file is too large")
+	if up.Voice {
+		maxSize, tooLarge = min(s.cfg.Files.MaxVoiceSize, maxSize), ierrors.InvalidArgument("the voice message is too large")
+	}
 	var head bytes.Buffer
 	size := int64(0)
 	eof := false
@@ -78,7 +81,7 @@ func (s *fileService) Upload(stream pb.DRPCFileService_UploadStream) error {
 		}
 		size += int64(len(chunk))
 		if size > maxSize {
-			return ierrors.InvalidArgument("file is too large")
+			return tooLarge
 		}
 		head.Write(chunk)
 	}
@@ -125,7 +128,7 @@ func (s *fileService) Upload(stream pb.DRPCFileService_UploadStream) error {
 		}
 		size += int64(len(chunk))
 		if size > maxSize {
-			return abort(ierrors.InvalidArgument("file is too large"))
+			return abort(tooLarge)
 		}
 		if _, err := pw.Write(chunk); err != nil {
 			return abort(err)

@@ -290,6 +290,10 @@ func (a *channel) setVoice(msg SetVoice) (*pb.Channel, error) {
 	if a.ch.Kind == models.ChannelDirect {
 		return nil, ierrors.FailedPrecondition("direct conversations always allow voice messages")
 	}
+	// Each change reaches every member.
+	if !a.poster(msg.P.UserID).Allow() {
+		return nil, ierrors.ResourceExhausted("you are changing settings too fast")
+	}
 	ctx, cancel := a.ctx()
 	defer cancel()
 	tr, err := a.teamRole(ctx, msg.P.UserID)
