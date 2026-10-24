@@ -14,6 +14,7 @@ import (
 
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
 	"github.com/ssenerg/gochat/internal/client/drpc"
+	"github.com/ssenerg/gochat/internal/core/emoji"
 	ierrors "github.com/ssenerg/gochat/internal/errors"
 	"github.com/ssenerg/gochat/internal/web/render"
 )
@@ -1056,4 +1057,44 @@ func (h *Handler) mentionSuggestions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.fragment(w, http.StatusOK, "suggest", items)
+}
+
+func (h *Handler) reactionPicker(w http.ResponseWriter, r *http.Request) {
+	if h.signedIn(w, r) == nil {
+		return
+	}
+	chID, msgID, rootID, ok := h.messageTarget(w, r)
+	if !ok {
+		return
+	}
+	h.fragment(w, http.StatusOK, "emoji-picker", struct {
+		URL   string
+		Emoji []emoji.Emoji
+	}{render.ReactURL(chID, msgID, rootID), emoji.All})
+}
+
+// react adds or takes back a reaction and answers with the message's
+// reaction bar; a choice from the picker also closes it.
+func (h *Handler) react(w http.ResponseWriter, r *http.Request) {
+	u := h.signedIn(w, r)
+	if u == nil {
+		return
+	}
+	chID, msgID, rootID, ok := h.messageTarget(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := h.ctx(r)
+	defer cancel()
+	res, err := h.client.Messages.React(ctx, &pb.ReactRequest{
+		ChannelId: chID, MessageId: msgID, RootId: rootID, Emoji: r.PostFormValue("emoji"), Remove: r.PostFormValue("remove") == "1",
+	})
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	if r.PostFormValue("picker") == "1" {
+		w.Header().Set("HX-Trigger", "closeModal")
+	}
+	h.fragment(w, http.StatusOK, "reactions", render.Reactions(chID, msgID, rootID, res.Reactions, u, true))
 }

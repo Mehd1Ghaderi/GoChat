@@ -441,6 +441,28 @@ fieldset.choice legend { font-weight: 600; font-size: .92rem; padding: 0 .3rem; 
 .avatar.xs.everyone { background: var(--accent-fill); color: var(--accent-ink); }
 .avatar.xs .i { width: 15px; height: 15px; }
 
+/* Reactions: a quiet row of pills under the message, its own in accent. */
+.reactions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: .4rem; }
+.reactions:empty { display: none; }
+.reaction {
+  display: inline-flex; align-items: center; gap: .3rem; height: 28px; padding: 0 .55rem; border-radius: 99px;
+  border: 1px solid var(--border); background: var(--bg-soft); color: var(--fg); font: inherit; font-size: .82rem; cursor: pointer;
+}
+.reaction .e { font-size: 1rem; line-height: 1; }
+.reaction .n { font-weight: 650; font-variant-numeric: tabular-nums; }
+.reaction.mine { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--accent-soft-ink); }
+.reaction.add { width: 28px; padding: 0; justify-content: center; color: var(--fg-muted); }
+.reaction.add .i { width: 16px; height: 16px; }
+@media (hover: hover) { .reaction:hover { border-color: var(--accent); } .reaction.add { opacity: 0; } .msg:hover .reaction.add, .reaction.add:focus-visible { opacity: 1; } }
+.reaction:focus-visible, .emoji-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.emoji-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 4px; }
+.emoji-btn {
+  display: grid; place-items: center; height: 44px; border: 0; border-radius: 10px; background: transparent;
+  font-size: 1.45rem; line-height: 1; cursor: pointer;
+}
+@media (hover: hover) { .emoji-btn:hover { background: var(--bg-hover); } }
+.emoji { font-size: 1.1em; line-height: 1; }
+
 /* Threads: replies open beside the channel, over it on narrower screens. */
 .thread-link {
   display: inline-flex; align-items: center; gap: .4rem; margin: .3rem 0 0 -.45rem; padding: .25rem .5rem;

@@ -583,6 +583,20 @@ func (s *messageService) ListThread(ctx context.Context, req *pb.ListThreadReque
 	return &pb.ListThreadResponse{Root: res.Root, Replies: res.Replies, HasMore: res.HasMore}, nil
 }
 
+func (s *messageService) React(ctx context.Context, req *pb.ReactRequest) (*pb.ReactResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	out, err := actors.Ask[[]*pb.Reaction](ctx, s.sys.Engine, s.sys.Channels, channels.React{
+		Target: t, MessageID: req.MessageId, RootID: req.RootId, Emoji: req.Emoji, Remove: req.Remove,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ReactResponse{Reactions: out}, nil
+}
+
 func (s *messageService) SendTyping(ctx context.Context, req *pb.SendTypingRequest) (*pb.SendTypingResponse, error) {
 	t, err := channelTarget(ctx, req.ChannelId)
 	if err != nil {

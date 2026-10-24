@@ -420,6 +420,37 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
+	t.Run("reactions toggle and arrive live", func(t *testing.T) {
+		bobWS.send(map[string]string{"op": "post", "channel_id": town, "content": "react to me"})
+		f := adminWS.expect(5*time.Second, "react to me", `hx-swap-oob="afterbegin"`)
+		msg := msgIDRe.FindStringSubmatch(f)[1]
+		bar := `id="reactions-` + msg + `"`
+		react := func(c *client, emoji string, remove bool) (*http.Response, string) {
+			v := url.Values{"emoji": {emoji}}
+			if remove {
+				v.Set("remove", "1")
+			}
+			return c.hx("/m/"+town+"/"+msg+"/react", v)
+		}
+		if res, body := react(admin, "tada", false); res.StatusCode != http.StatusOK || !strings.Contains(body, bar) || !strings.Contains(body, `aria-pressed="true"`) {
+			t.Fatalf("react: %d %s", res.StatusCode, body)
+		}
+		bobWS.expect(5*time.Second, bar, "🎉", `<span class="n">1</span>`, `aria-pressed="false"`)
+		react(bob, "tada", false)
+		adminWS.expect(5*time.Second, bar, `<span class="n">2</span>`, `aria-pressed="true"`)
+		react(admin, "tada", true)
+		bobWS.expect(5*time.Second, bar, `<span class="n">1</span>`, `aria-pressed="true"`)
+		if _, page := admin.get("/t/" + teamName + "/ch/" + town); !strings.Contains(page, bar) || !strings.Contains(page, "🎉") {
+			t.Fatal("the reaction is gone after a reload")
+		}
+		if res, _ := react(bob, "<script>", false); res.StatusCode == http.StatusOK {
+			t.Fatal("an unknown emoji was accepted")
+		}
+		if _, picker := bob.do(http.MethodGet, "/m/"+town+"/"+msg+"/react", nil, "", true); !strings.Contains(picker, `class="emoji-grid"`) {
+			t.Fatalf("picker: %s", picker)
+		}
+	})
+
 	t.Run("typing reaches others only", func(t *testing.T) {
 		adminWS.send(map[string]string{"op": "typing", "channel_id": town})
 		bobWS.expect(5*time.Second, "is typing")

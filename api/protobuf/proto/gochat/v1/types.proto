@@ -109,4 +109,11 @@ message Message {
   string root_id = 8;
   int32 reply_count = 9;
   google.protobuf.Timestamp last_reply_at = 10;
+  repeated Reaction reactions = 11;
+}
+
+// Reaction is one emoji on a message and who reacted with it.
+message Reaction {
+  string emoji = 1;
+  repeated string user_ids = 2;
 }

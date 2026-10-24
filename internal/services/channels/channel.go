@@ -13,6 +13,7 @@ import (
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
 	"github.com/ssenerg/gochat/internal/actors"
 	"github.com/ssenerg/gochat/internal/authz"
+	"github.com/ssenerg/gochat/internal/core/emoji"
 	"github.com/ssenerg/gochat/internal/core/ids"
 	"github.com/ssenerg/gochat/internal/core/mention"
 	"github.com/ssenerg/gochat/internal/core/models"
@@ -178,6 +179,8 @@ func (a *channel) handle(c *actor.Context, req Request) {
 		err = a.thread(c, msg)
 	case Typing:
 		out, err = a.typingEvent(msg)
+	case React:
+		out, err = a.react(msg)
 	case MarkRead:
 		err = a.markRead(c, msg)
 	case Join:
@@ -619,6 +622,7 @@ func (a *channel) delete(msg Delete) (Done, error) {
 	if err := a.Repo.DeleteMessage(ctx, a.id, m.ID); err != nil {
 		return Done{}, err
 	}
+	a.dropReactions(ctx, m.ID)
 	if m.ID == a.ch.LastMessageID {
 		a.rewindLast(ctx)
 	}
@@ -636,6 +640,7 @@ func (a *channel) deleteReply(ctx context.Context, m *models.Message) error {
 	if err := a.Repo.DeleteReply(ctx, a.id, m.RootID, m.ID); err != nil {
 		return err
 	}
+	a.dropReactions(ctx, m.ID)
 	a.dropAttachments(m.Attachments)
 	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessageDeleted{MessageDeleted: &pb.MessageDeleted{
 		ChannelId: a.id.String(), MessageId: m.ID.String(), RootId: m.RootID.String(),
@@ -662,17 +667,104 @@ func (a *channel) deleteReply(ctx context.Context, m *models.Message) error {
 	return nil
 }
 
-// dropThread deletes the replies of a deleted root, and their files.
+// dropThread deletes the replies of a deleted root, their reactions and
+// their files.
 func (a *channel) dropThread(ctx context.Context, rootID gocql.UUID) {
-	atts, err := a.Repo.ThreadAttachments(ctx, a.id, rootID)
+	replies, atts, err := a.Repo.ThreadContents(ctx, a.id, rootID)
 	if err != nil {
-		a.Logger.Warn("failed to list a thread's files", zap.String("channel", a.id.String()), zap.Error(err))
+		a.Logger.Warn("failed to list a thread's replies", zap.String("channel", a.id.String()), zap.Error(err))
 	}
 	if err := a.Repo.DeleteThread(ctx, a.id, rootID); err != nil {
 		a.Logger.Warn("failed to delete a thread", zap.String("channel", a.id.String()), zap.Error(err))
 		return
 	}
+	for _, id := range replies {
+		a.dropReactions(ctx, id)
+	}
 	a.dropAttachments(atts)
+}
+
+func (a *channel) dropReactions(ctx context.Context, messageID gocql.UUID) {
+	if err := a.Repo.DeleteReactions(ctx, a.id, messageID); err != nil {
+		a.Logger.Warn("failed to delete reactions", zap.String("channel", a.id.String()), zap.Error(err))
+	}
+}
+
+// maxReactionKinds bounds the different emoji on one message.
+const maxReactionKinds = 20
+
+func (a *channel) react(msg React) ([]*pb.Reaction, error) {
+	if _, err := a.member(msg.P); err != nil {
+		return nil, err
+	}
+	if !emoji.Valid(msg.Emoji) {
+		return nil, ierrors.InvalidArgument("unknown emoji")
+	}
+	if !a.poster(msg.P.UserID).Allow() {
+		return nil, ierrors.ResourceExhausted("you are reacting too fast")
+	}
+	ctx, cancel := a.ctx()
+	defer cancel()
+	m, err := a.messageOf(ctx, msg.MessageID, msg.RootID)
+	if err != nil {
+		return nil, err
+	}
+	if msg.Remove {
+		err = a.Repo.RemoveReaction(ctx, a.id, m.ID, msg.Emoji, msg.P.UserID)
+	} else {
+		var rows []*scylla.Reaction
+		if rows, err = a.Repo.ListReactions(ctx, a.id, []gocql.UUID{m.ID}); err != nil {
+			return nil, err
+		}
+		kinds := map[string]bool{}
+		for _, r := range rows {
+			kinds[r.Emoji] = true
+		}
+		if !kinds[msg.Emoji] && len(kinds) >= maxReactionKinds {
+			return nil, ierrors.FailedPrecondition("this message has as many kinds of reaction as it can take")
+		}
+		err = a.Repo.AddReaction(ctx, a.id, m.ID, msg.Emoji, msg.P.UserID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	rows, err := a.Repo.ListReactions(ctx, a.id, []gocql.UUID{m.ID})
+	if err != nil {
+		return nil, err
+	}
+	out := groupReactions(rows)[m.ID]
+	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_ReactionsChanged{ReactionsChanged: &pb.ReactionsChanged{
+		ChannelId: a.id.String(), MessageId: m.ID.String(), RootId: convert.ID(m.RootID), Reactions: out,
+	}}})
+	return out, nil
+}
+
+// groupReactions gathers reactions per message, in the picker's order of
+// emoji, people in the order stored.
+func groupReactions(rows []*scylla.Reaction) map[gocql.UUID][]*pb.Reaction {
+	byMessage := map[gocql.UUID]map[string]*pb.Reaction{}
+	for _, r := range rows {
+		m := byMessage[r.MessageID]
+		if m == nil {
+			m = map[string]*pb.Reaction{}
+			byMessage[r.MessageID] = m
+		}
+		re := m[r.Emoji]
+		if re == nil {
+			re = &pb.Reaction{Emoji: r.Emoji}
+			m[r.Emoji] = re
+		}
+		re.UserIds = append(re.UserIds, r.UserID.String())
+	}
+	out := make(map[gocql.UUID][]*pb.Reaction, len(byMessage))
+	for id, m := range byMessage {
+		for _, e := range emoji.All {
+			if re := m[e.Name]; re != nil {
+				out[id] = append(out[id], re)
+			}
+		}
+	}
+	return out
 }
 
 // rewindLast makes the newest remaining message the channel's last, so the
@@ -854,6 +946,15 @@ func (a *channel) render(ctx context.Context, list []*models.Message) ([]*pb.Mes
 			atts[att.ID] = att
 		}
 	}
+	msgIDs := make([]gocql.UUID, len(list))
+	for i, m := range list {
+		msgIDs[i] = m.ID
+	}
+	rows, err := a.Repo.ListReactions(ctx, a.id, msgIDs)
+	if err != nil {
+		return nil, err
+	}
+	reactions := groupReactions(rows)
 	out := make([]*pb.Message, 0, len(list))
 	for _, m := range list {
 		var mine []*models.Attachment
@@ -862,7 +963,9 @@ func (a *channel) render(ctx context.Context, list []*models.Message) ([]*pb.Mes
 				mine = append(mine, att)
 			}
 		}
-		out = append(out, convert.Message(m, convert.PublicUser(authors[m.UserID]), mine))
+		view := convert.Message(m, convert.PublicUser(authors[m.UserID]), mine)
+		view.Reactions = reactions[m.ID]
+		out = append(out, view)
 	}
 	return out, nil
 }

@@ -23,9 +23,11 @@ func newMarkdown() goldmark.Markdown {
 		goldmark.WithExtensions(extension.Linkify, extension.Strikethrough, extension.Table, extension.TaskList),
 		goldmark.WithParserOptions(
 			parser.WithASTTransformers(util.Prioritized(linkTransformer{}, 100)),
-			parser.WithInlineParsers(util.Prioritized(mentionParser{}, 500)),
+			parser.WithInlineParsers(util.Prioritized(mentionParser{}, 500), util.Prioritized(emojiParser{}, 500)),
 		),
-		goldmark.WithRendererOptions(html.WithHardWraps(), renderer.WithNodeRenderers(util.Prioritized(mentionRenderer{}, 500))),
+		goldmark.WithRendererOptions(html.WithHardWraps(), renderer.WithNodeRenderers(
+			util.Prioritized(mentionRenderer{}, 500), util.Prioritized(emojiRenderer{}, 500),
+		)),
 	)
 }
 

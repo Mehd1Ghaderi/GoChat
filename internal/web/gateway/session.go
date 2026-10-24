@@ -591,6 +591,11 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 		if (d.RootId == "" && d.ChannelId == s.channelID) || (d.RootId != "" && d.RootId == s.threadID) {
 			s.fragment("message-deleted", d.MessageId)
 		}
+	case *pb.Event_ReactionsChanged:
+		d := p.ReactionsChanged
+		if (d.RootId == "" && d.ChannelId == s.channelID) || (d.RootId != "" && d.RootId == s.threadID) {
+			s.fragment("reactions", render.Reactions(d.ChannelId, d.MessageId, d.RootId, d.Reactions, s.user, true))
+		}
 	case *pb.Event_Typing:
 		t := p.Typing
 		if t.ChannelId != s.channelID || t.GetUser().GetId() == me {

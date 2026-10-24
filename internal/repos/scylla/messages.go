@@ -3,6 +3,7 @@ package scylla
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/gocql/gocql"
@@ -158,14 +159,16 @@ func (r *Repository) ListReplies(ctx context.Context, channelID, rootID, before 
 	return out, false, nil
 }
 
-// ThreadAttachments lists the files of a thread's replies.
-func (r *Repository) ThreadAttachments(ctx context.Context, channelID, rootID gocql.UUID) ([]gocql.UUID, error) {
-	iter := r.query(ctx, "SELECT attachments FROM replies WHERE channel_id = ? AND root_id = ?", channelID, rootID).Iter()
-	var out, atts []gocql.UUID
-	for iter.Scan(&atts) {
-		out = append(out, atts...)
+// ThreadContents lists the replies of a thread and their files.
+func (r *Repository) ThreadContents(ctx context.Context, channelID, rootID gocql.UUID) (replies, files []gocql.UUID, err error) {
+	iter := r.query(ctx, "SELECT id, attachments FROM replies WHERE channel_id = ? AND root_id = ?", channelID, rootID).Iter()
+	var id gocql.UUID
+	var atts []gocql.UUID
+	for iter.Scan(&id, &atts) {
+		replies = append(replies, id)
+		files = append(files, atts...)
 	}
-	return out, wrap(iter.Close())
+	return replies, files, wrap(iter.Close())
 }
 
 func (r *Repository) DeleteThread(ctx context.Context, channelID, rootID gocql.UUID) error {
@@ -185,4 +188,48 @@ func (r *Repository) SetThreadSummary(ctx context.Context, root *models.Message,
 	}
 	return wrap(r.query(ctx, "UPDATE messages SET reply_count = ?, last_reply_at = ?, participants = participants + ? WHERE channel_id = ? AND bucket = ? AND id = ?",
 		count, lastAt, []gocql.UUID{participant}, root.ChannelID, root.Bucket, root.ID).ExecRelease())
+}
+
+// Reaction is one person's emoji on a message.
+type Reaction struct {
+	MessageID gocql.UUID `db:"message_id"`
+	Emoji     string     `db:"emoji"`
+	UserID    gocql.UUID `db:"user_id"`
+}
+
+func (r *Repository) AddReaction(ctx context.Context, channelID, messageID gocql.UUID, emoji string, userID gocql.UUID) error {
+	return wrap(r.query(ctx, "INSERT INTO reactions (channel_id, bucket, message_id, emoji, user_id) VALUES (?, ?, ?, ?, ?)",
+		channelID, ids.BucketOf(messageID), messageID, emoji, userID).ExecRelease())
+}
+
+func (r *Repository) RemoveReaction(ctx context.Context, channelID, messageID gocql.UUID, emoji string, userID gocql.UUID) error {
+	return wrap(r.query(ctx, "DELETE FROM reactions WHERE channel_id = ? AND bucket = ? AND message_id = ? AND emoji = ? AND user_id = ?",
+		channelID, ids.BucketOf(messageID), messageID, emoji, userID).ExecRelease())
+}
+
+func (r *Repository) DeleteReactions(ctx context.Context, channelID, messageID gocql.UUID) error {
+	return wrap(r.query(ctx, "DELETE FROM reactions WHERE channel_id = ? AND bucket = ? AND message_id = ?",
+		channelID, ids.BucketOf(messageID), messageID).ExecRelease())
+}
+
+// ListReactions returns the reactions to messages, one query per bucket
+// they fall in.
+func (r *Repository) ListReactions(ctx context.Context, channelID gocql.UUID, messageIDs []gocql.UUID) ([]*Reaction, error) {
+	byBucket := map[int32][]gocql.UUID{}
+	for _, id := range messageIDs {
+		b := ids.BucketOf(id)
+		byBucket[b] = append(byBucket[b], id)
+	}
+	var out []*Reaction
+	for bucket, list := range byBucket {
+		for chunk := range slices.Chunk(list, 100) {
+			var page []*Reaction
+			if err := r.query(ctx, "SELECT message_id, emoji, user_id FROM reactions WHERE channel_id = ? AND bucket = ? AND message_id IN ?",
+				channelID, bucket, chunk).SelectRelease(&page); err != nil {
+				return nil, wrap(err)
+			}
+			out = append(out, page...)
+		}
+	}
+	return out, nil
 }

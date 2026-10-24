@@ -8,6 +8,8 @@ import (
 	"github.com/yuin/goldmark/renderer"
 	"github.com/yuin/goldmark/text"
 	"github.com/yuin/goldmark/util"
+
+	"github.com/ssenerg/gochat/internal/core/emoji"
 )
 
 // An @name in a message renders as a mention; the same for every reader,
@@ -55,6 +57,53 @@ func (mentionRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
 		if entering {
 			_, _ = w.WriteString(`<span class="mention">@`)
 			_, _ = w.Write(util.EscapeHTML(n.(*mentionNode).name))
+			_, _ = w.WriteString(`</span>`)
+		}
+		return ast.WalkSkipChildren, nil
+	})
+}
+
+// A :name: of a known emoji renders as the emoji.
+var kindEmoji = ast.NewNodeKind("Emoji")
+
+type emojiNode struct {
+	ast.BaseInline
+	name, char string
+}
+
+func (n *emojiNode) Kind() ast.NodeKind { return kindEmoji }
+
+func (n *emojiNode) Dump(src []byte, level int) { ast.DumpHelper(n, src, level, nil, nil) }
+
+type emojiParser struct{}
+
+func (emojiParser) Trigger() []byte { return []byte{':'} }
+
+func (emojiParser) Parse(_ ast.Node, block text.Reader, _ parser.Context) ast.Node {
+	line, _ := block.PeekLine()
+	end := bytes.IndexByte(line[1:], ':')
+	if end < 1 || end > 32 {
+		return nil
+	}
+	name := string(line[1 : end+1])
+	char, ok := emoji.Char(name)
+	if !ok {
+		return nil
+	}
+	block.Advance(end + 2)
+	return &emojiNode{name: name, char: char}
+}
+
+type emojiRenderer struct{}
+
+func (emojiRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
+	reg.Register(kindEmoji, func(w util.BufWriter, _ []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if entering {
+			e := n.(*emojiNode)
+			_, _ = w.WriteString(`<span class="emoji" title=":`)
+			_, _ = w.Write(util.EscapeHTML([]byte(e.name)))
+			_, _ = w.WriteString(`:">`)
+			_, _ = w.WriteString(e.char)
 			_, _ = w.WriteString(`</span>`)
 		}
 		return ast.WalkSkipChildren, nil

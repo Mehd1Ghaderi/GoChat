@@ -13,6 +13,20 @@ service MessageService {
   rpc SendTyping(SendTypingRequest) returns (SendTypingResponse);
   // ListThread returns a thread's root and its replies.
   rpc ListThread(ListThreadRequest) returns (ListThreadResponse);
+  rpc React(ReactRequest) returns (ReactResponse);
+}
+
+// ReactRequest adds the caller's reaction, or with remove takes it back.
+message ReactRequest {
+  string channel_id = 1;
+  string message_id = 2;
+  string root_id = 3;
+  string emoji = 4;
+  bool remove = 5;
+}
+
+message ReactResponse {
+  repeated Reaction reactions = 1;
 }
 
 message PostMessageRequest {

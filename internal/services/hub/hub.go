@@ -294,28 +294,7 @@ func (h *hub) deliver(c *actor.Context, msg Deliver) {
 // shallowEvent copies an event's envelope so each gateway gets its own
 // recipient list while the payload is shared, read-only.
 func shallowEvent(e *pb.Event) *pb.Event {
-	out := &pb.Event{Broadcast: e.Broadcast}
-	switch p := e.Payload.(type) {
-	case *pb.Event_MessagePosted:
-		out.Payload = p
-	case *pb.Event_MessageEdited:
-		out.Payload = p
-	case *pb.Event_MessageDeleted:
-		out.Payload = p
-	case *pb.Event_Typing:
-		out.Payload = p
-	case *pb.Event_ChannelJoined:
-		out.Payload = p
-	case *pb.Event_ChannelLeft:
-		out.Payload = p
-	case *pb.Event_Presence:
-		out.Payload = p
-	case *pb.Event_TeamJoined:
-		out.Payload = p
-	case *pb.Event_TeamLeft:
-		out.Payload = p
-	}
-	return out
+	return &pb.Event{Broadcast: e.Broadcast, Payload: e.Payload}
 }
 
 func (h *hub) revoke(c *actor.Context, msg RevokeSessions) {

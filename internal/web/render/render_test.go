@@ -149,3 +149,29 @@ func TestMentions(t *testing.T) {
 		t.Error("@here does not mention bob")
 	}
 }
+
+func TestReactions(t *testing.T) {
+	r, err := New(16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body := string(r.markdown("ship it :rocket: at 10:30:45 and :nope:")); !strings.Contains(body, `title=":rocket:">🚀</span>`) || strings.Contains(body, ":nope:\">") {
+		t.Fatalf("shortcodes: %s", body)
+	}
+	me := &pb.User{Id: "me"}
+	v := Reactions("c", "m", "", []*pb.Reaction{{Emoji: "tada", UserIds: []string{"x", "me"}}, {Emoji: "bogus", UserIds: []string{"x"}}}, me, false)
+	if len(v.List) != 1 || !v.List[0].Mine || v.List[0].Count != 2 || v.List[0].Char != "🎉" {
+		t.Fatalf("reaction view: %+v", v)
+	}
+	var buf bytes.Buffer
+	if err := r.Fragment(&buf, "reactions", v); err != nil {
+		t.Fatal(err)
+	}
+	if out := buf.String(); !strings.Contains(out, `"remove": "1"`) || !strings.Contains(out, `aria-pressed="true"`) {
+		t.Fatalf("reaction bar: %s", out)
+	}
+	buf.Reset()
+	if err := r.Fragment(&buf, "reactions", Reactions("c", "m", "", nil, me, false)); err != nil || buf.String() != `<div class="reactions" id="reactions-m"></div>` {
+		t.Fatalf("empty bar: %q %v", buf.String(), err)
+	}
+}

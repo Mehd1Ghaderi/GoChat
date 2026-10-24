@@ -78,7 +78,15 @@ message Event {
     Presence presence = 9;
     TeamJoined team_joined = 10;
     TeamLeft team_left = 11;
+    ReactionsChanged reactions_changed = 12;
   }
+}
+
+message ReactionsChanged {
+  string channel_id = 1;
+  string message_id = 2;
+  string root_id = 3;
+  repeated Reaction reactions = 4;
 }
 
 message MessagePosted {

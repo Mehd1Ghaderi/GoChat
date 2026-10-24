@@ -86,6 +86,16 @@ type ThreadResult struct {
 	HasMore bool
 }
 
+// React adds the caller's reaction to a message, or with Remove takes it
+// back. It replies with the message's reactions.
+type React struct {
+	Target
+	MessageID string
+	RootID    string
+	Emoji     string
+	Remove    bool
+}
+
 type Typing struct{ Target }
 
 type MarkRead struct {

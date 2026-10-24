@@ -3,17 +3,17 @@
   {{template "avatar" (dict "User" .Author "Size" "")}}
   <div class="msg-main">
     {{template "msg-content" .}}
+    {{template "reactions" .Bar}}
     {{if and (not .RootId) .ReplyCount}}
     <button class="thread-link" hx-get="/m/{{.ChannelId}}/{{.Id}}/thread" hx-target="#thread">{{icon "reply"}}<span>{{.ReplyCount}} {{if eq .ReplyCount 1}}reply{{else}}replies{{end}}</span>{{with .LastReplyAt}}<time datetime="{{iso .AsTime}}">{{clock .AsTime}}</time>{{end}}</button>
     {{end}}
   </div>
-  {{if or (not .RootId) .Mine .CanDelete}}
   <div class="msg-actions">
+    <button class="icon-btn sm" hx-get="{{.Bar.URL}}" hx-target="#modal" aria-label="Add a reaction" title="React">{{icon "smile"}}</button>
     {{if not .RootId}}<button class="icon-btn sm" hx-get="/m/{{.ChannelId}}/{{.Id}}/thread" hx-target="#thread" aria-label="Reply in thread" title="Reply">{{icon "reply"}}</button>{{end}}
     {{if .Mine}}<button class="icon-btn sm" hx-get="/m/{{.ChannelId}}/{{.Id}}/edit{{with .RootId}}?root={{.}}{{end}}" hx-target="#msg-{{.Id}}" hx-swap="outerHTML" aria-label="Edit message" title="Edit">{{icon "edit"}}</button>{{end}}
     {{if .CanDelete}}<button class="icon-btn sm" hx-post="/m/{{.ChannelId}}/{{.Id}}/delete{{with .RootId}}?root={{.}}{{end}}" hx-confirm="{{if .ReplyCount}}Delete this message and its thread?{{else}}Delete this message?{{end}}" hx-target="#msg-{{.Id}}" hx-swap="outerHTML" aria-label="Delete message" title="Delete">{{icon "trash"}}</button>{{end}}
   </div>
-  {{end}}
 </article>
 {{end}}
 
@@ -63,3 +63,11 @@
 {{define "avatar"}}{{$u := .User}}{{if and $u $u.Photo}}<span class="avatar {{.Size}} {{avatar $u}}" aria-hidden="true"><img src="/photos/u/{{$u.Id}}/{{$u.Photo}}" alt="" loading="lazy" decoding="async"></span>{{else}}<span class="avatar {{.Size}} {{avatar $u}}" aria-hidden="true">{{initials $u}}</span>{{end}}{{end}}
 
 {{define "suggest"}}{{if .}}<ul class="suggest" role="listbox" aria-label="People to mention">{{range $i, $s := .}}<li role="option" data-insert="@{{$s.Name}} " aria-selected="{{if eq $i 0}}true{{else}}false{{end}}">{{if $s.User}}{{template "avatar" (dict "User" $s.User "Size" "xs")}}<strong>{{name $s.User}}</strong><span class="muted">@{{$s.Name}}</span>{{else}}<span class="avatar xs everyone" aria-hidden="true">{{icon "members"}}</span><strong>@{{$s.Name}}</strong><span class="muted">{{$s.Note}}</span>{{end}}</li>{{end}}</ul>{{end}}{{end}}
+
+{{define "reactions"}}<div class="reactions" id="reactions-{{.ID}}"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>{{range .List}}<button type="button" class="reaction{{if .Mine}} mine{{end}}" hx-post="{{$.URL}}" hx-vals='{"emoji": "{{.Name}}"{{if .Mine}}, "remove": "1"{{end}}}' hx-swap="none" aria-pressed="{{if .Mine}}true{{else}}false{{end}}" title="{{.Who}}"><span class="e" aria-hidden="true">{{.Char}}</span><span class="n">{{.Count}}</span><span class="visually-hidden">{{.Name}}</span></button>{{end}}{{if .List}}<button type="button" class="reaction add" hx-get="{{$.URL}}" hx-target="#modal" aria-label="Add a reaction" title="Add a reaction">{{icon "smile"}}</button>{{end}}</div>{{end}}
+
+{{define "emoji-picker"}}
+{{template "modal-start" "Add a reaction"}}
+<div class="emoji-grid" role="group" aria-label="Emoji">{{range .Emoji}}<button type="button" class="emoji-btn" hx-post="{{$.URL}}" hx-vals='{"emoji": "{{.Name}}", "picker": "1"}' hx-swap="none" title=":{{.Name}}:" aria-label="{{.Name}}">{{.Char}}</button>{{end}}</div>
+{{template "modal-end"}}
+{{end}}

@@ -1,10 +1,14 @@
 package render
 
 import (
+	"fmt"
 	"html/template"
+	"slices"
+	"strings"
 	"time"
 
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
+	"github.com/ssenerg/gochat/internal/core/emoji"
 	"github.com/ssenerg/gochat/internal/core/mention"
 )
 
@@ -18,6 +22,7 @@ type Message struct {
 	// Mentioned is set when the message calls out its reader.
 	Mentioned bool
 	OOB       bool
+	bar       ReactionsView
 }
 
 // Message prepares m for the viewer meID; moderators may delete any message.
@@ -31,6 +36,7 @@ func (r *Renderer) Message(m *pb.Message, me *pb.User, moderator bool) *Message 
 		Mine:      mine,
 		CanDelete: mine || moderator,
 		Mentioned: !mine && Mentions(m, me),
+		bar:       Reactions(m.GetChannelId(), m.GetId(), m.GetRootId(), m.GetReactions(), me, false),
 	}
 }
 
@@ -119,4 +125,66 @@ type Presence struct {
 type Toast struct {
 	Kind string
 	Text string
+}
+
+// ReactionView is one emoji on a message as a reader sees it.
+type ReactionView struct {
+	Name  string
+	Char  string
+	Count int
+	Mine  bool
+	Who   string
+}
+
+// ReactionsView is a message's reaction bar.
+type ReactionsView struct {
+	ID   string
+	URL  string
+	List []ReactionView
+	OOB  bool
+}
+
+// ReactURL is where a message's reactions are added and taken back.
+func ReactURL(channelID, messageID, rootID string) string {
+	u := "/m/" + channelID + "/" + messageID + "/react"
+	if rootID != "" {
+		u += "?root=" + rootID
+	}
+	return u
+}
+
+// Reactions prepares a message's reactions for me.
+func Reactions(channelID, messageID, rootID string, list []*pb.Reaction, me *pb.User, oob bool) ReactionsView {
+	out := ReactionsView{ID: messageID, URL: ReactURL(channelID, messageID, rootID), OOB: oob}
+	for _, r := range list {
+		char, ok := emoji.Char(r.Emoji)
+		if !ok || len(r.UserIds) == 0 {
+			continue
+		}
+		v := ReactionView{Name: r.Emoji, Char: char, Count: len(r.UserIds), Mine: slices.Contains(r.UserIds, me.GetId())}
+		switch {
+		case v.Mine && v.Count == 1:
+			v.Who = "You reacted with :" + r.Emoji + ":"
+		case v.Mine:
+			v.Who = fmt.Sprintf("You and %d more reacted with :%s:", v.Count-1, r.Emoji)
+		default:
+			v.Who = fmt.Sprintf("%d reacted with :%s:", v.Count, r.Emoji)
+		}
+		out.List = append(out.List, v)
+	}
+	return out
+}
+
+// Bar is the message's reaction bar.
+func (m *Message) Bar() ReactionsView {
+	return m.bar
+}
+
+// key tells the reaction bars of two readers apart, for caching.
+func (v ReactionsView) key() string {
+	var b strings.Builder
+	for _, r := range v.List {
+		fmt.Fprintf(&b, "%s:%d:%t,", r.Name, r.Count, r.Mine)
+	}
+	return b.String()
 }

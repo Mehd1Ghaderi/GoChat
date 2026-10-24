@@ -813,6 +813,7 @@ type Message struct {
 	RootId        string                 `protobuf:"bytes,8,opt,name=root_id,json=rootId,proto3" json:"root_id,omitempty"`
 	ReplyCount    int32                  `protobuf:"varint,9,opt,name=reply_count,json=replyCount,proto3" json:"reply_count,omitempty"`
 	LastReplyAt   *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=last_reply_at,json=lastReplyAt,proto3" json:"last_reply_at,omitempty"`
+	Reactions     []*Reaction            `protobuf:"bytes,11,rep,name=reactions,proto3" json:"reactions,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -917,6 +918,66 @@ func (x *Message) GetLastReplyAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *Message) GetReactions() []*Reaction {
+	if x != nil {
+		return x.Reactions
+	}
+	return nil
+}
+
+// Reaction is one emoji on a message and who reacted with it.
+type Reaction struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Emoji         string                 `protobuf:"bytes,1,opt,name=emoji,proto3" json:"emoji,omitempty"`
+	UserIds       []string               `protobuf:"bytes,2,rep,name=user_ids,json=userIds,proto3" json:"user_ids,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Reaction) Reset() {
+	*x = Reaction{}
+	mi := &file_gochat_v1_types_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Reaction) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Reaction) ProtoMessage() {}
+
+func (x *Reaction) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_types_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Reaction.ProtoReflect.Descriptor instead.
+func (*Reaction) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_types_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *Reaction) GetEmoji() string {
+	if x != nil {
+		return x.Emoji
+	}
+	return ""
+}
+
+func (x *Reaction) GetUserIds() []string {
+	if x != nil {
+		return x.UserIds
+	}
+	return nil
+}
+
 var File_gochat_v1_types_proto protoreflect.FileDescriptor
 
 const file_gochat_v1_types_proto_rawDesc = "" +
@@ -976,7 +1037,7 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12!\n" +
 	"\fcontent_type\x18\x03 \x01(\tR\vcontentType\x12\x12\n" +
-	"\x04size\x18\x04 \x01(\x03R\x04size\"\xa2\x03\n" +
+	"\x04size\x18\x04 \x01(\x03R\x04size\"\xd5\x03\n" +
 	"\aMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -991,7 +1052,11 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"\vreply_count\x18\t \x01(\x05R\n" +
 	"replyCount\x12>\n" +
 	"\rlast_reply_at\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampR\vlastReplyAt*V\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\vlastReplyAt\x121\n" +
+	"\treactions\x18\v \x03(\v2\x13.gochat.v1.ReactionR\treactions\";\n" +
+	"\bReaction\x12\x14\n" +
+	"\x05emoji\x18\x01 \x01(\tR\x05emoji\x12\x19\n" +
+	"\buser_ids\x18\x02 \x03(\tR\auserIds*V\n" +
 	"\n" +
 	"SystemRole\x12\x1b\n" +
 	"\x17SYSTEM_ROLE_UNSPECIFIED\x10\x00\x12\x14\n" +
@@ -1027,7 +1092,7 @@ func file_gochat_v1_types_proto_rawDescGZIP() []byte {
 }
 
 var file_gochat_v1_types_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_gochat_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_gochat_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_gochat_v1_types_proto_goTypes = []any{
 	(SystemRole)(0),               // 0: gochat.v1.SystemRole
 	(TeamRole)(0),                 // 1: gochat.v1.TeamRole
@@ -1041,34 +1106,36 @@ var file_gochat_v1_types_proto_goTypes = []any{
 	(*ChannelMember)(nil),         // 9: gochat.v1.ChannelMember
 	(*Attachment)(nil),            // 10: gochat.v1.Attachment
 	(*Message)(nil),               // 11: gochat.v1.Message
-	(*timestamppb.Timestamp)(nil), // 12: google.protobuf.Timestamp
+	(*Reaction)(nil),              // 12: gochat.v1.Reaction
+	(*timestamppb.Timestamp)(nil), // 13: google.protobuf.Timestamp
 }
 var file_gochat_v1_types_proto_depIdxs = []int32{
 	0,  // 0: gochat.v1.User.role:type_name -> gochat.v1.SystemRole
-	12, // 1: gochat.v1.User.created_at:type_name -> google.protobuf.Timestamp
-	12, // 2: gochat.v1.Session.expires_at:type_name -> google.protobuf.Timestamp
+	13, // 1: gochat.v1.User.created_at:type_name -> google.protobuf.Timestamp
+	13, // 2: gochat.v1.Session.expires_at:type_name -> google.protobuf.Timestamp
 	1,  // 3: gochat.v1.Team.role:type_name -> gochat.v1.TeamRole
-	12, // 4: gochat.v1.Team.created_at:type_name -> google.protobuf.Timestamp
+	13, // 4: gochat.v1.Team.created_at:type_name -> google.protobuf.Timestamp
 	4,  // 5: gochat.v1.TeamMember.user:type_name -> gochat.v1.User
 	1,  // 6: gochat.v1.TeamMember.role:type_name -> gochat.v1.TeamRole
-	12, // 7: gochat.v1.TeamMember.joined_at:type_name -> google.protobuf.Timestamp
+	13, // 7: gochat.v1.TeamMember.joined_at:type_name -> google.protobuf.Timestamp
 	3,  // 8: gochat.v1.Channel.type:type_name -> gochat.v1.ChannelType
 	2,  // 9: gochat.v1.Channel.role:type_name -> gochat.v1.ChannelRole
 	4,  // 10: gochat.v1.Channel.peer:type_name -> gochat.v1.User
-	12, // 11: gochat.v1.Channel.created_at:type_name -> google.protobuf.Timestamp
+	13, // 11: gochat.v1.Channel.created_at:type_name -> google.protobuf.Timestamp
 	4,  // 12: gochat.v1.ChannelMember.user:type_name -> gochat.v1.User
 	2,  // 13: gochat.v1.ChannelMember.role:type_name -> gochat.v1.ChannelRole
-	12, // 14: gochat.v1.ChannelMember.joined_at:type_name -> google.protobuf.Timestamp
+	13, // 14: gochat.v1.ChannelMember.joined_at:type_name -> google.protobuf.Timestamp
 	4,  // 15: gochat.v1.Message.author:type_name -> gochat.v1.User
 	10, // 16: gochat.v1.Message.attachments:type_name -> gochat.v1.Attachment
-	12, // 17: gochat.v1.Message.created_at:type_name -> google.protobuf.Timestamp
-	12, // 18: gochat.v1.Message.edited_at:type_name -> google.protobuf.Timestamp
-	12, // 19: gochat.v1.Message.last_reply_at:type_name -> google.protobuf.Timestamp
-	20, // [20:20] is the sub-list for method output_type
-	20, // [20:20] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	13, // 17: gochat.v1.Message.created_at:type_name -> google.protobuf.Timestamp
+	13, // 18: gochat.v1.Message.edited_at:type_name -> google.protobuf.Timestamp
+	13, // 19: gochat.v1.Message.last_reply_at:type_name -> google.protobuf.Timestamp
+	12, // 20: gochat.v1.Message.reactions:type_name -> gochat.v1.Reaction
+	21, // [21:21] is the sub-list for method output_type
+	21, // [21:21] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_gochat_v1_types_proto_init() }
@@ -1082,7 +1149,7 @@ func file_gochat_v1_types_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gochat_v1_types_proto_rawDesc), len(file_gochat_v1_types_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

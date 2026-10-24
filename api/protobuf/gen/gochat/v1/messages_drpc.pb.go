@@ -45,6 +45,7 @@ type DRPCMessageServiceClient interface {
 	GetMessage(ctx context.Context, in *GetMessageRequest) (*GetMessageResponse, error)
 	SendTyping(ctx context.Context, in *SendTypingRequest) (*SendTypingResponse, error)
 	ListThread(ctx context.Context, in *ListThreadRequest) (*ListThreadResponse, error)
+	React(ctx context.Context, in *ReactRequest) (*ReactResponse, error)
 }
 
 type drpcMessageServiceClient struct {
@@ -120,6 +121,15 @@ func (c *drpcMessageServiceClient) ListThread(ctx context.Context, in *ListThrea
 	return out, nil
 }
 
+func (c *drpcMessageServiceClient) React(ctx context.Context, in *ReactRequest) (*ReactResponse, error) {
+	out := new(ReactResponse)
+	err := c.cc.Invoke(ctx, "/gochat.v1.MessageService/React", drpcEncoding_File_gochat_v1_messages_proto{}, in, out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 type DRPCMessageServiceServer interface {
 	PostMessage(context.Context, *PostMessageRequest) (*PostMessageResponse, error)
 	EditMessage(context.Context, *EditMessageRequest) (*EditMessageResponse, error)
@@ -128,6 +138,7 @@ type DRPCMessageServiceServer interface {
 	GetMessage(context.Context, *GetMessageRequest) (*GetMessageResponse, error)
 	SendTyping(context.Context, *SendTypingRequest) (*SendTypingResponse, error)
 	ListThread(context.Context, *ListThreadRequest) (*ListThreadResponse, error)
+	React(context.Context, *ReactRequest) (*ReactResponse, error)
 }
 
 type DRPCMessageServiceUnimplementedServer struct{}
@@ -160,9 +171,13 @@ func (s *DRPCMessageServiceUnimplementedServer) ListThread(context.Context, *Lis
 	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
 }
 
+func (s *DRPCMessageServiceUnimplementedServer) React(context.Context, *ReactRequest) (*ReactResponse, error) {
+	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
+}
+
 type DRPCMessageServiceDescription struct{}
 
-func (DRPCMessageServiceDescription) NumMethods() int { return 7 }
+func (DRPCMessageServiceDescription) NumMethods() int { return 8 }
 
 func (DRPCMessageServiceDescription) Method(n int) (string, drpc.Encoding, drpc.Receiver, interface{}, bool) {
 	switch n {
@@ -229,6 +244,15 @@ func (DRPCMessageServiceDescription) Method(n int) (string, drpc.Encoding, drpc.
 						in1.(*ListThreadRequest),
 					)
 			}, DRPCMessageServiceServer.ListThread, true
+	case 7:
+		return "/gochat.v1.MessageService/React", drpcEncoding_File_gochat_v1_messages_proto{},
+			func(srv interface{}, ctx context.Context, in1, in2 interface{}) (drpc.Message, error) {
+				return srv.(DRPCMessageServiceServer).
+					React(
+						ctx,
+						in1.(*ReactRequest),
+					)
+			}, DRPCMessageServiceServer.React, true
 	default:
 		return "", nil, nil, nil, false
 	}
@@ -372,6 +396,26 @@ func (x *drpcMessageService_ListThreadStream) GetStream() drpc.Stream {
 }
 
 func (x *drpcMessageService_ListThreadStream) SendAndClose(m *ListThreadResponse) error {
+	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_messages_proto{}); err != nil {
+		return err
+	}
+	return x.CloseSend()
+}
+
+type DRPCMessageService_ReactStream interface {
+	drpc.Stream
+	SendAndClose(*ReactResponse) error
+}
+
+type drpcMessageService_ReactStream struct {
+	drpc.Stream
+}
+
+func (x *drpcMessageService_ReactStream) GetStream() drpc.Stream {
+	return x.Stream
+}
+
+func (x *drpcMessageService_ReactStream) SendAndClose(m *ReactResponse) error {
 	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_messages_proto{}); err != nil {
 		return err
 	}
