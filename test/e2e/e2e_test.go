@@ -448,12 +448,14 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// view waits a moment after the frame, since what follows may come
+	// from another socket and overtake it.
 	view := func(s *socket, ch string) {
 		s.send(map[string]string{"op": "view", "team_id": teamID, "team_name": teamName, "channel_id": ch})
+		time.Sleep(300 * time.Millisecond)
 	}
 	view(adminWS, town)
 	view(bobWS, town)
-	time.Sleep(300 * time.Millisecond)
 
 	t.Run("messages arrive in real time and escaped", func(t *testing.T) {
 		bobWS.send(map[string]string{"op": "post", "channel_id": town, "content": "hello <script>alert(1)</script> from bob"})
@@ -520,8 +522,8 @@ func TestEndToEnd(t *testing.T) {
 		if !strings.Contains(f, `<span class="mention">@`+bobName+`</span>`) || strings.Contains(f, `">@nobody`) {
 			t.Fatalf("mention markup: %s", f)
 		}
-		if _, list := bob.do(http.MethodGet, "/m/"+town+"/people?q=adm", nil, "", true); !strings.Contains(list, `data-insert="@admin "`) {
-			t.Fatalf("suggestions for adm: %s", list)
+		if _, list := bob.do(http.MethodGet, "/m/"+town+"/people?q="+adminName[:3], nil, "", true); !strings.Contains(list, `data-insert="@`+adminName+` "`) {
+			t.Fatalf("suggestions for %s: %s", adminName[:3], list)
 		}
 		if _, list := bob.do(http.MethodGet, "/m/"+town+"/people?q=cha", nil, "", true); !strings.Contains(list, `data-insert="@channel "`) {
 			t.Fatalf("suggestions for cha: %s", list)
@@ -992,8 +994,7 @@ func TestEndToEnd(t *testing.T) {
 		if list := threads(admin); strings.Contains(list, `thread-card unread" `+card) {
 			t.Fatal("opening the thread did not read it")
 		}
-		adminWS.send(map[string]string{"op": "view", "team_id": teamID, "team_name": teamName, "channel_id": ""})
-		time.Sleep(200 * time.Millisecond)
+		view(adminWS, "")
 		bobWS.send(map[string]string{"op": "post", "channel_id": town, "root_id": root, "content": "another reply"})
 		adminWS.expect(5*time.Second, `id="threads-refresh"`, "threads?list=1")
 		view(adminWS, town)
