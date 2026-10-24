@@ -41,6 +41,7 @@ type DRPCFileServiceClient interface {
 	Upload(ctx context.Context) (DRPCFileService_UploadClient, error)
 	Download(ctx context.Context, in *DownloadRequest) (DRPCFileService_DownloadClient, error)
 	GetPhoto(ctx context.Context, in *GetPhotoRequest) (*GetPhotoResponse, error)
+	GetStorageUsage(ctx context.Context, in *GetStorageUsageRequest) (*GetStorageUsageResponse, error)
 }
 
 type drpcFileServiceClient struct {
@@ -147,10 +148,20 @@ func (c *drpcFileServiceClient) GetPhoto(ctx context.Context, in *GetPhotoReques
 	return out, nil
 }
 
+func (c *drpcFileServiceClient) GetStorageUsage(ctx context.Context, in *GetStorageUsageRequest) (*GetStorageUsageResponse, error) {
+	out := new(GetStorageUsageResponse)
+	err := c.cc.Invoke(ctx, "/gochat.v1.FileService/GetStorageUsage", drpcEncoding_File_gochat_v1_files_proto{}, in, out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 type DRPCFileServiceServer interface {
 	Upload(DRPCFileService_UploadStream) error
 	Download(*DownloadRequest, DRPCFileService_DownloadStream) error
 	GetPhoto(context.Context, *GetPhotoRequest) (*GetPhotoResponse, error)
+	GetStorageUsage(context.Context, *GetStorageUsageRequest) (*GetStorageUsageResponse, error)
 }
 
 type DRPCFileServiceUnimplementedServer struct{}
@@ -167,9 +178,13 @@ func (s *DRPCFileServiceUnimplementedServer) GetPhoto(context.Context, *GetPhoto
 	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
 }
 
+func (s *DRPCFileServiceUnimplementedServer) GetStorageUsage(context.Context, *GetStorageUsageRequest) (*GetStorageUsageResponse, error) {
+	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
+}
+
 type DRPCFileServiceDescription struct{}
 
-func (DRPCFileServiceDescription) NumMethods() int { return 3 }
+func (DRPCFileServiceDescription) NumMethods() int { return 4 }
 
 func (DRPCFileServiceDescription) Method(n int) (string, drpc.Encoding, drpc.Receiver, interface{}, bool) {
 	switch n {
@@ -199,6 +214,15 @@ func (DRPCFileServiceDescription) Method(n int) (string, drpc.Encoding, drpc.Rec
 						in1.(*GetPhotoRequest),
 					)
 			}, DRPCFileServiceServer.GetPhoto, true
+	case 3:
+		return "/gochat.v1.FileService/GetStorageUsage", drpcEncoding_File_gochat_v1_files_proto{},
+			func(srv interface{}, ctx context.Context, in1, in2 interface{}) (drpc.Message, error) {
+				return srv.(DRPCFileServiceServer).
+					GetStorageUsage(
+						ctx,
+						in1.(*GetStorageUsageRequest),
+					)
+			}, DRPCFileServiceServer.GetStorageUsage, true
 	default:
 		return "", nil, nil, nil, false
 	}
@@ -272,6 +296,26 @@ func (x *drpcFileService_GetPhotoStream) GetStream() drpc.Stream {
 }
 
 func (x *drpcFileService_GetPhotoStream) SendAndClose(m *GetPhotoResponse) error {
+	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_files_proto{}); err != nil {
+		return err
+	}
+	return x.CloseSend()
+}
+
+type DRPCFileService_GetStorageUsageStream interface {
+	drpc.Stream
+	SendAndClose(*GetStorageUsageResponse) error
+}
+
+type drpcFileService_GetStorageUsageStream struct {
+	drpc.Stream
+}
+
+func (x *drpcFileService_GetStorageUsageStream) GetStream() drpc.Stream {
+	return x.Stream
+}
+
+func (x *drpcFileService_GetStorageUsageStream) SendAndClose(m *GetStorageUsageResponse) error {
 	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_files_proto{}); err != nil {
 		return err
 	}

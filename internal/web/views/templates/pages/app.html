@@ -15,6 +15,7 @@
             <button hx-get="/t/{{.Team.Name}}/channels/new" hx-target="#modal">Create a channel</button>
             <button hx-get="/t/{{.Team.Name}}/channels/browse" hx-target="#modal">Browse channels</button>
             <a href="/settings">Account settings</a>
+            {{if isSystemAdmin .User}}<a href="/admin/users">Manage users</a>{{end}}
           </div>
         </details>
       </header>

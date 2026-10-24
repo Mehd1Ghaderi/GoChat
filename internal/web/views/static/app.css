@@ -188,6 +188,7 @@ fieldset.choice legend { font-weight: 600; font-size: .92rem; padding: 0 .3rem; 
 .card p { margin: 0; }
 .qr { width: 200px; height: 200px; image-rendering: pixelated; background: #fff; padding: 8px; border-radius: 10px; }
 .secret code { word-break: break-all; font-size: 1rem; }
+.usage { width: 100%; height: 8px; accent-color: var(--accent); }
 .codes { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .4rem; padding: 0; list-style: none; }
 .codes code { display: block; padding: .4rem; text-align: center; background: var(--bg-soft); border-radius: 8px; }
 

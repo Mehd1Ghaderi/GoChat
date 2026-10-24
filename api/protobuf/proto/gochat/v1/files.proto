@@ -10,6 +10,9 @@ service FileService {
   // The first message is the header, every other one a chunk.
   rpc Download(DownloadRequest) returns (stream DownloadResponse);
   rpc GetPhoto(GetPhotoRequest) returns (GetPhotoResponse);
+  // GetStorageUsage tells how much the caller's attachments take, or a
+  // user's for a system admin.
+  rpc GetStorageUsage(GetStorageUsageRequest) returns (GetStorageUsageResponse);
 }
 
 message UploadHeader {
@@ -53,4 +56,17 @@ message GetPhotoResponse {
   // The current version, which differs from the one asked for once the photo
   // changed.
   string version = 3;
+}
+
+message GetStorageUsageRequest {
+  // Empty for the caller.
+  string user_id = 1;
+}
+
+message GetStorageUsageResponse {
+  int64 used = 1;
+  // Zero when there is no limit.
+  int64 quota = 2;
+  // The user has a quota of their own rather than the server's default.
+  bool custom = 3;
 }

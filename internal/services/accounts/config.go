@@ -18,16 +18,21 @@ type Config struct {
 	SessionTTL        time.Duration   `mapstructure:"session_ttl"`
 	SessionCacheTTL   time.Duration   `mapstructure:"session_cache_ttl"`
 	SessionCacheSize  int             `mapstructure:"session_cache_size"`
-	MFATTL            time.Duration   `mapstructure:"mfa_ttl"`
-	MFAMaxAttempts    int             `mapstructure:"mfa_max_attempts"`
-	TOTPIssuer        string          `mapstructure:"totp_issuer"`
+	// LastSeenInterval is how often a session in use records it.
+	LastSeenInterval time.Duration `mapstructure:"last_seen_interval"`
+	MFATTL           time.Duration `mapstructure:"mfa_ttl"`
+	MFAMaxAttempts   int           `mapstructure:"mfa_max_attempts"`
+	TOTPIssuer       string        `mapstructure:"totp_issuer"`
 	// SecretKey seals TOTP secrets at rest: 32 bytes, base64.
 	SecretKey  string `mapstructure:"secret_key"`
 	OpenSignup bool   `mapstructure:"open_signup"`
-	// SetupToken, when set, must be given to create the first account.
-	SetupToken    string        `mapstructure:"setup_token"`
-	LoginFailures int           `mapstructure:"login_failures"`
-	LoginWindow   time.Duration `mapstructure:"login_window"`
+	// SetupToken must be given to create the first account. Without one, no
+	// account can be created unless AllowOpenBootstrap lets the first
+	// sign-up become the admin.
+	SetupToken         string        `mapstructure:"setup_token"`
+	AllowOpenBootstrap bool          `mapstructure:"allow_open_bootstrap"`
+	LoginFailures      int           `mapstructure:"login_failures"`
+	LoginWindow        time.Duration `mapstructure:"login_window"`
 }
 
 var _ config.Config = (*Config)(nil)
@@ -50,6 +55,9 @@ func (c *Config) Validate() error {
 	}
 	if c.SessionCacheTTL <= 0 || c.SessionCacheSize < 1 {
 		return errors.New("session_cache_ttl and session_cache_size must be positive")
+	}
+	if c.LastSeenInterval < time.Minute {
+		return errors.New("last_seen_interval must be at least 1m")
 	}
 	if c.MFAMaxAttempts < 1 {
 		return errors.New("mfa_max_attempts must be at least 1")

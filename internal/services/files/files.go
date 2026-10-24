@@ -29,6 +29,11 @@ type Repo interface {
 	ListPendingUploads(ctx context.Context, day int32) ([]*scylla.PendingUpload, error)
 	DeleteOrphan(ctx context.Context, id gocql.UUID) (bool, error)
 	ForgetPending(ctx context.Context, p *scylla.PendingUpload) error
+	GetUser(ctx context.Context, id gocql.UUID) (*models.User, error)
+	StorageUsage(ctx context.Context, userID gocql.UUID) (used, quota int64, err error)
+	ChargeStorage(ctx context.Context, userID gocql.UUID, size, limit int64) (bool, error)
+	ReleaseStorage(ctx context.Context, userID gocql.UUID, size int64) error
+	SetStorageQuota(ctx context.Context, userID gocql.UUID, quota int64) error
 }
 
 type Storage interface {
@@ -43,35 +48,6 @@ type Deps struct {
 	Authz    *authz.Authorizer
 	Engine   *actor.Engine
 	Channels *actor.PID
-}
-
-// BeginUpload replies with an *Upload when the caller may upload to the
-// channel.
-type BeginUpload struct {
-	P         *models.Principal
-	ChannelID string
-	Name      string
-}
-
-type Upload struct {
-	ID        gocql.UUID
-	ChannelID gocql.UUID
-	Name      string
-	ObjectKey string
-}
-
-// CompleteUpload records a stored upload and replies with its *pb.Attachment.
-type CompleteUpload struct {
-	P           *models.Principal
-	Upload      *Upload
-	Size        int64
-	ContentType string
-}
-
-// OpenDownload replies with the *models.Attachment the caller may read.
-type OpenDownload struct {
-	P            *models.Principal
-	AttachmentID string
 }
 
 func Pool(d *Deps) actor.Producer {
@@ -95,6 +71,10 @@ func (w *worker) Receive(c *actor.Context) {
 		out, err = w.complete(ctx, msg)
 	case OpenDownload:
 		out, err = w.open(ctx, msg)
+	case Usage:
+		out, err = w.usage(ctx, msg)
+	case SetQuota:
+		out, err = w.setQuota(ctx, msg)
 	default:
 		return
 	}
@@ -127,13 +107,36 @@ func (w *worker) begin(ctx context.Context, msg BeginUpload) (*Upload, error) {
 	if !w.Authz.Can(authz.ObjFile, authz.ActUpload, string(acc.Role), string(msg.P.Role)) {
 		return nil, ierrors.PermissionDenied()
 	}
+	room, err := w.room(ctx, msg.P.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if room == 0 {
+		return nil, ErrQuota
+	}
 	id := ids.New()
 	return &Upload{
 		ID:        id,
 		ChannelID: channelID,
 		Name:      validate.Filename(msg.Name),
 		ObjectKey: "attachments/" + channelID.String() + "/" + id.String(),
+		Room:      room,
 	}, nil
+}
+
+// room is how many more bytes userID may store, -1 for no limit.
+func (w *worker) room(ctx context.Context, userID gocql.UUID) (int64, error) {
+	used, quota, err := w.Repo.StorageUsage(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	if quota <= 0 {
+		quota = w.Cfg.Quota
+	}
+	if quota <= 0 {
+		return -1, nil
+	}
+	return max(0, quota-used), nil
 }
 
 func (w *worker) complete(ctx context.Context, msg CompleteUpload) (*pb.Attachment, error) {
@@ -147,11 +150,91 @@ func (w *worker) complete(ctx context.Context, msg CompleteUpload) (*pb.Attachme
 		Size:        msg.Size,
 		ObjectKey:   u.ObjectKey,
 		CreatedAt:   time.Now().UTC(),
+		Counted:     true,
+	}
+	// Charged first, so uploads at once cannot pass the quota together.
+	ok, err := w.Repo.ChargeStorage(ctx, msg.P.UserID, msg.Size, w.Cfg.Quota)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, ErrQuota
 	}
 	if err := w.Repo.InsertAttachment(ctx, att); err != nil {
+		// A row that may exist is left to the janitor, which releases it.
+		if !scylla.Uncertain(err) {
+			w.release(att)
+		}
 		return nil, err
 	}
 	return convert.Attachment(att), nil
+}
+
+func (w *worker) release(att *models.Attachment) {
+	ctx, cancel := context.WithTimeout(context.Background(), w.Cfg.OpTimeout)
+	defer cancel()
+	if err := w.Repo.ReleaseStorage(ctx, att.UploaderID, att.Size); err != nil {
+		w.Logger.Warn("failed to release storage", zap.String("user", att.UploaderID.String()), zap.Error(err))
+	}
+}
+
+// owner is whose storage a call is about: the caller's, or for someone who
+// may manage any, that of raw.
+func (w *worker) owner(p *models.Principal, raw string) (gocql.UUID, error) {
+	if raw == "" {
+		return p.UserID, nil
+	}
+	id, ok := ids.Parse(raw)
+	if !ok {
+		return gocql.UUID{}, ierrors.InvalidArgument("invalid user id")
+	}
+	if id != p.UserID && !w.Authz.Can(authz.ObjStorage, authz.ActManageAny, string(p.Role)) {
+		return gocql.UUID{}, ierrors.PermissionDenied()
+	}
+	return id, nil
+}
+
+func (w *worker) usage(ctx context.Context, msg Usage) (*StorageUsage, error) {
+	userID, err := w.owner(msg.P, msg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	used, quota, err := w.Repo.StorageUsage(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	out := &StorageUsage{Used: used, Quota: w.Cfg.Quota}
+	if quota > 0 {
+		out.Quota, out.Custom = quota, true
+	}
+	return out, nil
+}
+
+// maxQuota bounds the quota one user may get, a petabyte.
+const maxQuota = 1 << 50
+
+func (w *worker) setQuota(ctx context.Context, msg SetQuota) (Done, error) {
+	if !w.Authz.Can(authz.ObjStorage, authz.ActManageAny, string(msg.P.Role)) {
+		return Done{}, ierrors.PermissionDenied()
+	}
+	if msg.Quota < 0 || msg.Quota > maxQuota {
+		return Done{}, ierrors.InvalidArgument("the quota is out of range")
+	}
+	id, ok := ids.Parse(msg.UserID)
+	if !ok {
+		return Done{}, errNoUser
+	}
+	if _, err := w.Repo.GetUser(ctx, id); err != nil {
+		if ierrors.Is(err, ierrors.CodeNotFound) {
+			return Done{}, errNoUser
+		}
+		return Done{}, err
+	}
+	if err := w.Repo.SetStorageQuota(ctx, id, msg.Quota); err != nil {
+		return Done{}, err
+	}
+	w.Logger.Info("storage quota set", zap.String("user", id.String()), zap.Int64("quota", msg.Quota), zap.String("by", msg.P.UserID.String()))
+	return Done{}, nil
 }
 
 var errNoFile = ierrors.NotFound("file not found")

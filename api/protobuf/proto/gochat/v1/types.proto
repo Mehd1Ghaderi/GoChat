@@ -72,6 +72,21 @@ message Session {
   google.protobuf.Timestamp expires_at = 3;
 }
 
+// SessionInfo describes a signed-in browser or device, never its token.
+message SessionInfo {
+  string id = 1;
+  string user_agent = 2;
+  // The address it signed in from, and the one it was last seen at.
+  string ip = 3;
+  string last_ip = 4;
+  google.protobuf.Timestamp created_at = 5;
+  // Unset until it is first seen after signing in.
+  google.protobuf.Timestamp last_seen_at = 6;
+  google.protobuf.Timestamp expires_at = 7;
+  // The session of the request.
+  bool current = 8;
+}
+
 message Team {
   string id = 1;
   string name = 2;

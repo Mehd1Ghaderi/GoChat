@@ -12,6 +12,7 @@ import (
 	"html/template"
 	"io"
 	"io/fs"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -156,6 +157,8 @@ func (r *Renderer) funcs() template.FuncMap {
 		"avatar":  AvatarClass,
 		"icon":    Icon,
 		"size":    HumanSize,
+		"device":  Device,
+		"mib":     MiB,
 		"isImage": IsImage,
 		"iso":     func(t time.Time) string { return t.UTC().Format(time.RFC3339) },
 		"clock":   func(t time.Time) string { return t.UTC().Format("15:04") },
@@ -248,6 +251,14 @@ func HumanSize(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGT"[exp])
+}
+
+// MiB is n bytes in whole mebibytes, at least one, or empty for zero.
+func MiB(n int64) string {
+	if n <= 0 {
+		return ""
+	}
+	return strconv.FormatInt(max(1, n>>20), 10)
 }
 
 // IsImage reports whether a file may be shown inline: raster formats only,

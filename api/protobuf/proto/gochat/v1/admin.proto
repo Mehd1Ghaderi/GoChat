@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package gochat.v1;
+
+import "gochat/v1/types.proto";
+
+// AdminService administers accounts. Every RPC is for system admins.
+service AdminService {
+  rpc FindUser(FindUserRequest) returns (FindUserResponse);
+  // SetUserDeactivated deactivates a user, which signs every session of
+  // theirs out, or reactivates one.
+  rpc SetUserDeactivated(SetUserDeactivatedRequest) returns (SetUserDeactivatedResponse);
+  rpc SetStorageQuota(SetStorageQuotaRequest) returns (SetStorageQuotaResponse);
+}
+
+message FindUserRequest {
+  oneof key {
+    // A username or an email address.
+    string login = 1;
+    string user_id = 2;
+  }
+}
+
+message FindUserResponse {
+  User user = 1;
+  string email = 2;
+}
+
+message SetUserDeactivatedRequest {
+  string user_id = 1;
+  bool deactivated = 2;
+}
+
+message SetUserDeactivatedResponse {
+  User user = 1;
+}
+
+message SetStorageQuotaRequest {
+  string user_id = 1;
+  // In bytes; zero puts the user back on the server's default.
+  int64 quota = 2;
+}
+
+message SetStorageQuotaResponse {}

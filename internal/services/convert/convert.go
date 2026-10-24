@@ -11,6 +11,7 @@ import (
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
 	"github.com/ssenerg/gochat/internal/core/ids"
 	"github.com/ssenerg/gochat/internal/core/models"
+	"github.com/ssenerg/gochat/internal/core/secure"
 )
 
 func Time(t time.Time) *timestamppb.Timestamp {
@@ -98,6 +99,20 @@ func User(u *models.User) *pb.User {
 		Status:       Status(u.Status),
 		DndUntil:     Time(u.DNDUntil),
 		CustomStatus: Custom(u, time.Now()),
+	}
+}
+
+// Session describes s, the session of the request when current.
+func Session(s *models.Session, current bool) *pb.SessionInfo {
+	return &pb.SessionInfo{
+		Id:         secure.PublicID(s.TokenHash),
+		UserAgent:  s.UserAgent,
+		Ip:         s.IP,
+		LastIp:     s.LastIP,
+		CreatedAt:  Time(s.CreatedAt),
+		LastSeenAt: Time(s.LastSeen),
+		ExpiresAt:  Time(s.ExpiresAt),
+		Current:    current,
 	}
 }
 
