@@ -158,6 +158,8 @@ func (c *client) socket(origin string) (*socket, *http.Response, error) {
 	if err != nil {
 		return nil, res, err
 	}
+	// A sidebar of many channels outgrows the library's default limit.
+	conn.SetReadLimit(4 << 20)
 	s := &socket{t: c.t, conn: conn, in: make(chan string, 256)}
 	go func() {
 		for {
@@ -252,6 +254,7 @@ var (
 	offTopicRe  = regexp.MustCompile(`data-channel="([0-9a-f-]{36})"(?s:[^<]*>.{0,600}?)<span class="label">Off-Topic</span>`)
 	photoRe     = regexp.MustCompile(`/photos/([ut])/([0-9a-f-]{36})/([0-9a-f]{16})`)
 	staticCSSRe = regexp.MustCompile(`/static/[0-9a-f]+/app\.css`)
+	pickRe      = regexp.MustCompile(`data-pick="([0-9a-f-]{36})"`)
 )
 
 // bootstrap sets a fresh server up with the admin and the team the tests use.
@@ -610,6 +613,313 @@ func TestEndToEnd(t *testing.T) {
 		adminWS.expect(5*time.Second, "for admins only")
 		bobWS.refuse(time.Second, "for admins only")
 		view(adminWS, town)
+	})
+
+	t.Run("search finds what each person may read", func(t *testing.T) {
+		word := "zq" + random(4)
+		name := "hidden-" + random(3)
+		res, _ := admin.hx("/t/"+teamName+"/channels", url.Values{"name": {name}, "display_name": {"Hidden"}, "type": {"private"}})
+		hidden := channelRe.FindStringSubmatch(res.Header.Get("HX-Location"))[1]
+		view(adminWS, hidden)
+		adminWS.send(map[string]string{"op": "post", "channel_id": hidden, "content": "private " + word + " plans"})
+		adminWS.expect(5*time.Second, "private "+word)
+		view(adminWS, town)
+		bobWS.send(map[string]string{"op": "post", "channel_id": town, "content": "the public " + word + " release notes <b>bold</b>"})
+		pub := msgIDRe.FindStringSubmatch(adminWS.expect(5*time.Second, "public "+word))[1]
+
+		search := func(c *client, q string) string {
+			t.Helper()
+			for range 10 {
+				_, body := c.do(http.MethodGet, "/t/"+teamName+"/search?q="+url.QueryEscape(q), nil, "", true)
+				// The results, without the query echoed in the search box.
+				_, body, _ = strings.Cut(body, `id="search-results"`)
+				if !strings.Contains(body, "searching too fast") {
+					return body
+				}
+				time.Sleep(time.Second)
+			}
+			t.Fatalf("searching %q stayed too fast", q)
+			return ""
+		}
+		// Messages are filed for search a moment after they are posted.
+		var body string
+		for deadline := time.Now().Add(8 * time.Second); ; time.Sleep(400 * time.Millisecond) {
+			if body = search(admin, word); strings.Contains(body, "plans") && strings.Contains(body, "release") {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("search did not find both messages: %s", body)
+			}
+		}
+		if !strings.Contains(body, "<mark>"+word+"</mark>") || strings.Contains(body, "<b>bold") || !strings.Contains(body, "?msg="+pub) {
+			t.Fatalf("results: %s", body)
+		}
+		if body := search(bob, word); !strings.Contains(body, "release") || strings.Contains(body, "plans") {
+			t.Fatalf("bob's results: %s", body)
+		}
+		for q, want := range map[string]string{
+			`"release notes" ` + word:   "release",
+			word + " from:" + adminName: "plans",
+			word + " in:" + name:        "plans",
+			word + " -release":          "plans",
+		} {
+			body := search(admin, q)
+			other := map[string]string{"release": "plans", "plans": "release"}[want]
+			if !strings.Contains(body, want) || strings.Contains(body, other) {
+				t.Fatalf("%q: %s", q, body)
+			}
+		}
+		if body := search(admin, "the"); !strings.Contains(body, "Type a word") {
+			t.Fatalf("a stop word alone: %s", body)
+		}
+		if _, page := admin.get("/t/" + teamName + "/ch/" + town + "?msg=" + pub); !strings.Contains(page, ` focus" id="msg-`+pub+`" data-focus="1"`) {
+			t.Fatalf("the linked message is not focused: %s", page)
+		}
+		if res, _ := bob.hx("/m/"+town+"/"+pub, url.Values{"content": {"nothing to see"}}); res.StatusCode != http.StatusOK {
+			t.Fatalf("edit: %d", res.StatusCode)
+		}
+		for deadline := time.Now().Add(8 * time.Second); strings.Contains(search(admin, word), "release"); time.Sleep(400 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatal("an edited message is still found by its old words")
+			}
+		}
+	})
+
+	t.Run("group conversations and the switcher", func(t *testing.T) {
+		_, body := admin.hx("/t/"+teamName+"/invites", url.Values{})
+		carol := newClient(t, "carol")
+		carolName, carolPass := "carol-"+random(4), "pw-"+random(8)
+		inv := inviteRe.FindStringSubmatch(body)[1]
+		carol.get("/signup?invite=" + inv)
+		if res, body := carol.form("/signup", url.Values{
+			"username": {carolName}, "display_name": {"Carol"}, "email": {carolName + "@example.test"},
+			"password": {carolPass}, "confirm": {carolPass}, "invite": {inv},
+		}); res.StatusCode != http.StatusSeeOther {
+			t.Fatalf("carol's signup: %d %s", res.StatusCode, body)
+		}
+		userID := func(q string) string {
+			_, list := admin.do(http.MethodGet, "/t/"+teamName+"/people/search?q="+q, nil, "", true)
+			m := pickRe.FindStringSubmatch(list)
+			if m == nil {
+				t.Fatalf("no one found for %q: %s", q, list)
+			}
+			return m[1]
+		}
+		bobUser, carolUser := userID(bobName), userID(carolName)
+		open := func(people ...string) string {
+			t.Helper()
+			res, body := admin.hx("/t/"+teamName+"/dm", url.Values{"user_id": people})
+			m := channelRe.FindStringSubmatch(res.Header.Get("HX-Location"))
+			if m == nil {
+				t.Fatalf("open %v: %d %s", people, res.StatusCode, body)
+			}
+			return m[1]
+		}
+		group := open(bobUser, carolUser)
+		if again := open(carolUser, bobUser); again != group {
+			t.Fatalf("the same people opened another group: %s, %s", group, again)
+		}
+		if direct := open(bobUser); direct == group {
+			t.Fatal("one person opened the group")
+		}
+		bobWS.expect(5*time.Second, `id="channel-lists"`, `class="group-count"`)
+		view(adminWS, group)
+		adminWS.send(map[string]string{"op": "post", "channel_id": group, "content": "hello group"})
+		bobWS.expect(5*time.Second, `id="notify"`, "hello group")
+		bobWS.expect(5*time.Second, `id="unread-`+group+`" class="mentions"`)
+		view(adminWS, town)
+		if _, page := carol.get("/t/" + teamName + "/ch/" + group); !strings.Contains(page, "hello group") || !strings.Contains(page, "Your conversation with") {
+			t.Fatalf("carol's view of the group: %s", page)
+		}
+		if res, _ := bob.hx("/t/"+teamName+"/ch/"+group+"/leave", url.Values{}); res.StatusCode < 400 {
+			t.Fatalf("bob left a group conversation: %d", res.StatusCode)
+		}
+		if res, _ := admin.hx("/t/"+teamName+"/dm", url.Values{"user_id": {bobUser, carolUser, "00000000-0000-4000-8000-000000000000"}}); res.StatusCode != http.StatusNotFound {
+			t.Fatalf("a group with a stranger: %d", res.StatusCode)
+		}
+
+		if _, list := bob.do(http.MethodGet, "/t/"+teamName+"/switch/results?q=off", nil, "", true); !strings.Contains(list, "Off-Topic") || !strings.Contains(list, `role="option"`) {
+			t.Fatalf("switcher for off: %s", list)
+		}
+		if _, list := bob.do(http.MethodGet, "/t/"+teamName+"/switch/results?q=carol", nil, "", true); !strings.Contains(list, "Carol") {
+			t.Fatalf("switcher for carol: %s", list)
+		}
+		if _, modal := bob.do(http.MethodGet, "/t/"+teamName+"/switch", nil, "", true); !strings.Contains(modal, "data-switch-input") || !strings.Contains(modal, "Town Square") {
+			t.Fatalf("switcher: %s", modal)
+		}
+	})
+
+	t.Run("channel settings, privacy and archiving", func(t *testing.T) {
+		res, _ := admin.hx("/t/"+teamName+"/channels", url.Values{"name": {"proj-" + random(3)}, "display_name": {"Project"}, "type": {"public"}})
+		proj := channelRe.FindStringSubmatch(res.Header.Get("HX-Location"))[1]
+		base := "/t/" + teamName + "/ch/" + proj
+		bob.hx(base+"/join", url.Values{})
+		view(bobWS, proj)
+		defer view(bobWS, town)
+		if res, _ := bob.hx(base+"/settings", url.Values{"display_name": {"Mine"}, "name": {"mine-" + random(3)}}); res.StatusCode != http.StatusForbidden {
+			t.Fatalf("a member changed the settings: %d", res.StatusCode)
+		}
+		newName := "launch-" + random(3)
+		res, body := admin.hx(base+"/settings", url.Values{"display_name": {"Launch"}, "name": {newName}, "purpose": {"Ship it"}})
+		if res.StatusCode != http.StatusOK || !strings.Contains(body, "Saved.") {
+			t.Fatalf("settings: %d %s", res.StatusCode, body)
+		}
+		bobWS.expect(5*time.Second, `id="channel-header-`+proj+`"`, "Launch", "Ship it")
+		if _, body := admin.hx("/t/"+teamName+"/channels", url.Values{"name": {newName}, "display_name": {"Again"}, "type": {"public"}}); !strings.Contains(body, "exists") {
+			t.Fatalf("a renamed channel's name was free: %s", body)
+		}
+		if _, body := admin.hx(base+"/privacy", url.Values{"private": {"1"}}); !strings.Contains(body, "private now") {
+			t.Fatalf("make private: %s", body)
+		}
+		if res, _ := bob.hx(base+"/privacy", url.Values{"private": {"0"}}); res.StatusCode != http.StatusForbidden {
+			t.Fatalf("a member made the channel public: %d", res.StatusCode)
+		}
+		if res, _ := admin.hx(base+"/archive", url.Values{"archived": {"1"}}); res.Header.Get("HX-Location") == "" {
+			t.Fatalf("archive: %d", res.StatusCode)
+		}
+		bobWS.expect(5*time.Second, `id="composer-area-`+proj+`"`, "is archived")
+		bobWS.send(map[string]string{"op": "post", "channel_id": proj, "content": "too late"})
+		bobWS.expect(5*time.Second, "this channel is archived")
+		if _, page := bob.get("/t/" + teamName + "/ch/" + town); strings.Contains(page, `data-channel="`+proj+`"`) {
+			t.Fatal("an archived channel stayed in the sidebar")
+		}
+		if _, modal := bob.do(http.MethodGet, "/t/"+teamName+"/channels/browse", nil, "", true); !strings.Contains(modal, "Archived channels") || !strings.Contains(modal, "Launch") {
+			t.Fatalf("browse: %s", modal)
+		}
+		admin.hx(base+"/archive", url.Values{"archived": {"0"}})
+		bobWS.expect(5*time.Second, `id="composer-area-`+proj+`"`, `id="composer"`)
+		if res, _ := admin.hx("/t/"+teamName+"/ch/"+town+"/archive", url.Values{"archived": {"1"}}); res.StatusCode < 400 {
+			t.Fatalf("the town square was archived: %d", res.StatusCode)
+		}
+	})
+
+	t.Run("threads gather what people follow", func(t *testing.T) {
+		adminWS.send(map[string]string{"op": "post", "channel_id": town, "content": "inbox root " + random(3)})
+		root := msgIDRe.FindStringSubmatch(bobWS.expect(5*time.Second, "inbox root", `hx-swap-oob="afterbegin"`))[1]
+		card := `hx-get="/m/` + town + `/` + root + `/thread"`
+		bobWS.send(map[string]string{"op": "post", "channel_id": town, "root_id": root, "content": "inbox reply"})
+		adminWS.expect(5*time.Second, `id="threads-unread" class="dot on"`)
+		threads := func(c *client) string {
+			_, body := c.do(http.MethodGet, "/t/"+teamName+"/threads", nil, "", true)
+			return body
+		}
+		if list := threads(admin); !strings.Contains(list, `thread-card unread" `+card) {
+			t.Fatalf("admin's threads: %s", list)
+		}
+		if list := threads(bob); !strings.Contains(list, card) || strings.Contains(list, `thread-card unread" `+card) {
+			t.Fatalf("the replier's threads: %s", list)
+		}
+		if _, panel := admin.do(http.MethodGet, "/m/"+town+"/"+root+"/thread", nil, "", true); !strings.Contains(panel, `aria-pressed="true"`) || !strings.Contains(panel, "Following") {
+			t.Fatalf("thread panel: %s", panel)
+		}
+		if list := threads(admin); strings.Contains(list, `thread-card unread" `+card) {
+			t.Fatal("opening the thread did not read it")
+		}
+		adminWS.send(map[string]string{"op": "view", "team_id": teamID, "team_name": teamName, "channel_id": ""})
+		time.Sleep(200 * time.Millisecond)
+		bobWS.send(map[string]string{"op": "post", "channel_id": town, "root_id": root, "content": "another reply"})
+		adminWS.expect(5*time.Second, `id="threads-refresh"`, "threads?list=1")
+		view(adminWS, town)
+		if res, body := bob.hx("/m/"+town+"/"+root+"/follow", url.Values{"follow": {"0"}}); res.StatusCode != http.StatusOK || !strings.Contains(body, ">Follow<") {
+			t.Fatalf("unfollow: %d %s", res.StatusCode, body)
+		}
+		if list := threads(bob); strings.Contains(list, card) {
+			t.Fatal("an unfollowed thread is still listed")
+		}
+		bob.hx("/m/"+town+"/"+root+"/follow", url.Values{"follow": {"1"}})
+		if list := threads(bob); !strings.Contains(list, card) {
+			t.Fatal("a followed thread is not listed")
+		}
+		if res, page := admin.get("/t/" + teamName + "/threads"); res.StatusCode != http.StatusOK || !strings.Contains(page, `id="threads-view"`) || !strings.Contains(page, `data-place="threads"`) {
+			t.Fatalf("threads page: %d", res.StatusCode)
+		}
+	})
+
+	t.Run("pins are shared and saves are private", func(t *testing.T) {
+		adminWS.send(map[string]string{"op": "post", "channel_id": town, "content": "pin me " + random(3)})
+		id := msgIDRe.FindStringSubmatch(bobWS.expect(5*time.Second, "pin me", `hx-swap-oob="afterbegin"`))[1]
+		if res, body := bob.hx("/m/"+town+"/"+id+"/pin", url.Values{"pinned": {"1"}}); res.StatusCode != http.StatusOK || !strings.Contains(body, "Pinned</span>") {
+			t.Fatalf("pin: %d %s", res.StatusCode, body)
+		}
+		adminWS.expect(5*time.Second, `id="pins-btn-`+town+`"`, `class="count"`)
+		adminWS.expect(5*time.Second, `id="msg-`+id+`"`, "Pinned</span>")
+		pins := func() string {
+			_, body := admin.do(http.MethodGet, "/t/"+teamName+"/ch/"+town+"/pins", nil, "", true)
+			return body
+		}
+		if list := pins(); !strings.Contains(list, "?msg="+id) {
+			t.Fatalf("pinned list: %s", list)
+		}
+		if res, body := admin.hx("/m/"+town+"/"+id+"/save", url.Values{"saved": {"1"}}); res.StatusCode != http.StatusOK || !strings.Contains(body, `flag saved`) {
+			t.Fatalf("save: %d %s", res.StatusCode, body)
+		}
+		adminWS.expect(5*time.Second, `id="saved-changed"`)
+		saved := func(c *client) string {
+			_, body := c.do(http.MethodGet, "/t/"+teamName+"/saved", nil, "", true)
+			return body
+		}
+		if list := saved(admin); !strings.Contains(list, "?msg="+id) {
+			t.Fatalf("admin's saved: %s", list)
+		}
+		if list := saved(bob); strings.Contains(list, "?msg="+id) {
+			t.Fatal("a save showed to someone else")
+		}
+		_, page := admin.do(http.MethodGet, "/t/"+teamName+"/ch/"+town, nil, "", true)
+		if !regexp.MustCompile(`id="msg-` + id + `"(?s:.*?)flag saved`).MatchString(page) {
+			t.Fatal("the channel does not show the save to its saver")
+		}
+		if _, page := bob.do(http.MethodGet, "/t/"+teamName+"/ch/"+town, nil, "", true); strings.Contains(page, "flag saved") {
+			t.Fatal("the channel shows another person's save")
+		}
+		admin.hx("/m/"+town+"/"+id+"/delete", url.Values{})
+		adminWS.expect(5*time.Second, `id="pins-btn-`+town+`"`)
+		if list := pins(); strings.Contains(list, id) {
+			t.Fatal("a deleted message stayed pinned")
+		}
+		if list := saved(admin); strings.Contains(list, id) {
+			t.Fatal("a deleted message stayed saved")
+		}
+	})
+
+	t.Run("statuses show and do not disturb holds notifications", func(t *testing.T) {
+		_, list := admin.do(http.MethodGet, "/t/"+teamName+"/people/search?q="+bobName, nil, "", true)
+		bobUser := pickRe.FindStringSubmatch(list)[1]
+		res, _ := admin.hx("/t/"+teamName+"/dm", url.Values{"user_id": {bobUser}})
+		direct := channelRe.FindStringSubmatch(res.Header.Get("HX-Location"))[1]
+		setStatus := func(status, emoji, text string) (*http.Response, string) {
+			return bob.hx("/status", url.Values{"status": {status}, "dnd": {"0"}, "emoji": {emoji}, "text": {text}, "clear": {"60"}})
+		}
+		if _, modal := bob.do(http.MethodGet, "/status", nil, "", true); !strings.Contains(modal, "Set your status") || !strings.Contains(modal, `value="dnd"`) {
+			t.Fatalf("status modal: %s", modal)
+		}
+		if res, body := setStatus("dnd", "calendar", "In a meeting"); res.StatusCode != http.StatusOK || !strings.Contains(body, `class="presence dnd"`) || !strings.Contains(body, "In a meeting") {
+			t.Fatalf("set status: %d %s", res.StatusCode, body)
+		}
+		adminWS.expect(5*time.Second, `id="presence-`+bobUser+`" class="presence dnd"`)
+		adminWS.expect(5*time.Second, `id="channel-lists"`, `class="cs" title="In a meeting"`)
+		if _, page := admin.do(http.MethodGet, "/t/"+teamName+"/ch/"+direct, nil, "", true); !strings.Contains(page, `class="custom-status"`) || !strings.Contains(page, `class="presence dnd"`) {
+			t.Fatalf("the conversation does not show bob's status: %s", page)
+		}
+		adminWS.send(map[string]string{"op": "post", "channel_id": direct, "content": "are you there"})
+		frames := strings.Join(bobWS.collect(2*time.Second), "\n")
+		if strings.Contains(frames, `id="notify"`) || !strings.Contains(frames, `id="unread-`+direct+`" class="mentions"`) {
+			t.Fatalf("do not disturb notified, or did not count the message: %s", frames)
+		}
+		if res, _ := setStatus("busy", "", ""); res.StatusCode != http.StatusBadRequest {
+			t.Fatalf("an unknown status: %d", res.StatusCode)
+		}
+		if res, _ := setStatus("online", "<b>", "hi"); res.StatusCode != http.StatusBadRequest {
+			t.Fatalf("an unknown emoji: %d", res.StatusCode)
+		}
+		adminWS.expect(5*time.Second, `id="presence-`+bobUser+`" class="presence on"`)
+		setStatus("offline", "", "")
+		adminWS.expect(5*time.Second, `id="presence-`+bobUser+`" class="presence "`)
+		if res, body := setStatus("online", "", ""); res.StatusCode != http.StatusOK || !strings.Contains(body, "@"+bobName) {
+			t.Fatalf("clear status: %d %s", res.StatusCode, body)
+		}
+		adminWS.expect(5*time.Second, `id="presence-`+bobUser+`" class="presence on"`)
+		adminWS.send(map[string]string{"op": "post", "channel_id": direct, "content": "now?"})
+		bobWS.expect(5*time.Second, `id="notify"`, "now?")
 	})
 
 	t.Run("csrf and origin are enforced", func(t *testing.T) {

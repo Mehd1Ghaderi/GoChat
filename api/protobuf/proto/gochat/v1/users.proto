@@ -11,6 +11,30 @@ service UserService {
   // SetPhoto takes a processed photo: see the photo package.
   rpc SetPhoto(SetPhotoRequest) returns (SetPhotoResponse);
   rpc RemovePhoto(RemovePhotoRequest) returns (RemovePhotoResponse);
+  rpc SetStatus(SetStatusRequest) returns (SetStatusResponse);
+  rpc SetCustomStatus(SetCustomStatusRequest) returns (SetCustomStatusResponse);
+}
+
+message SetStatusRequest {
+  Status status = 1;
+  // How long do-not-disturb lasts; zero until it is turned off.
+  int32 dnd_minutes = 2;
+}
+
+message SetStatusResponse {
+  User user = 1;
+}
+
+// SetCustomStatusRequest with no emoji and no text clears the status.
+message SetCustomStatusRequest {
+  string emoji = 1;
+  string text = 2;
+  // When the status clears itself; zero to keep it.
+  int32 minutes = 3;
+}
+
+message SetCustomStatusResponse {
+  User user = 1;
 }
 
 message GetUserRequest {
@@ -35,6 +59,8 @@ message GetPresenceRequest {
 
 message GetPresenceResponse {
   repeated string online_user_ids = 1;
+  // The status of each user not offline.
+  map<string, Status> statuses = 2;
 }
 
 message SetPhotoRequest {

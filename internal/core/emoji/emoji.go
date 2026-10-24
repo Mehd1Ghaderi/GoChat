@@ -20,6 +20,7 @@ var All = []Emoji{
 	{"trophy", "🏆"}, {"gift", "🎁"}, {"cake", "🎂"}, {"coffee", "☕"}, {"pizza", "🍕"}, {"beers", "🍻"},
 	{"memo", "📝"}, {"bug", "🐛"}, {"warning", "⚠️"}, {"x", "❌"}, {"question", "❓"}, {"exclamation", "❗"},
 	{"rainbow", "🌈"}, {"sunny", "☀️"}, {"crescent_moon", "🌙"}, {"robot", "🤖"}, {"ghost", "👻"}, {"see_no_evil", "🙈"},
+	{"speech_balloon", "💬"}, {"calendar", "📅"}, {"headphones", "🎧"}, {"house", "🏠"}, {"palm_tree", "🌴"}, {"face_with_thermometer", "🤒"},
 }
 
 var byName = func() map[string]string {

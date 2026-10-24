@@ -38,6 +38,8 @@ type Repo interface {
 	UpdateDisplayName(ctx context.Context, id gocql.UUID, name string, now time.Time) error
 	UpdateMemberDisplayName(ctx context.Context, userID gocql.UUID, name string) error
 	SetUserPhoto(ctx context.Context, id gocql.UUID, version string, now time.Time) error
+	SetStatus(ctx context.Context, id gocql.UUID, status string, dndUntil time.Time) error
+	SetCustomStatus(ctx context.Context, id gocql.UUID, emoji, text string, until time.Time) error
 
 	CreateTeam(ctx context.Context, t *models.Team) error
 	GetTeam(ctx context.Context, id gocql.UUID) (*models.Team, error)
@@ -67,6 +69,10 @@ type Repo interface {
 	ListLastReads(ctx context.Context, userID gocql.UUID) ([]*scylla.ChannelRead, error)
 	CountMentions(ctx context.Context, userID gocql.UUID) (map[gocql.UUID]int, error)
 	ListMuted(ctx context.Context, userID gocql.UUID) (map[gocql.UUID]bool, error)
+	ListThreadFollows(ctx context.Context, userID gocql.UUID, limit int) ([]*scylla.ThreadFollow, error)
+	GetMessage(ctx context.Context, channelID, id gocql.UUID) (*models.Message, error)
+	GetReply(ctx context.Context, channelID, rootID, id gocql.UUID) (*models.Message, error)
+	ListSaved(ctx context.Context, userID gocql.UUID, limit int) ([]*scylla.Saved, error)
 }
 
 type Deps struct {
@@ -139,6 +145,12 @@ func (w *worker) Receive(c *actor.Context) {
 		out, err = w.createChannel(ctx, msg)
 	case OpenDirect:
 		out, err = w.openDirect(ctx, msg)
+	case OpenGroup:
+		out, err = w.openGroup(ctx, msg)
+	case ListThreads:
+		out, err = w.listThreads(ctx, msg)
+	case ListSaved:
+		out, err = w.listSaved(ctx, msg)
 	case GetUser:
 		out, err = w.getUser(ctx, msg)
 	case UpdateProfile:
@@ -153,6 +165,10 @@ func (w *worker) Receive(c *actor.Context) {
 		out, err = w.me(ctx, msg.P)
 	case Presence:
 		out, err = w.presence(ctx, msg)
+	case SetStatus:
+		out, err = w.setStatus(ctx, msg)
+	case SetCustomStatus:
+		out, err = w.setCustomStatus(ctx, msg)
 	case ListMuted:
 		out, err = w.listMuted(ctx, msg.P)
 	default:
@@ -668,19 +684,6 @@ func directPair(a, b gocql.UUID) string {
 	return x + ":" + y
 }
 
-// peerOf returns the other side of a direct channel, whose name is its pair.
-func peerOf(ch *models.Channel, self gocql.UUID) (gocql.UUID, bool) {
-	left, right, ok := strings.Cut(ch.Name, ":")
-	if !ok {
-		return gocql.UUID{}, false
-	}
-	other := left
-	if left == self.String() {
-		other = right
-	}
-	return ids.Parse(other)
-}
-
 func (w *worker) listChannels(ctx context.Context, msg ListChannels) ([]*pb.Channel, error) {
 	var memberships []*models.ChannelMember
 	if msg.TeamID != "" {
@@ -732,10 +735,8 @@ func (w *worker) listChannels(ctx context.Context, msg ListChannels) ([]*pb.Chan
 	}
 	var peerIDs []gocql.UUID
 	for _, ch := range all {
-		if ch.Kind == models.ChannelDirect {
-			if id, ok := peerOf(ch, msg.P.UserID); ok {
-				peerIDs = append(peerIDs, id)
-			}
+		if ch.Kind.Conversation() {
+			peerIDs = append(peerIDs, convert.PeerIDs(ch, msg.P.UserID)...)
 		}
 	}
 	peers, err := w.Users.GetMany(ctx, peerIDs)
@@ -744,14 +745,13 @@ func (w *worker) listChannels(ctx context.Context, msg ListChannels) ([]*pb.Chan
 	}
 	out := make([]*pb.Channel, 0, len(all))
 	for _, ch := range all {
-		var peer *pb.User
-		if ch.Kind == models.ChannelDirect {
-			id, _ := peerOf(ch, msg.P.UserID)
-			if peer = convert.PublicUser(peers[id]); peer == nil {
-				continue
-			}
+		if !ch.ArchivedAt.IsZero() {
+			continue
 		}
-		view := convert.Channel(ch, roles[ch.ID], lastRead[ch.ID], peer)
+		view := convert.Conversation(ch, roles[ch.ID], lastRead[ch.ID], msg.P.UserID, peers)
+		if ch.Kind.Conversation() && view.Peer == nil && len(view.Peers) == 0 {
+			continue
+		}
 		view.MentionCount = int32(min(mentions[ch.ID], 9999)) //nolint:gosec // bounded
 		view.Muted = muted[ch.ID]
 		out = append(out, view)
@@ -764,10 +764,17 @@ func sortKey(ch *pb.Channel) string {
 	if ch.Peer != nil {
 		return strings.ToLower(ch.Peer.DisplayName)
 	}
+	if len(ch.Peers) > 0 {
+		names := make([]string, len(ch.Peers))
+		for i, p := range ch.Peers {
+			names[i] = p.DisplayName
+		}
+		return strings.ToLower(strings.Join(names, ", "))
+	}
 	return strings.ToLower(ch.DisplayName)
 }
 
-func (w *worker) browseChannels(ctx context.Context, msg BrowseChannels) ([]*pb.Channel, error) {
+func (w *worker) browseChannels(ctx context.Context, msg BrowseChannels) (*Browsed, error) {
 	teamID, err := parseID(msg.TeamID, "team")
 	if err != nil {
 		return nil, err
@@ -791,23 +798,32 @@ func (w *worker) browseChannels(ctx context.Context, msg BrowseChannels) ([]*pb.
 	for _, cm := range mine {
 		joined[cm.ChannelID] = true
 	}
-	var open []gocql.UUID
+	var visible []gocql.UUID
 	for _, tc := range listed {
-		if tc.Kind == models.ChannelPublic && !joined[tc.ChannelID] {
-			open = append(open, tc.ChannelID)
+		if tc.Kind == models.ChannelPublic || joined[tc.ChannelID] {
+			visible = append(visible, tc.ChannelID)
 		}
 	}
-	out := make([]*pb.Channel, 0, len(open))
-	for start := 0; start < len(open); start += 100 {
-		found, err := w.Repo.GetChannels(ctx, open[start:min(start+100, len(open))])
+	out := &Browsed{}
+	for start := 0; start < len(visible); start += 100 {
+		found, err := w.Repo.GetChannels(ctx, visible[start:min(start+100, len(visible))])
 		if err != nil {
 			return nil, err
 		}
 		for _, ch := range found {
-			out = append(out, convert.Channel(ch, "", gocql.UUID{}, nil))
+			switch {
+			case !ch.ArchivedAt.IsZero():
+				if joined[ch.ID] {
+					out.Archived = append(out.Archived, convert.Channel(ch, "", gocql.UUID{}, nil))
+				}
+			case !joined[ch.ID]:
+				out.Open = append(out.Open, convert.Channel(ch, "", gocql.UUID{}, nil))
+			}
 		}
 	}
-	slices.SortFunc(out, func(a, b *pb.Channel) int { return cmp.Compare(sortKey(a), sortKey(b)) })
+	byName := func(a, b *pb.Channel) int { return cmp.Compare(sortKey(a), sortKey(b)) }
+	slices.SortFunc(out.Open, byName)
+	slices.SortFunc(out.Archived, byName)
 	return out, nil
 }
 
@@ -857,25 +873,39 @@ func (w *worker) createChannel(ctx context.Context, msg CreateChannel) (*pb.Chan
 	return out, nil
 }
 
-func (w *worker) shareTeam(ctx context.Context, a, b gocql.UUID) (bool, error) {
-	ta, err := w.Repo.ListUserTeams(ctx, a)
+// teamsOf returns the teams a user belongs to.
+func (w *worker) teamsOf(ctx context.Context, userID gocql.UUID) (map[gocql.UUID]bool, error) {
+	list, err := w.Repo.ListUserTeams(ctx, userID)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	tb, err := w.Repo.ListUserTeams(ctx, b)
-	if err != nil {
-		return false, err
-	}
-	set := make(map[gocql.UUID]bool, len(ta))
-	for _, t := range ta {
+	set := make(map[gocql.UUID]bool, len(list))
+	for _, t := range list {
 		set[t.TeamID] = true
 	}
-	for _, t := range tb {
-		if set[t.TeamID] {
-			return true, nil
+	return set, nil
+}
+
+// reachable checks p may start a conversation with target: an active user
+// who shares one of mine, p's teams, unless p is an admin.
+func (w *worker) reachable(ctx context.Context, p *models.Principal, mine map[gocql.UUID]bool, target gocql.UUID) error {
+	peer, err := w.Users.Get(ctx, target)
+	if err != nil || peer.Deactivated {
+		return ierrors.NotFound("user not found")
+	}
+	if p.Role == models.SystemRoleAdmin {
+		return nil
+	}
+	theirs, err := w.teamsOf(ctx, target)
+	if err != nil {
+		return err
+	}
+	for id := range theirs {
+		if mine[id] {
+			return nil
 		}
 	}
-	return false, nil
+	return ierrors.NotFound("user not found")
 }
 
 func (w *worker) openDirect(ctx context.Context, msg OpenDirect) (*pb.Channel, error) {
@@ -889,18 +919,12 @@ func (w *worker) openDirect(ctx context.Context, msg OpenDirect) (*pb.Channel, e
 	if target == msg.P.UserID {
 		return nil, ierrors.InvalidArgument("pick someone else")
 	}
-	peer, err := w.Users.Get(ctx, target)
-	if err != nil || peer.Deactivated {
-		return nil, ierrors.NotFound("user not found")
+	mine, err := w.teamsOf(ctx, msg.P.UserID)
+	if err != nil {
+		return nil, err
 	}
-	if msg.P.Role != models.SystemRoleAdmin {
-		ok, err := w.shareTeam(ctx, msg.P.UserID, target)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, ierrors.NotFound("user not found")
-		}
+	if err := w.reachable(ctx, msg.P, mine, target); err != nil {
+		return nil, err
 	}
 	now := time.Now().UTC()
 	pair := directPair(msg.P.UserID, target)
@@ -976,7 +1000,7 @@ func (w *worker) me(ctx context.Context, p *models.Principal) (*MeResult, error)
 	return &MeResult{User: convert.User(u), Email: u.Email}, nil
 }
 
-func (w *worker) presence(ctx context.Context, msg Presence) ([]string, error) {
+func (w *worker) presence(ctx context.Context, msg Presence) (map[string]pb.Status, error) {
 	if len(msg.UserIDs) > 200 {
 		return nil, ierrors.InvalidArgument("too many users")
 	}
@@ -985,7 +1009,7 @@ func (w *worker) presence(ctx context.Context, msg Presence) ([]string, error) {
 			return nil, ierrors.InvalidArgument("invalid user id")
 		}
 	}
-	return actors.Ask[[]string](ctx, w.Engine, w.Hub, hub.Online{UserIDs: msg.UserIDs})
+	return actors.Ask[map[string]pb.Status](ctx, w.Engine, w.Hub, hub.Statuses{UserIDs: msg.UserIDs})
 }
 
 func (w *worker) listMuted(ctx context.Context, p *models.Principal) ([]string, error) {

@@ -46,6 +46,9 @@ const (
 	ActDeleteAny     Action = "delete_any"
 	ActUpload        Action = "upload"
 	ActUpdate        Action = "update"
+	ActArchive       Action = "archive"
+	ActMakePrivate   Action = "make_private"
+	ActMakePublic    Action = "make_public"
 )
 
 type Authorizer struct {

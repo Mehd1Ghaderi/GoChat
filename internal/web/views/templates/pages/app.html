@@ -20,8 +20,10 @@
       </header>
       {{template "channel-lists" .Lists}}
       <footer class="me">
-        {{template "avatar" (dict "User" .User "Size" "sm")}}
-        <span class="me-name"><strong>{{name .User}}</strong><small>@{{.User.Username}}</small></span>
+        <button type="button" class="me-status" hx-get="/status" hx-target="#modal" aria-label="Set your status" title="Set your status">
+          <span class="me-face">{{template "avatar" (dict "User" .User "Size" "sm")}}{{template "me-presence" (dict "Status" (chosen .User))}}</span>
+          {{template "me-name" (dict "User" .User)}}
+        </button>
         <a class="icon-btn" href="/settings" aria-label="Settings" title="Settings">{{icon "settings"}}</a>
         <form method="post" action="/logout">
           <input type="hidden" name="_csrf" value="{{.CSRF}}">
@@ -32,7 +34,7 @@
   </aside>
   <label for="nav-toggle" class="scrim" aria-hidden="true"></label>
   <main id="main" class="main">
-    {{template "channel" .Channel}}
+    {{if .Threads}}{{template "threads" .Threads}}{{else}}{{template "channel" .Channel}}{{end}}
   </main>
   <aside id="thread" class="thread-pane" aria-label="Thread"></aside>
   <div id="modal"></div>
@@ -40,5 +42,7 @@
   <div id="ws-control" hidden></div>
   <div id="resync" hidden></div>
   <div id="notify" hidden></div>
+  <div id="threads-refresh" hidden></div>
+  <div id="saved-changed" hidden></div>
 </div>
 {{end}}

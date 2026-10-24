@@ -21,6 +21,984 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type PinMessageRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ChannelId     string                 `protobuf:"bytes,1,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	MessageId     string                 `protobuf:"bytes,2,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	RootId        string                 `protobuf:"bytes,3,opt,name=root_id,json=rootId,proto3" json:"root_id,omitempty"`
+	Pinned        bool                   `protobuf:"varint,4,opt,name=pinned,proto3" json:"pinned,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PinMessageRequest) Reset() {
+	*x = PinMessageRequest{}
+	mi := &file_gochat_v1_messages_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PinMessageRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PinMessageRequest) ProtoMessage() {}
+
+func (x *PinMessageRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_messages_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PinMessageRequest.ProtoReflect.Descriptor instead.
+func (*PinMessageRequest) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *PinMessageRequest) GetChannelId() string {
+	if x != nil {
+		return x.ChannelId
+	}
+	return ""
+}
+
+func (x *PinMessageRequest) GetMessageId() string {
+	if x != nil {
+		return x.MessageId
+	}
+	return ""
+}
+
+func (x *PinMessageRequest) GetRootId() string {
+	if x != nil {
+		return x.RootId
+	}
+	return ""
+}
+
+func (x *PinMessageRequest) GetPinned() bool {
+	if x != nil {
+		return x.Pinned
+	}
+	return false
+}
+
+type PinMessageResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Message       *Message               `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PinMessageResponse) Reset() {
+	*x = PinMessageResponse{}
+	mi := &file_gochat_v1_messages_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PinMessageResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PinMessageResponse) ProtoMessage() {}
+
+func (x *PinMessageResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_messages_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PinMessageResponse.ProtoReflect.Descriptor instead.
+func (*PinMessageResponse) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *PinMessageResponse) GetMessage() *Message {
+	if x != nil {
+		return x.Message
+	}
+	return nil
+}
+
+type ListPinnedRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ChannelId     string                 `protobuf:"bytes,1,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListPinnedRequest) Reset() {
+	*x = ListPinnedRequest{}
+	mi := &file_gochat_v1_messages_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListPinnedRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListPinnedRequest) ProtoMessage() {}
+
+func (x *ListPinnedRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_messages_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListPinnedRequest.ProtoReflect.Descriptor instead.
+func (*ListPinnedRequest) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ListPinnedRequest) GetChannelId() string {
+	if x != nil {
+		return x.ChannelId
+	}
+	return ""
+}
+
+type ListPinnedResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Newest first.
+	Messages      []*Message `protobuf:"bytes,1,rep,name=messages,proto3" json:"messages,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListPinnedResponse) Reset() {
+	*x = ListPinnedResponse{}
+	mi := &file_gochat_v1_messages_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListPinnedResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListPinnedResponse) ProtoMessage() {}
+
+func (x *ListPinnedResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_messages_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListPinnedResponse.ProtoReflect.Descriptor instead.
+func (*ListPinnedResponse) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ListPinnedResponse) GetMessages() []*Message {
+	if x != nil {
+		return x.Messages
+	}
+	return nil
+}
+
+type SaveMessageRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ChannelId     string                 `protobuf:"bytes,1,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	MessageId     string                 `protobuf:"bytes,2,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	RootId        string                 `protobuf:"bytes,3,opt,name=root_id,json=rootId,proto3" json:"root_id,omitempty"`
+	Saved         bool                   `protobuf:"varint,4,opt,name=saved,proto3" json:"saved,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SaveMessageRequest) Reset() {
+	*x = SaveMessageRequest{}
+	mi := &file_gochat_v1_messages_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SaveMessageRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SaveMessageRequest) ProtoMessage() {}
+
+func (x *SaveMessageRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_messages_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SaveMessageRequest.ProtoReflect.Descriptor instead.
+func (*SaveMessageRequest) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *SaveMessageRequest) GetChannelId() string {
+	if x != nil {
+		return x.ChannelId
+	}
+	return ""
+}
+
+func (x *SaveMessageRequest) GetMessageId() string {
+	if x != nil {
+		return x.MessageId
+	}
+	return ""
+}
+
+func (x *SaveMessageRequest) GetRootId() string {
+	if x != nil {
+		return x.RootId
+	}
+	return ""
+}
+
+func (x *SaveMessageRequest) GetSaved() bool {
+	if x != nil {
+		return x.Saved
+	}
+	return false
+}
+
+type SaveMessageResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Message       *Message               `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SaveMessageResponse) Reset() {
+	*x = SaveMessageResponse{}
+	mi := &file_gochat_v1_messages_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SaveMessageResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SaveMessageResponse) ProtoMessage() {}
+
+func (x *SaveMessageResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_messages_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SaveMessageResponse.ProtoReflect.Descriptor instead.
+func (*SaveMessageResponse) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *SaveMessageResponse) GetMessage() *Message {
+	if x != nil {
+		return x.Message
+	}
+	return nil
+}
+
+type ListSavedRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The team whose channels, and the conversations, to list saves from.
+	TeamId string `protobuf:"bytes,1,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	// Only the ids of every message the caller saved.
+	IdsOnly       bool `protobuf:"varint,2,opt,name=ids_only,json=idsOnly,proto3" json:"ids_only,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListSavedRequest) Reset() {
+	*x = ListSavedRequest{}
+	mi := &file_gochat_v1_messages_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListSavedRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListSavedRequest) ProtoMessage() {}
+
+func (x *ListSavedRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_messages_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListSavedRequest.ProtoReflect.Descriptor instead.
+func (*ListSavedRequest) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ListSavedRequest) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
+func (x *ListSavedRequest) GetIdsOnly() bool {
+	if x != nil {
+		return x.IdsOnly
+	}
+	return false
+}
+
+type ListSavedResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Hits          []*SearchHit           `protobuf:"bytes,1,rep,name=hits,proto3" json:"hits,omitempty"`
+	MessageIds    []string               `protobuf:"bytes,2,rep,name=message_ids,json=messageIds,proto3" json:"message_ids,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListSavedResponse) Reset() {
+	*x = ListSavedResponse{}
+	mi := &file_gochat_v1_messages_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListSavedResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListSavedResponse) ProtoMessage() {}
+
+func (x *ListSavedResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_messages_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListSavedResponse.ProtoReflect.Descriptor instead.
+func (*ListSavedResponse) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ListSavedResponse) GetHits() []*SearchHit {
+	if x != nil {
+		return x.Hits
+	}
+	return nil
+}
+
+func (x *ListSavedResponse) GetMessageIds() []string {
+	if x != nil {
+		return x.MessageIds
+	}
+	return nil
+}
+
+type ListThreadsRequest struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	TeamId string                 `protobuf:"bytes,1,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	Offset uint32                 `protobuf:"varint,2,opt,name=offset,proto3" json:"offset,omitempty"`
+	// Zero counts the unread threads only.
+	Limit         uint32 `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListThreadsRequest) Reset() {
+	*x = ListThreadsRequest{}
+	mi := &file_gochat_v1_messages_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListThreadsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListThreadsRequest) ProtoMessage() {}
+
+func (x *ListThreadsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_messages_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListThreadsRequest.ProtoReflect.Descriptor instead.
+func (*ListThreadsRequest) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ListThreadsRequest) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
+func (x *ListThreadsRequest) GetOffset() uint32 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *ListThreadsRequest) GetLimit() uint32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type ThreadSummary struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Root    *Message               `protobuf:"bytes,1,opt,name=root,proto3" json:"root,omitempty"`
+	Channel *Channel               `protobuf:"bytes,2,opt,name=channel,proto3" json:"channel,omitempty"`
+	Unread  bool                   `protobuf:"varint,3,opt,name=unread,proto3" json:"unread,omitempty"`
+	// Some of the people in the thread, its starter first.
+	Participants  []*User `protobuf:"bytes,4,rep,name=participants,proto3" json:"participants,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ThreadSummary) Reset() {
+	*x = ThreadSummary{}
+	mi := &file_gochat_v1_messages_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ThreadSummary) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ThreadSummary) ProtoMessage() {}
+
+func (x *ThreadSummary) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_messages_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ThreadSummary.ProtoReflect.Descriptor instead.
+func (*ThreadSummary) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *ThreadSummary) GetRoot() *Message {
+	if x != nil {
+		return x.Root
+	}
+	return nil
+}
+
+func (x *ThreadSummary) GetChannel() *Channel {
+	if x != nil {
+		return x.Channel
+	}
+	return nil
+}
+
+func (x *ThreadSummary) GetUnread() bool {
+	if x != nil {
+		return x.Unread
+	}
+	return false
+}
+
+func (x *ThreadSummary) GetParticipants() []*User {
+	if x != nil {
+		return x.Participants
+	}
+	return nil
+}
+
+type ListThreadsResponse struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Threads     []*ThreadSummary       `protobuf:"bytes,1,rep,name=threads,proto3" json:"threads,omitempty"`
+	UnreadCount uint32                 `protobuf:"varint,2,opt,name=unread_count,json=unreadCount,proto3" json:"unread_count,omitempty"`
+	// Where the next page starts; zero at the end.
+	NextOffset    uint32 `protobuf:"varint,3,opt,name=next_offset,json=nextOffset,proto3" json:"next_offset,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListThreadsResponse) Reset() {
+	*x = ListThreadsResponse{}
+	mi := &file_gochat_v1_messages_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListThreadsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListThreadsResponse) ProtoMessage() {}
+
+func (x *ListThreadsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_messages_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListThreadsResponse.ProtoReflect.Descriptor instead.
+func (*ListThreadsResponse) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ListThreadsResponse) GetThreads() []*ThreadSummary {
+	if x != nil {
+		return x.Threads
+	}
+	return nil
+}
+
+func (x *ListThreadsResponse) GetUnreadCount() uint32 {
+	if x != nil {
+		return x.UnreadCount
+	}
+	return 0
+}
+
+func (x *ListThreadsResponse) GetNextOffset() uint32 {
+	if x != nil {
+		return x.NextOffset
+	}
+	return 0
+}
+
+type MarkThreadReadRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ChannelId     string                 `protobuf:"bytes,1,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	RootId        string                 `protobuf:"bytes,2,opt,name=root_id,json=rootId,proto3" json:"root_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MarkThreadReadRequest) Reset() {
+	*x = MarkThreadReadRequest{}
+	mi := &file_gochat_v1_messages_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarkThreadReadRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarkThreadReadRequest) ProtoMessage() {}
+
+func (x *MarkThreadReadRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_messages_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarkThreadReadRequest.ProtoReflect.Descriptor instead.
+func (*MarkThreadReadRequest) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *MarkThreadReadRequest) GetChannelId() string {
+	if x != nil {
+		return x.ChannelId
+	}
+	return ""
+}
+
+func (x *MarkThreadReadRequest) GetRootId() string {
+	if x != nil {
+		return x.RootId
+	}
+	return ""
+}
+
+type MarkThreadReadResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MarkThreadReadResponse) Reset() {
+	*x = MarkThreadReadResponse{}
+	mi := &file_gochat_v1_messages_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarkThreadReadResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarkThreadReadResponse) ProtoMessage() {}
+
+func (x *MarkThreadReadResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_messages_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarkThreadReadResponse.ProtoReflect.Descriptor instead.
+func (*MarkThreadReadResponse) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{12}
+}
+
+type FollowThreadRequest struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	ChannelId string                 `protobuf:"bytes,1,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	RootId    string                 `protobuf:"bytes,2,opt,name=root_id,json=rootId,proto3" json:"root_id,omitempty"`
+	// False stops following.
+	Follow        bool `protobuf:"varint,3,opt,name=follow,proto3" json:"follow,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FollowThreadRequest) Reset() {
+	*x = FollowThreadRequest{}
+	mi := &file_gochat_v1_messages_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FollowThreadRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FollowThreadRequest) ProtoMessage() {}
+
+func (x *FollowThreadRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_messages_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FollowThreadRequest.ProtoReflect.Descriptor instead.
+func (*FollowThreadRequest) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *FollowThreadRequest) GetChannelId() string {
+	if x != nil {
+		return x.ChannelId
+	}
+	return ""
+}
+
+func (x *FollowThreadRequest) GetRootId() string {
+	if x != nil {
+		return x.RootId
+	}
+	return ""
+}
+
+func (x *FollowThreadRequest) GetFollow() bool {
+	if x != nil {
+		return x.Follow
+	}
+	return false
+}
+
+type FollowThreadResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FollowThreadResponse) Reset() {
+	*x = FollowThreadResponse{}
+	mi := &file_gochat_v1_messages_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FollowThreadResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FollowThreadResponse) ProtoMessage() {}
+
+func (x *FollowThreadResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_messages_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FollowThreadResponse.ProtoReflect.Descriptor instead.
+func (*FollowThreadResponse) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{14}
+}
+
+type SearchMessagesRequest struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	TeamId string                 `protobuf:"bytes,1,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	Query  string                 `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
+	// The next_cursor of the page before.
+	Cursor        string `protobuf:"bytes,3,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	Limit         uint32 `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SearchMessagesRequest) Reset() {
+	*x = SearchMessagesRequest{}
+	mi := &file_gochat_v1_messages_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SearchMessagesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SearchMessagesRequest) ProtoMessage() {}
+
+func (x *SearchMessagesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_messages_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SearchMessagesRequest.ProtoReflect.Descriptor instead.
+func (*SearchMessagesRequest) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *SearchMessagesRequest) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
+func (x *SearchMessagesRequest) GetQuery() string {
+	if x != nil {
+		return x.Query
+	}
+	return ""
+}
+
+func (x *SearchMessagesRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
+func (x *SearchMessagesRequest) GetLimit() uint32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type SearchHit struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Message       *Message               `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	Channel       *Channel               `protobuf:"bytes,2,opt,name=channel,proto3" json:"channel,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SearchHit) Reset() {
+	*x = SearchHit{}
+	mi := &file_gochat_v1_messages_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SearchHit) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SearchHit) ProtoMessage() {}
+
+func (x *SearchHit) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_messages_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SearchHit.ProtoReflect.Descriptor instead.
+func (*SearchHit) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *SearchHit) GetMessage() *Message {
+	if x != nil {
+		return x.Message
+	}
+	return nil
+}
+
+func (x *SearchHit) GetChannel() *Channel {
+	if x != nil {
+		return x.Channel
+	}
+	return nil
+}
+
+type SearchMessagesResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Hits  []*SearchHit           `protobuf:"bytes,1,rep,name=hits,proto3" json:"hits,omitempty"`
+	// The words looked for, to mark in the results.
+	Terms []string `protobuf:"bytes,2,rep,name=terms,proto3" json:"terms,omitempty"`
+	// Empty at the end of the results.
+	NextCursor    string `protobuf:"bytes,3,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SearchMessagesResponse) Reset() {
+	*x = SearchMessagesResponse{}
+	mi := &file_gochat_v1_messages_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SearchMessagesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SearchMessagesResponse) ProtoMessage() {}
+
+func (x *SearchMessagesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_messages_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SearchMessagesResponse.ProtoReflect.Descriptor instead.
+func (*SearchMessagesResponse) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *SearchMessagesResponse) GetHits() []*SearchHit {
+	if x != nil {
+		return x.Hits
+	}
+	return nil
+}
+
+func (x *SearchMessagesResponse) GetTerms() []string {
+	if x != nil {
+		return x.Terms
+	}
+	return nil
+}
+
+func (x *SearchMessagesResponse) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
+}
+
 // ReactRequest adds the caller's reaction, or with remove takes it back.
 type ReactRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -35,7 +1013,7 @@ type ReactRequest struct {
 
 func (x *ReactRequest) Reset() {
 	*x = ReactRequest{}
-	mi := &file_gochat_v1_messages_proto_msgTypes[0]
+	mi := &file_gochat_v1_messages_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -47,7 +1025,7 @@ func (x *ReactRequest) String() string {
 func (*ReactRequest) ProtoMessage() {}
 
 func (x *ReactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_messages_proto_msgTypes[0]
+	mi := &file_gochat_v1_messages_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -60,7 +1038,7 @@ func (x *ReactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReactRequest.ProtoReflect.Descriptor instead.
 func (*ReactRequest) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{0}
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ReactRequest) GetChannelId() string {
@@ -107,7 +1085,7 @@ type ReactResponse struct {
 
 func (x *ReactResponse) Reset() {
 	*x = ReactResponse{}
-	mi := &file_gochat_v1_messages_proto_msgTypes[1]
+	mi := &file_gochat_v1_messages_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -119,7 +1097,7 @@ func (x *ReactResponse) String() string {
 func (*ReactResponse) ProtoMessage() {}
 
 func (x *ReactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_messages_proto_msgTypes[1]
+	mi := &file_gochat_v1_messages_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -132,7 +1110,7 @@ func (x *ReactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReactResponse.ProtoReflect.Descriptor instead.
 func (*ReactResponse) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{1}
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ReactResponse) GetReactions() []*Reaction {
@@ -155,7 +1133,7 @@ type PostMessageRequest struct {
 
 func (x *PostMessageRequest) Reset() {
 	*x = PostMessageRequest{}
-	mi := &file_gochat_v1_messages_proto_msgTypes[2]
+	mi := &file_gochat_v1_messages_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -167,7 +1145,7 @@ func (x *PostMessageRequest) String() string {
 func (*PostMessageRequest) ProtoMessage() {}
 
 func (x *PostMessageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_messages_proto_msgTypes[2]
+	mi := &file_gochat_v1_messages_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -180,7 +1158,7 @@ func (x *PostMessageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PostMessageRequest.ProtoReflect.Descriptor instead.
 func (*PostMessageRequest) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{2}
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *PostMessageRequest) GetChannelId() string {
@@ -220,7 +1198,7 @@ type PostMessageResponse struct {
 
 func (x *PostMessageResponse) Reset() {
 	*x = PostMessageResponse{}
-	mi := &file_gochat_v1_messages_proto_msgTypes[3]
+	mi := &file_gochat_v1_messages_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -232,7 +1210,7 @@ func (x *PostMessageResponse) String() string {
 func (*PostMessageResponse) ProtoMessage() {}
 
 func (x *PostMessageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_messages_proto_msgTypes[3]
+	mi := &file_gochat_v1_messages_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -245,7 +1223,7 @@ func (x *PostMessageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PostMessageResponse.ProtoReflect.Descriptor instead.
 func (*PostMessageResponse) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{3}
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *PostMessageResponse) GetMessage() *Message {
@@ -268,7 +1246,7 @@ type EditMessageRequest struct {
 
 func (x *EditMessageRequest) Reset() {
 	*x = EditMessageRequest{}
-	mi := &file_gochat_v1_messages_proto_msgTypes[4]
+	mi := &file_gochat_v1_messages_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -280,7 +1258,7 @@ func (x *EditMessageRequest) String() string {
 func (*EditMessageRequest) ProtoMessage() {}
 
 func (x *EditMessageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_messages_proto_msgTypes[4]
+	mi := &file_gochat_v1_messages_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -293,7 +1271,7 @@ func (x *EditMessageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EditMessageRequest.ProtoReflect.Descriptor instead.
 func (*EditMessageRequest) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{4}
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *EditMessageRequest) GetChannelId() string {
@@ -333,7 +1311,7 @@ type EditMessageResponse struct {
 
 func (x *EditMessageResponse) Reset() {
 	*x = EditMessageResponse{}
-	mi := &file_gochat_v1_messages_proto_msgTypes[5]
+	mi := &file_gochat_v1_messages_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -345,7 +1323,7 @@ func (x *EditMessageResponse) String() string {
 func (*EditMessageResponse) ProtoMessage() {}
 
 func (x *EditMessageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_messages_proto_msgTypes[5]
+	mi := &file_gochat_v1_messages_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -358,7 +1336,7 @@ func (x *EditMessageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EditMessageResponse.ProtoReflect.Descriptor instead.
 func (*EditMessageResponse) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{5}
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *EditMessageResponse) GetMessage() *Message {
@@ -379,7 +1357,7 @@ type DeleteMessageRequest struct {
 
 func (x *DeleteMessageRequest) Reset() {
 	*x = DeleteMessageRequest{}
-	mi := &file_gochat_v1_messages_proto_msgTypes[6]
+	mi := &file_gochat_v1_messages_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -391,7 +1369,7 @@ func (x *DeleteMessageRequest) String() string {
 func (*DeleteMessageRequest) ProtoMessage() {}
 
 func (x *DeleteMessageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_messages_proto_msgTypes[6]
+	mi := &file_gochat_v1_messages_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -404,7 +1382,7 @@ func (x *DeleteMessageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteMessageRequest.ProtoReflect.Descriptor instead.
 func (*DeleteMessageRequest) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{6}
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *DeleteMessageRequest) GetChannelId() string {
@@ -436,7 +1414,7 @@ type DeleteMessageResponse struct {
 
 func (x *DeleteMessageResponse) Reset() {
 	*x = DeleteMessageResponse{}
-	mi := &file_gochat_v1_messages_proto_msgTypes[7]
+	mi := &file_gochat_v1_messages_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -448,7 +1426,7 @@ func (x *DeleteMessageResponse) String() string {
 func (*DeleteMessageResponse) ProtoMessage() {}
 
 func (x *DeleteMessageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_messages_proto_msgTypes[7]
+	mi := &file_gochat_v1_messages_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -461,22 +1439,24 @@ func (x *DeleteMessageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteMessageResponse.ProtoReflect.Descriptor instead.
 func (*DeleteMessageResponse) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{7}
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{25}
 }
 
 type ListMessagesRequest struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	ChannelId string                 `protobuf:"bytes,1,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
 	// Exclusive upper bound; empty starts at the newest message.
-	BeforeId      string `protobuf:"bytes,2,opt,name=before_id,json=beforeId,proto3" json:"before_id,omitempty"`
-	Limit         uint32 `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	BeforeId string `protobuf:"bytes,2,opt,name=before_id,json=beforeId,proto3" json:"before_id,omitempty"`
+	Limit    uint32 `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	// Exclusive lower bound: the messages just newer than it instead.
+	AfterId       string `protobuf:"bytes,4,opt,name=after_id,json=afterId,proto3" json:"after_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListMessagesRequest) Reset() {
 	*x = ListMessagesRequest{}
-	mi := &file_gochat_v1_messages_proto_msgTypes[8]
+	mi := &file_gochat_v1_messages_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -488,7 +1468,7 @@ func (x *ListMessagesRequest) String() string {
 func (*ListMessagesRequest) ProtoMessage() {}
 
 func (x *ListMessagesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_messages_proto_msgTypes[8]
+	mi := &file_gochat_v1_messages_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -501,7 +1481,7 @@ func (x *ListMessagesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMessagesRequest.ProtoReflect.Descriptor instead.
 func (*ListMessagesRequest) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{8}
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *ListMessagesRequest) GetChannelId() string {
@@ -525,18 +1505,26 @@ func (x *ListMessagesRequest) GetLimit() uint32 {
 	return 0
 }
 
+func (x *ListMessagesRequest) GetAfterId() string {
+	if x != nil {
+		return x.AfterId
+	}
+	return ""
+}
+
 type ListMessagesResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Newest first.
-	Messages      []*Message `protobuf:"bytes,1,rep,name=messages,proto3" json:"messages,omitempty"`
-	HasMore       bool       `protobuf:"varint,2,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
+	Messages []*Message `protobuf:"bytes,1,rep,name=messages,proto3" json:"messages,omitempty"`
+	// Whether older messages remain, or with after_id newer ones.
+	HasMore       bool `protobuf:"varint,2,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListMessagesResponse) Reset() {
 	*x = ListMessagesResponse{}
-	mi := &file_gochat_v1_messages_proto_msgTypes[9]
+	mi := &file_gochat_v1_messages_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -548,7 +1536,7 @@ func (x *ListMessagesResponse) String() string {
 func (*ListMessagesResponse) ProtoMessage() {}
 
 func (x *ListMessagesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_messages_proto_msgTypes[9]
+	mi := &file_gochat_v1_messages_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -561,7 +1549,7 @@ func (x *ListMessagesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMessagesResponse.ProtoReflect.Descriptor instead.
 func (*ListMessagesResponse) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{9}
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ListMessagesResponse) GetMessages() []*Message {
@@ -589,7 +1577,7 @@ type GetMessageRequest struct {
 
 func (x *GetMessageRequest) Reset() {
 	*x = GetMessageRequest{}
-	mi := &file_gochat_v1_messages_proto_msgTypes[10]
+	mi := &file_gochat_v1_messages_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -601,7 +1589,7 @@ func (x *GetMessageRequest) String() string {
 func (*GetMessageRequest) ProtoMessage() {}
 
 func (x *GetMessageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_messages_proto_msgTypes[10]
+	mi := &file_gochat_v1_messages_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -614,7 +1602,7 @@ func (x *GetMessageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMessageRequest.ProtoReflect.Descriptor instead.
 func (*GetMessageRequest) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{10}
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *GetMessageRequest) GetChannelId() string {
@@ -651,7 +1639,7 @@ type ListThreadRequest struct {
 
 func (x *ListThreadRequest) Reset() {
 	*x = ListThreadRequest{}
-	mi := &file_gochat_v1_messages_proto_msgTypes[11]
+	mi := &file_gochat_v1_messages_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -663,7 +1651,7 @@ func (x *ListThreadRequest) String() string {
 func (*ListThreadRequest) ProtoMessage() {}
 
 func (x *ListThreadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_messages_proto_msgTypes[11]
+	mi := &file_gochat_v1_messages_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -676,7 +1664,7 @@ func (x *ListThreadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListThreadRequest.ProtoReflect.Descriptor instead.
 func (*ListThreadRequest) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{11}
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ListThreadRequest) GetChannelId() string {
@@ -713,14 +1701,16 @@ type ListThreadResponse struct {
 	// Oldest first.
 	Replies []*Message `protobuf:"bytes,2,rep,name=replies,proto3" json:"replies,omitempty"`
 	// Whether replies older than the first exist.
-	HasMore       bool `protobuf:"varint,3,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
+	HasMore bool `protobuf:"varint,3,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
+	// Whether the caller follows the thread.
+	Following     bool `protobuf:"varint,4,opt,name=following,proto3" json:"following,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListThreadResponse) Reset() {
 	*x = ListThreadResponse{}
-	mi := &file_gochat_v1_messages_proto_msgTypes[12]
+	mi := &file_gochat_v1_messages_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -732,7 +1722,7 @@ func (x *ListThreadResponse) String() string {
 func (*ListThreadResponse) ProtoMessage() {}
 
 func (x *ListThreadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_messages_proto_msgTypes[12]
+	mi := &file_gochat_v1_messages_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -745,7 +1735,7 @@ func (x *ListThreadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListThreadResponse.ProtoReflect.Descriptor instead.
 func (*ListThreadResponse) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{12}
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *ListThreadResponse) GetRoot() *Message {
@@ -769,6 +1759,13 @@ func (x *ListThreadResponse) GetHasMore() bool {
 	return false
 }
 
+func (x *ListThreadResponse) GetFollowing() bool {
+	if x != nil {
+		return x.Following
+	}
+	return false
+}
+
 type GetMessageResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Message       *Message               `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
@@ -778,7 +1775,7 @@ type GetMessageResponse struct {
 
 func (x *GetMessageResponse) Reset() {
 	*x = GetMessageResponse{}
-	mi := &file_gochat_v1_messages_proto_msgTypes[13]
+	mi := &file_gochat_v1_messages_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -790,7 +1787,7 @@ func (x *GetMessageResponse) String() string {
 func (*GetMessageResponse) ProtoMessage() {}
 
 func (x *GetMessageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_messages_proto_msgTypes[13]
+	mi := &file_gochat_v1_messages_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -803,7 +1800,7 @@ func (x *GetMessageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMessageResponse.ProtoReflect.Descriptor instead.
 func (*GetMessageResponse) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{13}
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *GetMessageResponse) GetMessage() *Message {
@@ -822,7 +1819,7 @@ type SendTypingRequest struct {
 
 func (x *SendTypingRequest) Reset() {
 	*x = SendTypingRequest{}
-	mi := &file_gochat_v1_messages_proto_msgTypes[14]
+	mi := &file_gochat_v1_messages_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -834,7 +1831,7 @@ func (x *SendTypingRequest) String() string {
 func (*SendTypingRequest) ProtoMessage() {}
 
 func (x *SendTypingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_messages_proto_msgTypes[14]
+	mi := &file_gochat_v1_messages_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -847,7 +1844,7 @@ func (x *SendTypingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendTypingRequest.ProtoReflect.Descriptor instead.
 func (*SendTypingRequest) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{14}
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *SendTypingRequest) GetChannelId() string {
@@ -865,7 +1862,7 @@ type SendTypingResponse struct {
 
 func (x *SendTypingResponse) Reset() {
 	*x = SendTypingResponse{}
-	mi := &file_gochat_v1_messages_proto_msgTypes[15]
+	mi := &file_gochat_v1_messages_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -877,7 +1874,7 @@ func (x *SendTypingResponse) String() string {
 func (*SendTypingResponse) ProtoMessage() {}
 
 func (x *SendTypingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_messages_proto_msgTypes[15]
+	mi := &file_gochat_v1_messages_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -890,14 +1887,82 @@ func (x *SendTypingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendTypingResponse.ProtoReflect.Descriptor instead.
 func (*SendTypingResponse) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{15}
+	return file_gochat_v1_messages_proto_rawDescGZIP(), []int{33}
 }
 
 var File_gochat_v1_messages_proto protoreflect.FileDescriptor
 
 const file_gochat_v1_messages_proto_rawDesc = "" +
 	"\n" +
-	"\x18gochat/v1/messages.proto\x12\tgochat.v1\x1a\x15gochat/v1/types.proto\"\x93\x01\n" +
+	"\x18gochat/v1/messages.proto\x12\tgochat.v1\x1a\x15gochat/v1/types.proto\"\x82\x01\n" +
+	"\x11PinMessageRequest\x12\x1d\n" +
+	"\n" +
+	"channel_id\x18\x01 \x01(\tR\tchannelId\x12\x1d\n" +
+	"\n" +
+	"message_id\x18\x02 \x01(\tR\tmessageId\x12\x17\n" +
+	"\aroot_id\x18\x03 \x01(\tR\x06rootId\x12\x16\n" +
+	"\x06pinned\x18\x04 \x01(\bR\x06pinned\"B\n" +
+	"\x12PinMessageResponse\x12,\n" +
+	"\amessage\x18\x01 \x01(\v2\x12.gochat.v1.MessageR\amessage\"2\n" +
+	"\x11ListPinnedRequest\x12\x1d\n" +
+	"\n" +
+	"channel_id\x18\x01 \x01(\tR\tchannelId\"D\n" +
+	"\x12ListPinnedResponse\x12.\n" +
+	"\bmessages\x18\x01 \x03(\v2\x12.gochat.v1.MessageR\bmessages\"\x81\x01\n" +
+	"\x12SaveMessageRequest\x12\x1d\n" +
+	"\n" +
+	"channel_id\x18\x01 \x01(\tR\tchannelId\x12\x1d\n" +
+	"\n" +
+	"message_id\x18\x02 \x01(\tR\tmessageId\x12\x17\n" +
+	"\aroot_id\x18\x03 \x01(\tR\x06rootId\x12\x14\n" +
+	"\x05saved\x18\x04 \x01(\bR\x05saved\"C\n" +
+	"\x13SaveMessageResponse\x12,\n" +
+	"\amessage\x18\x01 \x01(\v2\x12.gochat.v1.MessageR\amessage\"F\n" +
+	"\x10ListSavedRequest\x12\x17\n" +
+	"\ateam_id\x18\x01 \x01(\tR\x06teamId\x12\x19\n" +
+	"\bids_only\x18\x02 \x01(\bR\aidsOnly\"^\n" +
+	"\x11ListSavedResponse\x12(\n" +
+	"\x04hits\x18\x01 \x03(\v2\x14.gochat.v1.SearchHitR\x04hits\x12\x1f\n" +
+	"\vmessage_ids\x18\x02 \x03(\tR\n" +
+	"messageIds\"[\n" +
+	"\x12ListThreadsRequest\x12\x17\n" +
+	"\ateam_id\x18\x01 \x01(\tR\x06teamId\x12\x16\n" +
+	"\x06offset\x18\x02 \x01(\rR\x06offset\x12\x14\n" +
+	"\x05limit\x18\x03 \x01(\rR\x05limit\"\xb2\x01\n" +
+	"\rThreadSummary\x12&\n" +
+	"\x04root\x18\x01 \x01(\v2\x12.gochat.v1.MessageR\x04root\x12,\n" +
+	"\achannel\x18\x02 \x01(\v2\x12.gochat.v1.ChannelR\achannel\x12\x16\n" +
+	"\x06unread\x18\x03 \x01(\bR\x06unread\x123\n" +
+	"\fparticipants\x18\x04 \x03(\v2\x0f.gochat.v1.UserR\fparticipants\"\x8d\x01\n" +
+	"\x13ListThreadsResponse\x122\n" +
+	"\athreads\x18\x01 \x03(\v2\x18.gochat.v1.ThreadSummaryR\athreads\x12!\n" +
+	"\funread_count\x18\x02 \x01(\rR\vunreadCount\x12\x1f\n" +
+	"\vnext_offset\x18\x03 \x01(\rR\n" +
+	"nextOffset\"O\n" +
+	"\x15MarkThreadReadRequest\x12\x1d\n" +
+	"\n" +
+	"channel_id\x18\x01 \x01(\tR\tchannelId\x12\x17\n" +
+	"\aroot_id\x18\x02 \x01(\tR\x06rootId\"\x18\n" +
+	"\x16MarkThreadReadResponse\"e\n" +
+	"\x13FollowThreadRequest\x12\x1d\n" +
+	"\n" +
+	"channel_id\x18\x01 \x01(\tR\tchannelId\x12\x17\n" +
+	"\aroot_id\x18\x02 \x01(\tR\x06rootId\x12\x16\n" +
+	"\x06follow\x18\x03 \x01(\bR\x06follow\"\x16\n" +
+	"\x14FollowThreadResponse\"t\n" +
+	"\x15SearchMessagesRequest\x12\x17\n" +
+	"\ateam_id\x18\x01 \x01(\tR\x06teamId\x12\x14\n" +
+	"\x05query\x18\x02 \x01(\tR\x05query\x12\x16\n" +
+	"\x06cursor\x18\x03 \x01(\tR\x06cursor\x12\x14\n" +
+	"\x05limit\x18\x04 \x01(\rR\x05limit\"g\n" +
+	"\tSearchHit\x12,\n" +
+	"\amessage\x18\x01 \x01(\v2\x12.gochat.v1.MessageR\amessage\x12,\n" +
+	"\achannel\x18\x02 \x01(\v2\x12.gochat.v1.ChannelR\achannel\"y\n" +
+	"\x16SearchMessagesResponse\x12(\n" +
+	"\x04hits\x18\x01 \x03(\v2\x14.gochat.v1.SearchHitR\x04hits\x12\x14\n" +
+	"\x05terms\x18\x02 \x03(\tR\x05terms\x12\x1f\n" +
+	"\vnext_cursor\x18\x03 \x01(\tR\n" +
+	"nextCursor\"\x93\x01\n" +
 	"\fReactRequest\x12\x1d\n" +
 	"\n" +
 	"channel_id\x18\x01 \x01(\tR\tchannelId\x12\x1d\n" +
@@ -931,12 +1996,13 @@ const file_gochat_v1_messages_proto_rawDesc = "" +
 	"\n" +
 	"message_id\x18\x02 \x01(\tR\tmessageId\x12\x17\n" +
 	"\aroot_id\x18\x03 \x01(\tR\x06rootId\"\x17\n" +
-	"\x15DeleteMessageResponse\"g\n" +
+	"\x15DeleteMessageResponse\"\x82\x01\n" +
 	"\x13ListMessagesRequest\x12\x1d\n" +
 	"\n" +
 	"channel_id\x18\x01 \x01(\tR\tchannelId\x12\x1b\n" +
 	"\tbefore_id\x18\x02 \x01(\tR\bbeforeId\x12\x14\n" +
-	"\x05limit\x18\x03 \x01(\rR\x05limit\"a\n" +
+	"\x05limit\x18\x03 \x01(\rR\x05limit\x12\x19\n" +
+	"\bafter_id\x18\x04 \x01(\tR\aafterId\"a\n" +
 	"\x14ListMessagesResponse\x12.\n" +
 	"\bmessages\x18\x01 \x03(\v2\x12.gochat.v1.MessageR\bmessages\x12\x19\n" +
 	"\bhas_more\x18\x02 \x01(\bR\ahasMore\"j\n" +
@@ -951,17 +2017,18 @@ const file_gochat_v1_messages_proto_rawDesc = "" +
 	"channel_id\x18\x01 \x01(\tR\tchannelId\x12\x17\n" +
 	"\aroot_id\x18\x02 \x01(\tR\x06rootId\x12\x1b\n" +
 	"\tbefore_id\x18\x03 \x01(\tR\bbeforeId\x12\x14\n" +
-	"\x05limit\x18\x04 \x01(\rR\x05limit\"\x85\x01\n" +
+	"\x05limit\x18\x04 \x01(\rR\x05limit\"\xa3\x01\n" +
 	"\x12ListThreadResponse\x12&\n" +
 	"\x04root\x18\x01 \x01(\v2\x12.gochat.v1.MessageR\x04root\x12,\n" +
 	"\areplies\x18\x02 \x03(\v2\x12.gochat.v1.MessageR\areplies\x12\x19\n" +
-	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"B\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\x12\x1c\n" +
+	"\tfollowing\x18\x04 \x01(\bR\tfollowing\"B\n" +
 	"\x12GetMessageResponse\x12,\n" +
 	"\amessage\x18\x01 \x01(\v2\x12.gochat.v1.MessageR\amessage\"2\n" +
 	"\x11SendTypingRequest\x12\x1d\n" +
 	"\n" +
 	"channel_id\x18\x01 \x01(\tR\tchannelId\"\x14\n" +
-	"\x12SendTypingResponse2\xee\x04\n" +
+	"\x12SendTypingResponse2\xe7\t\n" +
 	"\x0eMessageService\x12L\n" +
 	"\vPostMessage\x12\x1d.gochat.v1.PostMessageRequest\x1a\x1e.gochat.v1.PostMessageResponse\x12L\n" +
 	"\vEditMessage\x12\x1d.gochat.v1.EditMessageRequest\x1a\x1e.gochat.v1.EditMessageResponse\x12R\n" +
@@ -973,7 +2040,17 @@ const file_gochat_v1_messages_proto_rawDesc = "" +
 	"SendTyping\x12\x1c.gochat.v1.SendTypingRequest\x1a\x1d.gochat.v1.SendTypingResponse\x12I\n" +
 	"\n" +
 	"ListThread\x12\x1c.gochat.v1.ListThreadRequest\x1a\x1d.gochat.v1.ListThreadResponse\x12:\n" +
-	"\x05React\x12\x17.gochat.v1.ReactRequest\x1a\x18.gochat.v1.ReactResponseB\xa2\x01\n" +
+	"\x05React\x12\x17.gochat.v1.ReactRequest\x1a\x18.gochat.v1.ReactResponse\x12U\n" +
+	"\x0eSearchMessages\x12 .gochat.v1.SearchMessagesRequest\x1a!.gochat.v1.SearchMessagesResponse\x12L\n" +
+	"\vListThreads\x12\x1d.gochat.v1.ListThreadsRequest\x1a\x1e.gochat.v1.ListThreadsResponse\x12U\n" +
+	"\x0eMarkThreadRead\x12 .gochat.v1.MarkThreadReadRequest\x1a!.gochat.v1.MarkThreadReadResponse\x12O\n" +
+	"\fFollowThread\x12\x1e.gochat.v1.FollowThreadRequest\x1a\x1f.gochat.v1.FollowThreadResponse\x12I\n" +
+	"\n" +
+	"PinMessage\x12\x1c.gochat.v1.PinMessageRequest\x1a\x1d.gochat.v1.PinMessageResponse\x12I\n" +
+	"\n" +
+	"ListPinned\x12\x1c.gochat.v1.ListPinnedRequest\x1a\x1d.gochat.v1.ListPinnedResponse\x12L\n" +
+	"\vSaveMessage\x12\x1d.gochat.v1.SaveMessageRequest\x1a\x1e.gochat.v1.SaveMessageResponse\x12F\n" +
+	"\tListSaved\x12\x1b.gochat.v1.ListSavedRequest\x1a\x1c.gochat.v1.ListSavedResponseB\xa2\x01\n" +
 	"\rcom.gochat.v1B\rMessagesProtoP\x01Z=github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1;gochatv1\xa2\x02\x03GXX\xaa\x02\tGochat.V1\xca\x02\tGochat\\V1\xe2\x02\x15Gochat\\V1\\GPBMetadata\xea\x02\n" +
 	"Gochat::V1b\x06proto3"
 
@@ -989,56 +2066,103 @@ func file_gochat_v1_messages_proto_rawDescGZIP() []byte {
 	return file_gochat_v1_messages_proto_rawDescData
 }
 
-var file_gochat_v1_messages_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_gochat_v1_messages_proto_msgTypes = make([]protoimpl.MessageInfo, 34)
 var file_gochat_v1_messages_proto_goTypes = []any{
-	(*ReactRequest)(nil),          // 0: gochat.v1.ReactRequest
-	(*ReactResponse)(nil),         // 1: gochat.v1.ReactResponse
-	(*PostMessageRequest)(nil),    // 2: gochat.v1.PostMessageRequest
-	(*PostMessageResponse)(nil),   // 3: gochat.v1.PostMessageResponse
-	(*EditMessageRequest)(nil),    // 4: gochat.v1.EditMessageRequest
-	(*EditMessageResponse)(nil),   // 5: gochat.v1.EditMessageResponse
-	(*DeleteMessageRequest)(nil),  // 6: gochat.v1.DeleteMessageRequest
-	(*DeleteMessageResponse)(nil), // 7: gochat.v1.DeleteMessageResponse
-	(*ListMessagesRequest)(nil),   // 8: gochat.v1.ListMessagesRequest
-	(*ListMessagesResponse)(nil),  // 9: gochat.v1.ListMessagesResponse
-	(*GetMessageRequest)(nil),     // 10: gochat.v1.GetMessageRequest
-	(*ListThreadRequest)(nil),     // 11: gochat.v1.ListThreadRequest
-	(*ListThreadResponse)(nil),    // 12: gochat.v1.ListThreadResponse
-	(*GetMessageResponse)(nil),    // 13: gochat.v1.GetMessageResponse
-	(*SendTypingRequest)(nil),     // 14: gochat.v1.SendTypingRequest
-	(*SendTypingResponse)(nil),    // 15: gochat.v1.SendTypingResponse
-	(*Reaction)(nil),              // 16: gochat.v1.Reaction
-	(*Message)(nil),               // 17: gochat.v1.Message
+	(*PinMessageRequest)(nil),      // 0: gochat.v1.PinMessageRequest
+	(*PinMessageResponse)(nil),     // 1: gochat.v1.PinMessageResponse
+	(*ListPinnedRequest)(nil),      // 2: gochat.v1.ListPinnedRequest
+	(*ListPinnedResponse)(nil),     // 3: gochat.v1.ListPinnedResponse
+	(*SaveMessageRequest)(nil),     // 4: gochat.v1.SaveMessageRequest
+	(*SaveMessageResponse)(nil),    // 5: gochat.v1.SaveMessageResponse
+	(*ListSavedRequest)(nil),       // 6: gochat.v1.ListSavedRequest
+	(*ListSavedResponse)(nil),      // 7: gochat.v1.ListSavedResponse
+	(*ListThreadsRequest)(nil),     // 8: gochat.v1.ListThreadsRequest
+	(*ThreadSummary)(nil),          // 9: gochat.v1.ThreadSummary
+	(*ListThreadsResponse)(nil),    // 10: gochat.v1.ListThreadsResponse
+	(*MarkThreadReadRequest)(nil),  // 11: gochat.v1.MarkThreadReadRequest
+	(*MarkThreadReadResponse)(nil), // 12: gochat.v1.MarkThreadReadResponse
+	(*FollowThreadRequest)(nil),    // 13: gochat.v1.FollowThreadRequest
+	(*FollowThreadResponse)(nil),   // 14: gochat.v1.FollowThreadResponse
+	(*SearchMessagesRequest)(nil),  // 15: gochat.v1.SearchMessagesRequest
+	(*SearchHit)(nil),              // 16: gochat.v1.SearchHit
+	(*SearchMessagesResponse)(nil), // 17: gochat.v1.SearchMessagesResponse
+	(*ReactRequest)(nil),           // 18: gochat.v1.ReactRequest
+	(*ReactResponse)(nil),          // 19: gochat.v1.ReactResponse
+	(*PostMessageRequest)(nil),     // 20: gochat.v1.PostMessageRequest
+	(*PostMessageResponse)(nil),    // 21: gochat.v1.PostMessageResponse
+	(*EditMessageRequest)(nil),     // 22: gochat.v1.EditMessageRequest
+	(*EditMessageResponse)(nil),    // 23: gochat.v1.EditMessageResponse
+	(*DeleteMessageRequest)(nil),   // 24: gochat.v1.DeleteMessageRequest
+	(*DeleteMessageResponse)(nil),  // 25: gochat.v1.DeleteMessageResponse
+	(*ListMessagesRequest)(nil),    // 26: gochat.v1.ListMessagesRequest
+	(*ListMessagesResponse)(nil),   // 27: gochat.v1.ListMessagesResponse
+	(*GetMessageRequest)(nil),      // 28: gochat.v1.GetMessageRequest
+	(*ListThreadRequest)(nil),      // 29: gochat.v1.ListThreadRequest
+	(*ListThreadResponse)(nil),     // 30: gochat.v1.ListThreadResponse
+	(*GetMessageResponse)(nil),     // 31: gochat.v1.GetMessageResponse
+	(*SendTypingRequest)(nil),      // 32: gochat.v1.SendTypingRequest
+	(*SendTypingResponse)(nil),     // 33: gochat.v1.SendTypingResponse
+	(*Message)(nil),                // 34: gochat.v1.Message
+	(*Channel)(nil),                // 35: gochat.v1.Channel
+	(*User)(nil),                   // 36: gochat.v1.User
+	(*Reaction)(nil),               // 37: gochat.v1.Reaction
 }
 var file_gochat_v1_messages_proto_depIdxs = []int32{
-	16, // 0: gochat.v1.ReactResponse.reactions:type_name -> gochat.v1.Reaction
-	17, // 1: gochat.v1.PostMessageResponse.message:type_name -> gochat.v1.Message
-	17, // 2: gochat.v1.EditMessageResponse.message:type_name -> gochat.v1.Message
-	17, // 3: gochat.v1.ListMessagesResponse.messages:type_name -> gochat.v1.Message
-	17, // 4: gochat.v1.ListThreadResponse.root:type_name -> gochat.v1.Message
-	17, // 5: gochat.v1.ListThreadResponse.replies:type_name -> gochat.v1.Message
-	17, // 6: gochat.v1.GetMessageResponse.message:type_name -> gochat.v1.Message
-	2,  // 7: gochat.v1.MessageService.PostMessage:input_type -> gochat.v1.PostMessageRequest
-	4,  // 8: gochat.v1.MessageService.EditMessage:input_type -> gochat.v1.EditMessageRequest
-	6,  // 9: gochat.v1.MessageService.DeleteMessage:input_type -> gochat.v1.DeleteMessageRequest
-	8,  // 10: gochat.v1.MessageService.ListMessages:input_type -> gochat.v1.ListMessagesRequest
-	10, // 11: gochat.v1.MessageService.GetMessage:input_type -> gochat.v1.GetMessageRequest
-	14, // 12: gochat.v1.MessageService.SendTyping:input_type -> gochat.v1.SendTypingRequest
-	11, // 13: gochat.v1.MessageService.ListThread:input_type -> gochat.v1.ListThreadRequest
-	0,  // 14: gochat.v1.MessageService.React:input_type -> gochat.v1.ReactRequest
-	3,  // 15: gochat.v1.MessageService.PostMessage:output_type -> gochat.v1.PostMessageResponse
-	5,  // 16: gochat.v1.MessageService.EditMessage:output_type -> gochat.v1.EditMessageResponse
-	7,  // 17: gochat.v1.MessageService.DeleteMessage:output_type -> gochat.v1.DeleteMessageResponse
-	9,  // 18: gochat.v1.MessageService.ListMessages:output_type -> gochat.v1.ListMessagesResponse
-	13, // 19: gochat.v1.MessageService.GetMessage:output_type -> gochat.v1.GetMessageResponse
-	15, // 20: gochat.v1.MessageService.SendTyping:output_type -> gochat.v1.SendTypingResponse
-	12, // 21: gochat.v1.MessageService.ListThread:output_type -> gochat.v1.ListThreadResponse
-	1,  // 22: gochat.v1.MessageService.React:output_type -> gochat.v1.ReactResponse
-	15, // [15:23] is the sub-list for method output_type
-	7,  // [7:15] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	34, // 0: gochat.v1.PinMessageResponse.message:type_name -> gochat.v1.Message
+	34, // 1: gochat.v1.ListPinnedResponse.messages:type_name -> gochat.v1.Message
+	34, // 2: gochat.v1.SaveMessageResponse.message:type_name -> gochat.v1.Message
+	16, // 3: gochat.v1.ListSavedResponse.hits:type_name -> gochat.v1.SearchHit
+	34, // 4: gochat.v1.ThreadSummary.root:type_name -> gochat.v1.Message
+	35, // 5: gochat.v1.ThreadSummary.channel:type_name -> gochat.v1.Channel
+	36, // 6: gochat.v1.ThreadSummary.participants:type_name -> gochat.v1.User
+	9,  // 7: gochat.v1.ListThreadsResponse.threads:type_name -> gochat.v1.ThreadSummary
+	34, // 8: gochat.v1.SearchHit.message:type_name -> gochat.v1.Message
+	35, // 9: gochat.v1.SearchHit.channel:type_name -> gochat.v1.Channel
+	16, // 10: gochat.v1.SearchMessagesResponse.hits:type_name -> gochat.v1.SearchHit
+	37, // 11: gochat.v1.ReactResponse.reactions:type_name -> gochat.v1.Reaction
+	34, // 12: gochat.v1.PostMessageResponse.message:type_name -> gochat.v1.Message
+	34, // 13: gochat.v1.EditMessageResponse.message:type_name -> gochat.v1.Message
+	34, // 14: gochat.v1.ListMessagesResponse.messages:type_name -> gochat.v1.Message
+	34, // 15: gochat.v1.ListThreadResponse.root:type_name -> gochat.v1.Message
+	34, // 16: gochat.v1.ListThreadResponse.replies:type_name -> gochat.v1.Message
+	34, // 17: gochat.v1.GetMessageResponse.message:type_name -> gochat.v1.Message
+	20, // 18: gochat.v1.MessageService.PostMessage:input_type -> gochat.v1.PostMessageRequest
+	22, // 19: gochat.v1.MessageService.EditMessage:input_type -> gochat.v1.EditMessageRequest
+	24, // 20: gochat.v1.MessageService.DeleteMessage:input_type -> gochat.v1.DeleteMessageRequest
+	26, // 21: gochat.v1.MessageService.ListMessages:input_type -> gochat.v1.ListMessagesRequest
+	28, // 22: gochat.v1.MessageService.GetMessage:input_type -> gochat.v1.GetMessageRequest
+	32, // 23: gochat.v1.MessageService.SendTyping:input_type -> gochat.v1.SendTypingRequest
+	29, // 24: gochat.v1.MessageService.ListThread:input_type -> gochat.v1.ListThreadRequest
+	18, // 25: gochat.v1.MessageService.React:input_type -> gochat.v1.ReactRequest
+	15, // 26: gochat.v1.MessageService.SearchMessages:input_type -> gochat.v1.SearchMessagesRequest
+	8,  // 27: gochat.v1.MessageService.ListThreads:input_type -> gochat.v1.ListThreadsRequest
+	11, // 28: gochat.v1.MessageService.MarkThreadRead:input_type -> gochat.v1.MarkThreadReadRequest
+	13, // 29: gochat.v1.MessageService.FollowThread:input_type -> gochat.v1.FollowThreadRequest
+	0,  // 30: gochat.v1.MessageService.PinMessage:input_type -> gochat.v1.PinMessageRequest
+	2,  // 31: gochat.v1.MessageService.ListPinned:input_type -> gochat.v1.ListPinnedRequest
+	4,  // 32: gochat.v1.MessageService.SaveMessage:input_type -> gochat.v1.SaveMessageRequest
+	6,  // 33: gochat.v1.MessageService.ListSaved:input_type -> gochat.v1.ListSavedRequest
+	21, // 34: gochat.v1.MessageService.PostMessage:output_type -> gochat.v1.PostMessageResponse
+	23, // 35: gochat.v1.MessageService.EditMessage:output_type -> gochat.v1.EditMessageResponse
+	25, // 36: gochat.v1.MessageService.DeleteMessage:output_type -> gochat.v1.DeleteMessageResponse
+	27, // 37: gochat.v1.MessageService.ListMessages:output_type -> gochat.v1.ListMessagesResponse
+	31, // 38: gochat.v1.MessageService.GetMessage:output_type -> gochat.v1.GetMessageResponse
+	33, // 39: gochat.v1.MessageService.SendTyping:output_type -> gochat.v1.SendTypingResponse
+	30, // 40: gochat.v1.MessageService.ListThread:output_type -> gochat.v1.ListThreadResponse
+	19, // 41: gochat.v1.MessageService.React:output_type -> gochat.v1.ReactResponse
+	17, // 42: gochat.v1.MessageService.SearchMessages:output_type -> gochat.v1.SearchMessagesResponse
+	10, // 43: gochat.v1.MessageService.ListThreads:output_type -> gochat.v1.ListThreadsResponse
+	12, // 44: gochat.v1.MessageService.MarkThreadRead:output_type -> gochat.v1.MarkThreadReadResponse
+	14, // 45: gochat.v1.MessageService.FollowThread:output_type -> gochat.v1.FollowThreadResponse
+	1,  // 46: gochat.v1.MessageService.PinMessage:output_type -> gochat.v1.PinMessageResponse
+	3,  // 47: gochat.v1.MessageService.ListPinned:output_type -> gochat.v1.ListPinnedResponse
+	5,  // 48: gochat.v1.MessageService.SaveMessage:output_type -> gochat.v1.SaveMessageResponse
+	7,  // 49: gochat.v1.MessageService.ListSaved:output_type -> gochat.v1.ListSavedResponse
+	34, // [34:50] is the sub-list for method output_type
+	18, // [18:34] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_gochat_v1_messages_proto_init() }
@@ -1053,7 +2177,7 @@ func file_gochat_v1_messages_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gochat_v1_messages_proto_rawDesc), len(file_gochat_v1_messages_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   16,
+			NumMessages:   34,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

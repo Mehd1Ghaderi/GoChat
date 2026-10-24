@@ -11,13 +11,24 @@
 
 {{define "channel-lists"}}
 <nav class="channel-lists" id="channel-lists" aria-label="Channels"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>
+  <button class="jump-to" type="button" hx-get="/t/{{.Team.Name}}/switch" hx-target="#modal">{{icon "search"}}<span>Go to…</span><kbd data-shortcut>Ctrl K</kbd></button>
+  <ul class="top-links">
+    <li><a href="/t/{{.Team.Name}}/threads" hx-get="/t/{{.Team.Name}}/threads" hx-target="#main" hx-push-url="true" data-place="threads"
+           class="sb-link{{if eq .Active "threads"}} active{{end}}"{{if eq .Active "threads"}} aria-current="page"{{end}}>
+      <span class="glyph" aria-hidden="true">{{icon "reply"}}</span><span class="label">Threads</span>
+      <span id="threads-unread" class="dot{{if .ThreadsUnread}} on{{end}}" aria-hidden="true"></span>
+    </a></li>
+    <li><button type="button" class="sb-link" hx-get="/t/{{.Team.Name}}/saved" hx-target="#thread">
+      <span class="glyph" aria-hidden="true">{{icon "bookmark"}}</span><span class="label">Saved</span>
+    </button></li>
+  </ul>
   <section>
     <h2><span>Channels</span>
       <button class="icon-btn sm" hx-get="/t/{{.Team.Name}}/channels/browse" hx-target="#modal" aria-label="Browse channels" title="Browse channels">{{icon "search"}}</button>
       <button class="icon-btn sm" hx-get="/t/{{.Team.Name}}/channels/new" hx-target="#modal" aria-label="Create a channel" title="Create a channel">{{icon "plus"}}</button>
     </h2>
     <ul>
-      {{range .Channels}}{{template "sidebar-item" (dict "Ch" . "Team" $.Team "Active" (eq .Id $.Active) "Online" $.Online)}}{{end}}
+      {{range .Channels}}{{template "sidebar-item" (dict "Ch" . "Team" $.Team "Active" (eq .Id $.Active) "Status" $.Status)}}{{end}}
     </ul>
   </section>
   <section>
@@ -25,7 +36,7 @@
       <button class="icon-btn sm" hx-get="/t/{{.Team.Name}}/people" hx-target="#modal" aria-label="Message someone" title="Message someone">{{icon "plus"}}</button>
     </h2>
     <ul>
-      {{range .DMs}}{{template "sidebar-item" (dict "Ch" . "Team" $.Team "Active" (eq .Id $.Active) "Online" $.Online)}}{{end}}
+      {{range .DMs}}{{template "sidebar-item" (dict "Ch" . "Team" $.Team "Active" (eq .Id $.Active) "Status" $.Status)}}{{end}}
     </ul>
   </section>
 </nav>
@@ -35,10 +46,12 @@
 <li>
   <a href="/t/{{.Team.Name}}/ch/{{.Ch.Id}}" hx-get="/t/{{.Team.Name}}/ch/{{.Ch.Id}}" hx-target="#main" hx-push-url="true"
      class="sb-link{{if .Active}} active{{end}}{{if .Ch.Muted}} muted{{end}}" data-channel="{{.Ch.Id}}"{{if .Active}} aria-current="page"{{end}}>
-    {{if isDirect .Ch}}<span id="presence-{{.Ch.Peer.Id}}" class="presence{{if index .Online .Ch.Peer.Id}} on{{end}}" aria-hidden="true"></span>
+    {{if isDirect .Ch}}{{template "presence" (dict "ID" .Ch.Peer.Id "Status" (index .Status .Ch.Peer.Id))}}
+    {{else if isGroup .Ch}}<span class="group-count" title="{{inc (len .Ch.Peers)}} people">{{inc (len .Ch.Peers)}}</span>
     {{else if isPrivate .Ch}}<span class="glyph" aria-hidden="true">{{icon "lock"}}</span>
     {{else}}<span class="glyph" aria-hidden="true">{{icon "hash"}}</span>{{end}}
     <span class="label">{{channelName .Ch}}</span>
+    {{with .Ch.Peer}}{{with .CustomStatus}}<span class="cs" title="{{.Text}}">{{emojiChar .Emoji}}</span>{{end}}{{end}}
     {{if and .Ch.MentionCount (not .Active)}}{{template "badge" (dict "ID" .Ch.Id "Count" .Ch.MentionCount "OOB" false)}}
     {{else}}<span id="unread-{{.Ch.Id}}" class="dot{{if and (unread .Ch) (not .Active) (not .Ch.Muted)}} on{{end}}" aria-hidden="true"></span>{{end}}
     {{if .Ch.Muted}}<span class="glyph muted-mark" title="Muted">{{icon "bell-off"}}</span>{{end}}
@@ -50,4 +63,12 @@
 
 {{define "unread"}}<span id="unread-{{.}}" class="dot on" aria-hidden="true" hx-swap-oob="outerHTML"></span>{{end}}
 
-{{define "presence"}}<span id="presence-{{.ID}}" class="presence{{if .Online}} on{{end}}" aria-hidden="true" hx-swap-oob="outerHTML"></span>{{end}}
+{{define "presence"}}<span id="presence-{{.ID}}" class="presence {{statusClass .Status}}" title="{{statusLabel .Status}}" aria-hidden="true" hx-swap-oob="outerHTML"></span>{{end}}
+
+{{define "head-presence"}}<span id="head-presence-{{.ID}}" class="presence {{statusClass .Status}}" title="{{statusLabel .Status}}" aria-hidden="true" hx-swap-oob="outerHTML"></span>{{end}}
+
+{{define "me-presence"}}<span id="me-presence" class="presence {{statusClass .Status}}" title="{{statusLabel .Status}}" aria-hidden="true"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}></span>{{end}}
+
+{{define "me-name"}}<span id="me-name" class="me-name"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}><strong>{{name .User}}</strong>{{with .User.CustomStatus}}<small><span aria-hidden="true">{{emojiChar .Emoji}}</span> {{.Text}}</small>{{else}}<small>@{{.User.Username}}</small>{{end}}</span>{{end}}
+
+{{define "peer-status"}}<span id="peer-status-{{.User.Id}}" class="custom-status"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>{{with .User.CustomStatus}}<span aria-hidden="true">{{emojiChar .Emoji}}</span>{{with .Text}}<span class="cs-text">{{.}}</span>{{end}}{{end}}</span>{{end}}

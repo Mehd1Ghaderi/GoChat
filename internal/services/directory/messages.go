@@ -85,9 +85,16 @@ type ListChannels struct {
 	TeamID string
 }
 
+// BrowseChannels replies with *Browsed.
 type BrowseChannels struct {
 	P      *models.Principal
 	TeamID string
+}
+
+// Browsed holds the public channels the caller may join, and the archived
+// ones they belong to.
+type Browsed struct {
+	Open, Archived []*pb.Channel
 }
 
 type CreateChannel struct {
@@ -100,6 +107,40 @@ type CreateChannel struct {
 type OpenDirect struct {
 	P      *models.Principal
 	UserID string
+}
+
+// OpenGroup opens the conversation of the caller and UserIDs.
+type OpenGroup struct {
+	P       *models.Principal
+	UserIDs []string
+}
+
+// ListThreads replies with *ThreadsResult. A zero Limit counts the unread
+// threads only.
+type ListThreads struct {
+	P             *models.Principal
+	TeamID        string
+	Offset, Limit int
+}
+
+type ThreadsResult struct {
+	Threads []*pb.ThreadSummary
+	Unread  int
+	// Next is the offset of the next page, zero at the end.
+	Next int
+}
+
+// ListSaved replies with *SavedResult; with IDsOnly, the ids of all the
+// caller saved, in any team.
+type ListSaved struct {
+	P       *models.Principal
+	TeamID  string
+	IDsOnly bool
+}
+
+type SavedResult struct {
+	Hits []*pb.SearchHit
+	IDs  []string
 }
 
 type GetUser struct {
@@ -146,10 +187,26 @@ type MeResult struct {
 	Email string
 }
 
+// Presence replies with the statuses of the users among UserIDs who are not
+// offline.
 type Presence struct {
 	P       *models.Principal
 	UserIDs []string
 }
+
+// SetStatus and SetCustomStatus reply with the caller as they now are.
+type (
+	SetStatus struct {
+		P          *models.Principal
+		Status     pb.Status
+		DNDMinutes int
+	}
+	SetCustomStatus struct {
+		P           *models.Principal
+		Emoji, Text string
+		Minutes     int
+	}
+)
 
 // ListMuted replies with the ids of the channels the caller muted.
 type ListMuted struct{ P *models.Principal }

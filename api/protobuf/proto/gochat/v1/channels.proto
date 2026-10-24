@@ -15,10 +15,18 @@ service ChannelService {
   rpc RemoveChannelMember(RemoveChannelMemberRequest) returns (RemoveChannelMemberResponse);
   rpc ListChannelMembers(ListChannelMembersRequest) returns (ListChannelMembersResponse);
   rpc OpenDirectChannel(OpenDirectChannelRequest) returns (OpenDirectChannelResponse);
+  // OpenGroupChannel opens the conversation of the caller and user_ids: a
+  // direct one for one person, a group one for two to seven.
+  rpc OpenGroupChannel(OpenGroupChannelRequest) returns (OpenGroupChannelResponse);
   rpc MarkChannelRead(MarkChannelReadRequest) returns (MarkChannelReadResponse);
   // A muted channel neither notifies nor shows its unread messages.
   rpc SetChannelMuted(SetChannelMutedRequest) returns (SetChannelMutedResponse);
   rpc ListMutedChannels(ListMutedChannelsRequest) returns (ListMutedChannelsResponse);
+  // UpdateChannel renames a channel and sets its purpose.
+  rpc UpdateChannel(UpdateChannelRequest) returns (UpdateChannelResponse);
+  rpc SetChannelPrivacy(SetChannelPrivacyRequest) returns (SetChannelPrivacyResponse);
+  // An archived channel can be read but takes no new messages.
+  rpc ArchiveChannel(ArchiveChannelRequest) returns (ArchiveChannelResponse);
   // Lets the channel's members post voice messages, or stops them. Channel
   // and team admins may change it.
   rpc SetChannelVoice(SetChannelVoiceRequest) returns (SetChannelVoiceResponse);
@@ -30,6 +38,37 @@ message SetChannelVoiceRequest {
 }
 
 message SetChannelVoiceResponse {
+  Channel channel = 1;
+}
+
+message UpdateChannelRequest {
+  string channel_id = 1;
+  string display_name = 2;
+  // The URL name.
+  string name = 3;
+  string purpose = 4;
+}
+
+message UpdateChannelResponse {
+  Channel channel = 1;
+}
+
+message SetChannelPrivacyRequest {
+  string channel_id = 1;
+  bool private = 2;
+}
+
+message SetChannelPrivacyResponse {
+  Channel channel = 1;
+}
+
+message ArchiveChannelRequest {
+  string channel_id = 1;
+  // False restores an archived channel.
+  bool archived = 2;
+}
+
+message ArchiveChannelResponse {
   Channel channel = 1;
 }
 
@@ -62,6 +101,8 @@ message BrowseChannelsRequest {
 message BrowseChannelsResponse {
   // Public channels of the team the caller has not joined.
   repeated Channel channels = 1;
+  // Archived channels the caller belongs to.
+  repeated Channel archived = 2;
 }
 
 message CreateChannelRequest {
@@ -127,6 +168,14 @@ message OpenDirectChannelRequest {
 }
 
 message OpenDirectChannelResponse {
+  Channel channel = 1;
+}
+
+message OpenGroupChannelRequest {
+  repeated string user_ids = 1;
+}
+
+message OpenGroupChannelResponse {
   Channel channel = 1;
 }
 
