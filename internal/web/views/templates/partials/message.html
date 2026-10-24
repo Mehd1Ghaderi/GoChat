@@ -1,5 +1,5 @@
 {{define "message"}}
-<article class="msg{{if .Mine}} mine{{end}}{{if .Mentioned}} mentioned{{end}}" id="msg-{{.Id}}"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>
+<article class="msg{{if .Mine}} mine{{end}}{{if .Mentioned}} mentioned{{end}}{{if .Focus}} focus{{end}}" id="msg-{{.Id}}"{{if .Focus}} data-focus="1"{{end}}{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>
   {{template "avatar" (dict "User" .Author "Size" "")}}
   <div class="msg-main">
     {{template "msg-content" .}}

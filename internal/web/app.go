@@ -178,12 +178,14 @@ func moderator(u *pb.User, team *pb.Team, ch *pb.Channel) bool {
 		ch.GetRole() == pb.ChannelRole_CHANNEL_ROLE_ADMIN
 }
 
-// channelView loads one channel and its newest messages as u sees them.
-func (h *Handler) channelView(ctx context.Context, u *pb.User, team *pb.Team, chID string) (*render.ChannelView, error) {
+// channelView loads one channel and its newest messages as u sees them, or
+// with focus the messages around that one.
+func (h *Handler) channelView(ctx context.Context, u *pb.User, team *pb.Team, chID, focus string) (*render.ChannelView, error) {
 	g, gctx := errgroup.WithContext(ctx)
 	var (
-		ch   *pb.Channel
-		msgs *pb.ListMessagesResponse
+		ch       *pb.Channel
+		msgs     *pb.ListMessagesResponse
+		anchored bool
 	)
 	g.Go(func() error {
 		res, err := h.client.Channels.GetChannel(gctx, &pb.GetChannelRequest{ChannelId: chID})
@@ -194,14 +196,14 @@ func (h *Handler) channelView(ctx context.Context, u *pb.User, team *pb.Team, ch
 		return nil
 	})
 	g.Go(func() error {
-		res, err := h.client.Messages.ListMessages(gctx, &pb.ListMessagesRequest{ChannelId: chID, Limit: pageSize})
+		res, more, err := h.history(gctx, chID, focus)
 		if err != nil {
 			if drpc.Err(err).Code == ierrors.CodePermissionDenied {
 				return nil
 			}
 			return err
 		}
-		msgs = res
+		msgs, anchored = res, more
 		return nil
 	})
 	if err := g.Wait(); err != nil {
@@ -219,9 +221,12 @@ func (h *Handler) channelView(ctx context.Context, u *pb.User, team *pb.Team, ch
 	}
 	if msgs != nil {
 		view.Messages = h.render.Messages(msgs.Messages, u, view.Moderator)
-		view.HasMore = msgs.HasMore
+		view.HasMore, view.Anchored = msgs.HasMore, anchored
 		if n := len(msgs.Messages); n > 0 {
 			view.Newest, view.Oldest = msgs.Messages[0].Id, msgs.Messages[n-1].Id
+		}
+		for _, m := range view.Messages {
+			m.Focus = focus != "" && m.Id == focus
 		}
 	}
 	if ch.Peer != nil {
@@ -230,6 +235,47 @@ func (h *Handler) channelView(ctx context.Context, u *pb.User, team *pb.Team, ch
 		}
 	}
 	return view, nil
+}
+
+// history loads a channel's newest messages, or with focus the messages
+// around that one; more reports newer messages beyond those loaded.
+func (h *Handler) history(ctx context.Context, chID, focus string) (*pb.ListMessagesResponse, bool, error) {
+	if focus == "" {
+		res, err := h.client.Messages.ListMessages(ctx, &pb.ListMessagesRequest{ChannelId: chID, Limit: pageSize})
+		return res, false, err
+	}
+	g, gctx := errgroup.WithContext(ctx)
+	var (
+		target       *pb.Message
+		older, newer *pb.ListMessagesResponse
+	)
+	g.Go(func() error {
+		res, err := h.client.Messages.GetMessage(gctx, &pb.GetMessageRequest{ChannelId: chID, MessageId: focus})
+		if err != nil {
+			if code := drpc.Err(err).Code; code == ierrors.CodeNotFound || code == ierrors.CodeInvalidArgument {
+				return nil
+			}
+			return err
+		}
+		target = res.Message
+		return nil
+	})
+	g.Go(func() (err error) {
+		older, err = h.client.Messages.ListMessages(gctx, &pb.ListMessagesRequest{ChannelId: chID, BeforeId: focus, Limit: pageSize / 2})
+		return
+	})
+	g.Go(func() (err error) {
+		newer, err = h.client.Messages.ListMessages(gctx, &pb.ListMessagesRequest{ChannelId: chID, AfterId: focus, Limit: pageSize / 2})
+		return
+	})
+	if err := g.Wait(); err != nil {
+		return nil, false, err
+	}
+	if target == nil || target.RootId != "" {
+		return h.history(ctx, chID, "")
+	}
+	list := append(append(newer.Messages, target), older.Messages...)
+	return &pb.ListMessagesResponse{Messages: list, HasMore: older.HasMore}, newer.HasMore, nil
 }
 
 func (h *Handler) channelPage(w http.ResponseWriter, r *http.Request) {
@@ -251,7 +297,7 @@ func (h *Handler) channelPage(w http.ResponseWriter, r *http.Request) {
 			h.fail(w, r, err)
 			return
 		}
-		view, err := h.channelView(ctx, u, team, chID)
+		view, err := h.channelView(ctx, u, team, chID, msgParam(r))
 		if err != nil {
 			h.fail(w, r, err)
 			return
@@ -290,7 +336,7 @@ func (h *Handler) channelPage(w http.ResponseWriter, r *http.Request) {
 	})
 	g.Go(func() error {
 		var err error
-		view, err = h.channelView(gctx, u, team, chID)
+		view, err = h.channelView(gctx, u, team, chID, msgParam(r))
 		return err
 	})
 	if err := g.Wait(); err != nil {

@@ -19,8 +19,10 @@ type Message struct {
 	Edited    bool
 	Mine      bool
 	CanDelete bool
-	// Mentioned is set when the message calls out its reader.
+	// Mentioned is set when the message calls out its reader, Focus when it
+	// is the one a link opened.
 	Mentioned bool
+	Focus     bool
 	OOB       bool
 	bar       ReactionsView
 }
@@ -105,6 +107,9 @@ type ChannelView struct {
 	PeerOnline bool
 	// OpenThread is the root of a thread to open with the channel.
 	OpenThread string
+	// Anchored is set when newer messages than those shown exist: the view
+	// shows an older part of the channel and takes no new messages.
+	Anchored bool
 }
 
 func Title(ch *pb.Channel) string {

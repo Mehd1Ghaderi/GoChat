@@ -19,6 +19,7 @@ import (
 	"github.com/ssenerg/gochat/internal/services/channels"
 	"github.com/ssenerg/gochat/internal/services/convert"
 	"github.com/ssenerg/gochat/internal/services/directory"
+	"github.com/ssenerg/gochat/internal/services/index"
 )
 
 type base struct {
@@ -575,7 +576,7 @@ func (s *messageService) ListMessages(ctx context.Context, req *pb.ListMessagesR
 	if err != nil {
 		return nil, err
 	}
-	res, err := actors.Ask[*channels.HistoryResult](ctx, s.sys.Engine, s.sys.Channels, channels.History{Target: t, BeforeID: req.BeforeId, Limit: int(req.Limit)})
+	res, err := actors.Ask[*channels.HistoryResult](ctx, s.sys.Engine, s.sys.Channels, channels.History{Target: t, BeforeID: req.BeforeId, AfterID: req.AfterId, Limit: int(req.Limit)})
 	if err != nil {
 		return nil, err
 	}
@@ -618,6 +619,20 @@ func (s *messageService) React(ctx context.Context, req *pb.ReactRequest) (*pb.R
 		return nil, err
 	}
 	return &pb.ReactResponse{Reactions: out}, nil
+}
+
+func (s *messageService) SearchMessages(ctx context.Context, req *pb.SearchMessagesRequest) (*pb.SearchMessagesResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	res, err := actors.Ask[*index.Result](ctx, s.sys.Engine, s.sys.Search, index.Search{
+		P: p, TeamID: req.TeamId, Query: req.Query, Cursor: req.Cursor, Limit: int(req.Limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.SearchMessagesResponse{Hits: res.Hits, Terms: res.Terms, NextCursor: res.Next}, nil
 }
 
 func (s *messageService) SendTyping(ctx context.Context, req *pb.SendTypingRequest) (*pb.SendTypingResponse, error) {

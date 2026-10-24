@@ -22,6 +22,7 @@ import (
 	"github.com/ssenerg/gochat/internal/repos/scylla"
 	"github.com/ssenerg/gochat/internal/services/convert"
 	"github.com/ssenerg/gochat/internal/services/hub"
+	"github.com/ssenerg/gochat/internal/services/index"
 )
 
 // DefaultChannel is the channel every team member stays in.
@@ -409,7 +410,27 @@ func (a *channel) post(msg Post) (*pb.Message, error) {
 	out := convert.Message(m, convert.PublicUser(author), atts)
 	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessagePosted{MessagePosted: &pb.MessagePosted{Message: out}}})
 	a.recordMentions(m)
+	a.file(index.Add{Doc: a.doc(m)})
 	return out, nil
+}
+
+func (a *channel) doc(m *models.Message) index.Doc {
+	members := make([]gocql.UUID, 0, len(a.members))
+	for id := range a.members {
+		members = append(members, id)
+	}
+	return index.Doc{
+		Scopes:  index.Scopes(a.ch, members),
+		Posting: scylla.Posting{MessageID: m.ID, ChannelID: a.id, RootID: m.RootID, UserID: m.UserID},
+		Content: m.Content,
+	}
+}
+
+// file hands a change of a message to the search index.
+func (a *channel) file(msg any) {
+	if a.Search != nil {
+		a.Engine.Send(a.Search, msg)
+	}
 }
 
 // recordMentions notes, off the actor, whom m calls out: named members,
@@ -485,6 +506,7 @@ func (a *channel) reply(ctx context.Context, root, m *models.Message, author *mo
 	out := convert.Message(m, convert.PublicUser(author), atts)
 	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessagePosted{MessagePosted: &pb.MessagePosted{Message: out, ParticipantIds: notify}}})
 	a.recordMentions(m)
+	a.file(index.Add{Doc: a.doc(m)})
 
 	root.ReplyCount++
 	root.LastReplyAt = m.ID.Time()
@@ -612,7 +634,9 @@ func (a *channel) edit(msg Edit) (*pb.Message, error) {
 	if err != nil {
 		return nil, err
 	}
+	old := m.Content
 	m.Content, m.EditedAt = content, now
+	a.file(index.Update{Doc: a.doc(m), Old: old})
 	out := convert.Message(m, convert.PublicUser(author), orderAttachments(m.Attachments, atts))
 	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessageEdited{MessageEdited: &pb.MessageEdited{Message: out}}})
 	return out, nil
@@ -648,6 +672,7 @@ func (a *channel) delete(msg Delete) (Done, error) {
 	if err := a.Repo.DeleteMessage(ctx, a.id, m.ID); err != nil {
 		return Done{}, err
 	}
+	a.file(index.Remove{Doc: a.doc(m)})
 	a.dropReactions(ctx, m.ID)
 	if m.ID == a.ch.LastMessageID {
 		a.rewindLast(ctx)
@@ -666,6 +691,7 @@ func (a *channel) deleteReply(ctx context.Context, m *models.Message) error {
 	if err := a.Repo.DeleteReply(ctx, a.id, m.RootID, m.ID); err != nil {
 		return err
 	}
+	a.file(index.Remove{Doc: a.doc(m)})
 	a.dropReactions(ctx, m.ID)
 	a.dropAttachments(m.Attachments)
 	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessageDeleted{MessageDeleted: &pb.MessageDeleted{
@@ -696,7 +722,7 @@ func (a *channel) deleteReply(ctx context.Context, m *models.Message) error {
 // dropThread deletes the replies of a deleted root, their reactions and
 // their files.
 func (a *channel) dropThread(ctx context.Context, rootID gocql.UUID) {
-	replies, atts, err := a.Repo.ThreadContents(ctx, a.id, rootID)
+	replies, err := a.Repo.ThreadContents(ctx, a.id, rootID)
 	if err != nil {
 		a.Logger.Warn("failed to list a thread's replies", zap.String("channel", a.id.String()), zap.Error(err))
 	}
@@ -704,8 +730,11 @@ func (a *channel) dropThread(ctx context.Context, rootID gocql.UUID) {
 		a.Logger.Warn("failed to delete a thread", zap.String("channel", a.id.String()), zap.Error(err))
 		return
 	}
-	for _, id := range replies {
-		a.dropReactions(ctx, id)
+	var atts []gocql.UUID
+	for _, m := range replies {
+		a.file(index.Remove{Doc: a.doc(m)})
+		a.dropReactions(ctx, m.ID)
+		atts = append(atts, m.Attachments...)
 	}
 	a.dropAttachments(atts)
 }
@@ -871,20 +900,32 @@ func (a *channel) history(c *actor.Context, msg History) error {
 	if err := a.canRead(msg.P); err != nil {
 		return err
 	}
-	var before gocql.UUID
-	if msg.BeforeID != "" {
-		id, ok := ids.ParseTime(msg.BeforeID)
+	var before, after gocql.UUID
+	for raw, into := range map[string]*gocql.UUID{msg.BeforeID: &before, msg.AfterID: &after} {
+		if raw == "" {
+			continue
+		}
+		id, ok := ids.ParseTime(raw)
 		if !ok {
 			return ierrors.InvalidArgument("invalid cursor")
 		}
-		before = id
+		*into = id
 	}
 	limit := msg.Limit
 	if limit <= 0 || limit > a.Cfg.HistoryLimit {
 		limit = a.Cfg.HistoryLimit
 	}
 	a.async(c, func(ctx context.Context) (any, error) {
-		list, more, err := a.Repo.ListMessages(ctx, a.id, before, limit)
+		var (
+			list []*models.Message
+			more bool
+			err  error
+		)
+		if ids.IsZero(after) {
+			list, more, err = a.Repo.ListMessages(ctx, a.id, before, limit)
+		} else if list, more, err = a.Repo.ListMessagesAfter(ctx, a.id, after, limit); err == nil {
+			slices.Reverse(list)
+		}
 		if err != nil {
 			return nil, err
 		}

@@ -1,5 +1,5 @@
 {{define "channel"}}
-<section class="channel" id="channel-view" data-team="{{.Team.Id}}" data-team-name="{{.Team.Name}}" data-channel="{{.Channel.Id}}" data-title="{{.Title}}" data-newest="{{.Newest}}"{{if .Moderator}} data-moderator="1"{{end}}{{with .OpenThread}} data-open-thread="{{.}}"{{end}}>
+<section class="channel" id="channel-view" data-team="{{.Team.Id}}" data-team-name="{{.Team.Name}}" data-channel="{{.Channel.Id}}" data-title="{{.Title}}" data-newest="{{.Newest}}"{{if .Moderator}} data-moderator="1"{{end}}{{with .OpenThread}} data-open-thread="{{.}}"{{end}}{{if .Anchored}} data-anchored="1"{{end}}>
   <header class="channel-header">
     <label for="nav-toggle" class="icon-btn menu-btn" aria-label="Open navigation">{{icon "menu"}}</label>
     <div class="channel-title">
@@ -7,6 +7,7 @@
       {{with .Channel.Purpose}}<p class="purpose">{{.}}</p>{{end}}
     </div>
     <div class="channel-actions">
+      <button class="icon-btn" hx-get="/t/{{.Team.Name}}/search" hx-target="#thread" aria-label="Search messages" title="Search (Ctrl+Shift+F)">{{icon "search"}}</button>
       {{if .Member}}{{template "mute-button" (dict "Team" .Team.Name "Channel" .Channel.Id "Muted" .Channel.Muted)}}{{end}}
       {{if and .Member (not (isDirect .Channel))}}
       <button class="icon-btn" hx-get="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/members" hx-target="#modal" aria-label="Members" title="Members">{{icon "members"}}</button>
@@ -18,6 +19,7 @@
   </header>
   {{if .Member}}
   <div class="messages" id="msgs-{{.Channel.Id}}" role="log" aria-label="Messages">
+    {{if .Anchored}}<div class="jump-recent"><a href="/t/{{.Team.Name}}/ch/{{.Channel.Id}}" hx-get="/t/{{.Team.Name}}/ch/{{.Channel.Id}}" hx-target="#main" hx-push-url="true">You are viewing older messages. Jump to recent</a></div>{{end}}
     {{range .Messages}}{{template "message" .}}{{end}}
     {{if .HasMore}}{{template "older" .}}{{else}}{{template "channel-start" .}}{{end}}
   </div>

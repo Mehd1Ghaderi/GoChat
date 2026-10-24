@@ -561,6 +561,76 @@ func TestEndToEnd(t *testing.T) {
 		view(adminWS, town)
 	})
 
+	t.Run("search finds what each person may read", func(t *testing.T) {
+		word := "zq" + random(4)
+		name := "hidden-" + random(3)
+		res, _ := admin.hx("/t/"+teamName+"/channels", url.Values{"name": {name}, "display_name": {"Hidden"}, "type": {"private"}})
+		hidden := channelRe.FindStringSubmatch(res.Header.Get("HX-Location"))[1]
+		view(adminWS, hidden)
+		adminWS.send(map[string]string{"op": "post", "channel_id": hidden, "content": "private " + word + " plans"})
+		adminWS.expect(5*time.Second, "private "+word)
+		view(adminWS, town)
+		bobWS.send(map[string]string{"op": "post", "channel_id": town, "content": "the public " + word + " release notes <b>bold</b>"})
+		pub := msgIDRe.FindStringSubmatch(adminWS.expect(5*time.Second, "public "+word))[1]
+
+		search := func(c *client, q string) string {
+			t.Helper()
+			for range 10 {
+				_, body := c.do(http.MethodGet, "/t/"+teamName+"/search?q="+url.QueryEscape(q), nil, "", true)
+				// The results, without the query echoed in the search box.
+				_, body, _ = strings.Cut(body, `id="search-results"`)
+				if !strings.Contains(body, "searching too fast") {
+					return body
+				}
+				time.Sleep(time.Second)
+			}
+			t.Fatalf("searching %q stayed too fast", q)
+			return ""
+		}
+		// Messages are filed for search a moment after they are posted.
+		var body string
+		for deadline := time.Now().Add(8 * time.Second); ; time.Sleep(400 * time.Millisecond) {
+			if body = search(admin, word); strings.Contains(body, "plans") && strings.Contains(body, "release") {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("search did not find both messages: %s", body)
+			}
+		}
+		if !strings.Contains(body, "<mark>"+word+"</mark>") || strings.Contains(body, "<b>bold") || !strings.Contains(body, "?msg="+pub) {
+			t.Fatalf("results: %s", body)
+		}
+		if body := search(bob, word); !strings.Contains(body, "release") || strings.Contains(body, "plans") {
+			t.Fatalf("bob's results: %s", body)
+		}
+		for q, want := range map[string]string{
+			`"release notes" ` + word:   "release",
+			word + " from:" + adminName: "plans",
+			word + " in:" + name:        "plans",
+			word + " -release":          "plans",
+		} {
+			body := search(admin, q)
+			other := map[string]string{"release": "plans", "plans": "release"}[want]
+			if !strings.Contains(body, want) || strings.Contains(body, other) {
+				t.Fatalf("%q: %s", q, body)
+			}
+		}
+		if body := search(admin, "the"); !strings.Contains(body, "Type a word") {
+			t.Fatalf("a stop word alone: %s", body)
+		}
+		if _, page := admin.get("/t/" + teamName + "/ch/" + town + "?msg=" + pub); !strings.Contains(page, ` focus" id="msg-`+pub+`" data-focus="1"`) {
+			t.Fatalf("the linked message is not focused: %s", page)
+		}
+		if res, _ := bob.hx("/m/"+town+"/"+pub, url.Values{"content": {"nothing to see"}}); res.StatusCode != http.StatusOK {
+			t.Fatalf("edit: %d", res.StatusCode)
+		}
+		for deadline := time.Now().Add(8 * time.Second); strings.Contains(search(admin, word), "release"); time.Sleep(400 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatal("an edited message is still found by its old words")
+			}
+		}
+	})
+
 	t.Run("csrf and origin are enforced", func(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodPost, baseURL+"/t/"+teamName+"/invites", nil)
 		req.Header.Set("HX-Request", "true")

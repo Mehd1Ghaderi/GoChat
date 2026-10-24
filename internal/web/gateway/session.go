@@ -81,7 +81,10 @@ type session struct {
 	teamName  string
 	channelID string
 	moderator bool
-	sidebar   map[string]bool
+	// anchored is set while the tab shows an older part of its channel,
+	// which takes no new messages.
+	anchored bool
+	sidebar  map[string]bool
 	// mentions counts unread mentions per channel in the sidebar.
 	mentions map[string]int
 	peers    map[string]bool
@@ -205,7 +208,7 @@ func (s *session) Receive(c *actor.Context) {
 	case viewChecked:
 		// A message posted while the page loaded reached neither the page
 		// nor this socket: reload the channel, once.
-		if msg.channelID == s.channelID && msg.last != "" && render.Newer(msg.last, s.shown) && s.resynced != msg.channelID {
+		if msg.channelID == s.channelID && !s.anchored && msg.last != "" && render.Newer(msg.last, s.shown) && s.resynced != msg.channelID {
 			s.resynced = msg.channelID
 			s.fragment("resync", s.channelURL())
 		}
@@ -417,6 +420,7 @@ type clientFrame struct {
 	LastID     string          `json:"last_id"`
 	Moderator  string          `json:"moderator"`
 	Resync     string          `json:"resync"`
+	Anchored   string          `json:"anchored"`
 	RootID     string          `json:"root_id"`
 	Content    string          `json:"content"`
 	Attachment json.RawMessage `json:"attachment"`
@@ -495,6 +499,7 @@ func (s *session) view(c *actor.Context, f *clientFrame) {
 	}
 	s.teamID, s.teamName, s.channelID = f.TeamID, f.TeamName, f.ChannelID
 	s.moderator = f.Moderator == "1"
+	s.anchored = f.Anchored == "1"
 	s.typingSeq++
 	s.typer, s.shown = "", ""
 	s.mentions[f.ChannelID] = 0
@@ -604,6 +609,9 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 			return
 		}
 		if m.ChannelId == s.channelID {
+			if s.anchored {
+				return
+			}
 			s.message("message-new", s.Render.Message(m, s.user, s.moderator))
 			if render.Newer(m.Id, s.shown) {
 				s.shown = m.Id

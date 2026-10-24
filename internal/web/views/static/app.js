@@ -28,6 +28,7 @@
       channel_id: v.dataset.channel,
       last_id: v.dataset.newest || "",
       moderator: v.dataset.moderator ? "1" : "",
+      anchored: v.dataset.anchored ? "1" : "",
       resync: resync ? "1" : ""
     });
   }
@@ -48,6 +49,30 @@
     pane.innerHTML = "";
     announceThread();
     return true;
+  }
+
+  var wide = window.matchMedia("(min-width: 821px)");
+  // Where the side pane sits beside the channel rather than over it.
+  var roomy = window.matchMedia("(min-width: 1181px)");
+
+  // Search shares the side pane with threads; it stays open beside the
+  // channel a result opened, where there is room.
+  function openSearch() {
+    var v = view();
+    var input = document.querySelector("[data-search-input]");
+    if (input) {
+      input.focus();
+      input.select();
+      return;
+    }
+    if (v) htmx.ajax("GET", "/t/" + v.dataset.teamName + "/search", { target: "#thread", swap: "innerHTML" });
+  }
+
+  // A link to a message opens its channel around it. htmx settles a
+  // message's new class late, so its data attribute marks it.
+  function focusMessage() {
+    var m = document.querySelector("#main .msg[data-focus]");
+    if (m) m.scrollIntoView({ block: "center" });
   }
 
   function scrollThread(always) {
@@ -287,18 +312,25 @@
   document.body.addEventListener("htmx:afterSwap", function (e) {
     if (e.detail.target && e.detail.target.id === "thread") {
       announceThread();
+      var input = document.querySelector("[data-search-input]");
+      if (input) {
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+        return;
+      }
       scrollThread(true);
       var reply = document.querySelector("#reply-composer textarea");
-      if (reply && window.matchMedia("(min-width: 821px)").matches) reply.focus();
+      if (reply && wide.matches) reply.focus();
       return;
     }
     if (e.detail.target && e.detail.target.id === "main") {
-      closeThread();
+      if (!(roomy.matches && document.getElementById("search-view"))) closeThread();
       markActive();
       announce(false);
       openLinkedThread();
+      focusMessage();
       var ta = document.querySelector("#composer textarea");
-      if (ta && window.matchMedia("(min-width: 821px)").matches) ta.focus();
+      if (ta && wide.matches && !document.querySelector("#main .msg[data-focus]")) ta.focus();
     }
   });
 
@@ -463,6 +495,11 @@
       if (m && m.innerHTML !== "") closeModal();
       else closeThread();
     }
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "F" || e.key === "f")) {
+      e.preventDefault();
+      openSearch();
+      return;
+    }
     if (!(t instanceof HTMLTextAreaElement) || !isComposer(t.form)) return;
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !touch.matches) {
       e.preventDefault();
@@ -491,5 +528,6 @@
     markActive();
     refreshNotifySetting();
     openLinkedThread();
+    focusMessage();
   });
 })();

@@ -11,6 +11,7 @@ import (
 	"github.com/ssenerg/gochat/internal/services/directory"
 	"github.com/ssenerg/gochat/internal/services/files"
 	"github.com/ssenerg/gochat/internal/services/hub"
+	"github.com/ssenerg/gochat/internal/services/index"
 )
 
 type Config struct {
@@ -19,6 +20,7 @@ type Config struct {
 	Channels  *channels.Config  `mapstructure:"channels"`
 	Files     *files.Config     `mapstructure:"files"`
 	Hub       *hub.Config       `mapstructure:"hub"`
+	Search    *index.Config     `mapstructure:"search"`
 	Users     *UsersConfig      `mapstructure:"users"`
 }
 
@@ -30,8 +32,8 @@ type UsersConfig struct {
 var _ config.Config = (*Config)(nil)
 
 func (c *Config) Validate() error {
-	if c.Accounts == nil || c.Directory == nil || c.Channels == nil || c.Files == nil || c.Hub == nil || c.Users == nil {
-		return errors.New("accounts, directory, channels, files, hub and users are required")
+	if c.Accounts == nil || c.Directory == nil || c.Channels == nil || c.Files == nil || c.Hub == nil || c.Search == nil || c.Users == nil {
+		return errors.New("accounts, directory, channels, files, hub, search and users are required")
 	}
 	if err := c.Accounts.Validate(); err != nil {
 		return fmt.Errorf("accounts.%w", err)
@@ -47,6 +49,9 @@ func (c *Config) Validate() error {
 	}
 	if err := c.Hub.Validate(); err != nil {
 		return fmt.Errorf("hub.%w", err)
+	}
+	if err := c.Search.Validate(); err != nil {
+		return fmt.Errorf("search.%w", err)
 	}
 	if c.Users.CacheSize < 1 || c.Users.CacheTTL <= 0 {
 		return errors.New("users.cache_size and users.cache_ttl must be positive")

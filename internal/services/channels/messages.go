@@ -53,10 +53,12 @@ type Delete struct {
 	RootID    string
 }
 
-// History replies with *HistoryResult.
+// History replies with *HistoryResult: the messages before BeforeID, or
+// with AfterID those just after it, newest first either way.
 type History struct {
 	Target
 	BeforeID string
+	AfterID  string
 	Limit    int
 }
 

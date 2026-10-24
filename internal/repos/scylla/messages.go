@@ -159,16 +159,48 @@ func (r *Repository) ListReplies(ctx context.Context, channelID, rootID, before 
 	return out, false, nil
 }
 
-// ThreadContents lists the replies of a thread and their files.
-func (r *Repository) ThreadContents(ctx context.Context, channelID, rootID gocql.UUID) (replies, files []gocql.UUID, err error) {
-	iter := r.query(ctx, "SELECT id, attachments FROM replies WHERE channel_id = ? AND root_id = ?", channelID, rootID).Iter()
-	var id gocql.UUID
-	var atts []gocql.UUID
-	for iter.Scan(&id, &atts) {
-		replies = append(replies, id)
-		files = append(files, atts...)
+// ThreadContents lists the replies of a thread: who wrote what, with which
+// files.
+func (r *Repository) ThreadContents(ctx context.Context, channelID, rootID gocql.UUID) ([]*models.Message, error) {
+	var out []*models.Message
+	err := r.query(ctx, "SELECT "+replyColumns+" FROM replies WHERE channel_id = ? AND root_id = ?", channelID, rootID).SelectRelease(&out)
+	return out, wrap(err)
+}
+
+// ListMessagesAfter returns up to limit messages newer than after, oldest
+// first, and whether newer ones remain.
+func (r *Repository) ListMessagesAfter(ctx context.Context, channelID, after gocql.UUID, limit int) ([]*models.Message, bool, error) {
+	lower := ids.BucketOf(after)
+	var buckets []int32
+	iter := r.query(ctx, "SELECT bucket FROM message_buckets WHERE channel_id = ? AND bucket >= ? ORDER BY bucket ASC", channelID, lower).Iter()
+	var b int32
+	for iter.Scan(&b) {
+		buckets = append(buckets, b)
 	}
-	return replies, files, wrap(iter.Close())
+	if err := iter.Close(); err != nil {
+		return nil, false, wrap(err)
+	}
+	out := make([]*models.Message, 0, limit+1)
+	for _, bucket := range buckets {
+		want := limit + 1 - len(out)
+		var page []*models.Message
+		var err error
+		if bucket == lower {
+			err = r.query(ctx, "SELECT "+messageColumns+" FROM messages WHERE channel_id = ? AND bucket = ? AND id > ? ORDER BY id ASC LIMIT ?",
+				channelID, bucket, after, want).SelectRelease(&page)
+		} else {
+			err = r.query(ctx, "SELECT "+messageColumns+" FROM messages WHERE channel_id = ? AND bucket = ? ORDER BY id ASC LIMIT ?",
+				channelID, bucket, want).SelectRelease(&page)
+		}
+		if err != nil {
+			return nil, false, wrap(err)
+		}
+		out = append(out, page...)
+		if len(out) > limit {
+			return out[:limit], true, nil
+		}
+	}
+	return out, false, nil
 }
 
 func (r *Repository) DeleteThread(ctx context.Context, channelID, rootID gocql.UUID) error {

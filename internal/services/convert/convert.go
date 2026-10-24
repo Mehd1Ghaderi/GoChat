@@ -2,6 +2,7 @@
 package convert
 
 import (
+	"strings"
 	"time"
 
 	"github.com/gocql/gocql"
@@ -157,6 +158,18 @@ func Message(m *models.Message, author *pb.User, atts []*models.Attachment) *pb.
 	}
 	for _, a := range atts {
 		out.Attachments = append(out.Attachments, Attachment(a))
+	}
+	return out
+}
+
+// PeerIDs returns the other people of a direct conversation, whose name
+// lists its members' ids.
+func PeerIDs(ch *models.Channel, self gocql.UUID) []gocql.UUID {
+	var out []gocql.UUID
+	for _, raw := range strings.Split(ch.Name, ":") {
+		if id, ok := ids.Parse(raw); ok && id != self {
+			out = append(out, id)
+		}
 	}
 	return out
 }

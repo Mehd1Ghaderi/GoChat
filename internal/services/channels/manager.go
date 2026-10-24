@@ -34,7 +34,7 @@ type Repo interface {
 	UpdateReplyContent(ctx context.Context, channelID, rootID, id gocql.UUID, content string, at time.Time) error
 	DeleteReply(ctx context.Context, channelID, rootID, id gocql.UUID) error
 	ListReplies(ctx context.Context, channelID, rootID, before gocql.UUID, limit int) ([]*models.Message, bool, error)
-	ThreadContents(ctx context.Context, channelID, rootID gocql.UUID) (replies, files []gocql.UUID, err error)
+	ThreadContents(ctx context.Context, channelID, rootID gocql.UUID) ([]*models.Message, error)
 	AddReaction(ctx context.Context, channelID, messageID gocql.UUID, emoji string, userID gocql.UUID) error
 	RemoveReaction(ctx context.Context, channelID, messageID gocql.UUID, emoji string, userID gocql.UUID) error
 	DeleteReactions(ctx context.Context, channelID, messageID gocql.UUID) error
@@ -42,6 +42,7 @@ type Repo interface {
 	DeleteThread(ctx context.Context, channelID, rootID gocql.UUID) error
 	SetThreadSummary(ctx context.Context, root *models.Message, count int, last time.Time, participant gocql.UUID) error
 	ListMessages(ctx context.Context, channelID, before gocql.UUID, limit int) ([]*models.Message, bool, error)
+	ListMessagesAfter(ctx context.Context, channelID, after gocql.UUID, limit int) ([]*models.Message, bool, error)
 	LastMessageBucket(ctx context.Context, channelID gocql.UUID) (int32, bool, error)
 	SetLastMessage(ctx context.Context, channelID, messageID gocql.UUID) error
 	ResetLastMessage(ctx context.Context, channelID, messageID gocql.UUID, at time.Time) error
@@ -71,6 +72,8 @@ type Deps struct {
 	Users   *users.Cache
 	Engine  *actor.Engine
 	Hub     *actor.PID
+	// Search files messages for search; nil leaves them out.
+	Search *actor.PID
 }
 
 // passivate asks to stop an idle channel actor that has handled requests.

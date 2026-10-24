@@ -14,6 +14,30 @@ service MessageService {
   // ListThread returns a thread's root and its replies.
   rpc ListThread(ListThreadRequest) returns (ListThreadResponse);
   rpc React(ReactRequest) returns (ReactResponse);
+  // SearchMessages finds the messages of a team, and of the caller's direct
+  // conversations, that match a query, newest first.
+  rpc SearchMessages(SearchMessagesRequest) returns (SearchMessagesResponse);
+}
+
+message SearchMessagesRequest {
+  string team_id = 1;
+  string query = 2;
+  // The next_cursor of the page before.
+  string cursor = 3;
+  uint32 limit = 4;
+}
+
+message SearchHit {
+  Message message = 1;
+  Channel channel = 2;
+}
+
+message SearchMessagesResponse {
+  repeated SearchHit hits = 1;
+  // The words looked for, to mark in the results.
+  repeated string terms = 2;
+  // Empty at the end of the results.
+  string next_cursor = 3;
 }
 
 // ReactRequest adds the caller's reaction, or with remove takes it back.
@@ -66,11 +90,14 @@ message ListMessagesRequest {
   // Exclusive upper bound; empty starts at the newest message.
   string before_id = 2;
   uint32 limit = 3;
+  // Exclusive lower bound: the messages just newer than it instead.
+  string after_id = 4;
 }
 
 message ListMessagesResponse {
   // Newest first.
   repeated Message messages = 1;
+  // Whether older messages remain, or with after_id newer ones.
   bool has_more = 2;
 }
 

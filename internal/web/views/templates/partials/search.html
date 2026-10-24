@@ -1,0 +1,54 @@
+{{define "search"}}
+<section class="thread-view search-view" id="search-view" aria-labelledby="search-title">
+  <header class="thread-header">
+    <h2 id="search-title">Search</h2>
+    <span class="thread-where">{{.Team.DisplayName}}</span>
+    <button class="icon-btn" type="button" data-close-thread aria-label="Close search" title="Close">{{icon "close"}}</button>
+  </header>
+  <form class="search-form" role="search" hx-get="/t/{{.Team.Name}}/search" hx-target="#thread">
+    <span class="glyph" aria-hidden="true">{{icon "search"}}</span>
+    <input type="search" name="q" value="{{.Query}}" maxlength="256" placeholder="Search messages" aria-label="Search messages"
+           autocomplete="off" spellcheck="false" enterkeyhint="search" data-search-input>
+  </form>
+  <div class="thread-scroll search-results" id="search-results" aria-live="polite">
+    {{if .Error}}<p class="search-note form-error" role="alert">{{.Error}}</p>
+    {{else if .Query}}{{if .Hits}}{{template "search-page" .}}{{else}}<p class="search-note muted">No messages match.</p>{{end}}
+    {{else}}{{template "search-help"}}{{end}}
+  </div>
+</section>
+{{end}}
+
+{{define "search-page"}}
+{{range .Hits}}{{template "hit" .}}{{end}}
+{{with .Error}}<p class="search-note form-error" role="alert">{{.}}</p>{{end}}
+{{with .MoreURL}}<div class="older" hx-get="{{.}}" hx-trigger="intersect once" hx-swap="outerHTML"><span class="spinner" aria-label="Loading more results"></span></div>{{end}}
+{{end}}
+
+{{define "hit"}}
+<a class="hit" href="{{.URL}}" hx-get="{{.URL}}" hx-target="#main" hx-push-url="true">
+  <span class="hit-where">
+    {{if isDirect .Channel}}{{icon "members"}}{{else if isPrivate .Channel}}{{icon "lock"}}{{else}}{{icon "hash"}}{{end}}
+    <span class="hit-channel">{{.Where}}</span>{{if .Message.RootId}}<span class="hit-thread">{{icon "reply"}}In a thread</span>{{end}}
+  </span>
+  <span class="hit-body">
+    {{template "avatar" (dict "User" .Message.Author "Size" "sm")}}
+    <span class="hit-text">
+      <span class="hit-meta"><strong>{{name .Message.Author}}</strong><time datetime="{{iso .Time}}" title="{{date .Time}}">{{date .Time}}</time></span>
+      <span class="hit-excerpt">{{.Excerpt}}</span>
+    </span>
+  </span>
+</a>
+{{end}}
+
+{{define "search-help"}}
+<div class="search-note">
+  <p class="muted">Searches the channels of this team you are in, and your direct messages.</p>
+  <ul class="search-tips">
+    <li><code>"release notes"</code><span>the words together</span></li>
+    <li><code>-draft</code><span>leave out a word</span></li>
+    <li><code>from:alice</code><span>written by someone</span></li>
+    <li><code>in:town-square</code><span>in one channel</span></li>
+    <li><code>on:2026-01-31</code><span>on a day, or <code>before:</code> and <code>after:</code></span></li>
+  </ul>
+</div>
+{{end}}

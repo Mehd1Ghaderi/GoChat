@@ -46,6 +46,7 @@ type DRPCMessageServiceClient interface {
 	SendTyping(ctx context.Context, in *SendTypingRequest) (*SendTypingResponse, error)
 	ListThread(ctx context.Context, in *ListThreadRequest) (*ListThreadResponse, error)
 	React(ctx context.Context, in *ReactRequest) (*ReactResponse, error)
+	SearchMessages(ctx context.Context, in *SearchMessagesRequest) (*SearchMessagesResponse, error)
 }
 
 type drpcMessageServiceClient struct {
@@ -130,6 +131,15 @@ func (c *drpcMessageServiceClient) React(ctx context.Context, in *ReactRequest) 
 	return out, nil
 }
 
+func (c *drpcMessageServiceClient) SearchMessages(ctx context.Context, in *SearchMessagesRequest) (*SearchMessagesResponse, error) {
+	out := new(SearchMessagesResponse)
+	err := c.cc.Invoke(ctx, "/gochat.v1.MessageService/SearchMessages", drpcEncoding_File_gochat_v1_messages_proto{}, in, out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 type DRPCMessageServiceServer interface {
 	PostMessage(context.Context, *PostMessageRequest) (*PostMessageResponse, error)
 	EditMessage(context.Context, *EditMessageRequest) (*EditMessageResponse, error)
@@ -139,6 +149,7 @@ type DRPCMessageServiceServer interface {
 	SendTyping(context.Context, *SendTypingRequest) (*SendTypingResponse, error)
 	ListThread(context.Context, *ListThreadRequest) (*ListThreadResponse, error)
 	React(context.Context, *ReactRequest) (*ReactResponse, error)
+	SearchMessages(context.Context, *SearchMessagesRequest) (*SearchMessagesResponse, error)
 }
 
 type DRPCMessageServiceUnimplementedServer struct{}
@@ -175,9 +186,13 @@ func (s *DRPCMessageServiceUnimplementedServer) React(context.Context, *ReactReq
 	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
 }
 
+func (s *DRPCMessageServiceUnimplementedServer) SearchMessages(context.Context, *SearchMessagesRequest) (*SearchMessagesResponse, error) {
+	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
+}
+
 type DRPCMessageServiceDescription struct{}
 
-func (DRPCMessageServiceDescription) NumMethods() int { return 8 }
+func (DRPCMessageServiceDescription) NumMethods() int { return 9 }
 
 func (DRPCMessageServiceDescription) Method(n int) (string, drpc.Encoding, drpc.Receiver, interface{}, bool) {
 	switch n {
@@ -253,6 +268,15 @@ func (DRPCMessageServiceDescription) Method(n int) (string, drpc.Encoding, drpc.
 						in1.(*ReactRequest),
 					)
 			}, DRPCMessageServiceServer.React, true
+	case 8:
+		return "/gochat.v1.MessageService/SearchMessages", drpcEncoding_File_gochat_v1_messages_proto{},
+			func(srv interface{}, ctx context.Context, in1, in2 interface{}) (drpc.Message, error) {
+				return srv.(DRPCMessageServiceServer).
+					SearchMessages(
+						ctx,
+						in1.(*SearchMessagesRequest),
+					)
+			}, DRPCMessageServiceServer.SearchMessages, true
 	default:
 		return "", nil, nil, nil, false
 	}
@@ -416,6 +440,26 @@ func (x *drpcMessageService_ReactStream) GetStream() drpc.Stream {
 }
 
 func (x *drpcMessageService_ReactStream) SendAndClose(m *ReactResponse) error {
+	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_messages_proto{}); err != nil {
+		return err
+	}
+	return x.CloseSend()
+}
+
+type DRPCMessageService_SearchMessagesStream interface {
+	drpc.Stream
+	SendAndClose(*SearchMessagesResponse) error
+}
+
+type drpcMessageService_SearchMessagesStream struct {
+	drpc.Stream
+}
+
+func (x *drpcMessageService_SearchMessagesStream) GetStream() drpc.Stream {
+	return x.Stream
+}
+
+func (x *drpcMessageService_SearchMessagesStream) SendAndClose(m *SearchMessagesResponse) error {
 	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_messages_proto{}); err != nil {
 		return err
 	}
