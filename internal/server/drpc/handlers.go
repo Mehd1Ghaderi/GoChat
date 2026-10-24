@@ -385,11 +385,11 @@ func (s *channelService) BrowseChannels(ctx context.Context, req *pb.BrowseChann
 	if err != nil {
 		return nil, err
 	}
-	list, err := actors.Ask[[]*pb.Channel](ctx, s.sys.Engine, s.sys.Directory, directory.BrowseChannels{P: p, TeamID: req.TeamId})
+	res, err := actors.Ask[*directory.Browsed](ctx, s.sys.Engine, s.sys.Directory, directory.BrowseChannels{P: p, TeamID: req.TeamId})
 	if err != nil {
 		return nil, err
 	}
-	return &pb.BrowseChannelsResponse{Channels: list}, nil
+	return &pb.BrowseChannelsResponse{Channels: res.Open, Archived: res.Archived}, nil
 }
 
 func (s *channelService) CreateChannel(ctx context.Context, req *pb.CreateChannelRequest) (*pb.CreateChannelResponse, error) {
@@ -498,6 +498,42 @@ func (s *channelService) OpenDirectChannel(ctx context.Context, req *pb.OpenDire
 		return nil, err
 	}
 	return &pb.OpenDirectChannelResponse{Channel: ch}, nil
+}
+
+func (s *channelService) UpdateChannel(ctx context.Context, req *pb.UpdateChannelRequest) (*pb.UpdateChannelResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Channels, channels.Settings{Target: t, DisplayName: req.DisplayName, Name: req.Name, Purpose: req.Purpose})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.UpdateChannelResponse{Channel: ch}, nil
+}
+
+func (s *channelService) SetChannelPrivacy(ctx context.Context, req *pb.SetChannelPrivacyRequest) (*pb.SetChannelPrivacyResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Channels, channels.Privacy{Target: t, Private: req.Private})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.SetChannelPrivacyResponse{Channel: ch}, nil
+}
+
+func (s *channelService) ArchiveChannel(ctx context.Context, req *pb.ArchiveChannelRequest) (*pb.ArchiveChannelResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Channels, channels.Archive{Target: t, Archived: req.Archived})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ArchiveChannelResponse{Channel: ch}, nil
 }
 
 func (s *channelService) OpenGroupChannel(ctx context.Context, req *pb.OpenGroupChannelRequest) (*pb.OpenGroupChannelResponse, error) {

@@ -80,7 +80,14 @@ message Event {
     TeamLeft team_left = 11;
     ReactionsChanged reactions_changed = 12;
     ChannelMuted channel_muted = 13;
+    ChannelUpdated channel_updated = 14;
   }
+}
+
+// ChannelUpdated tells the members of a channel it was renamed, made public
+// or private, archived or restored.
+message ChannelUpdated {
+  Channel channel = 1;
 }
 
 message ChannelMuted {

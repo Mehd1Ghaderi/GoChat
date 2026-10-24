@@ -43,6 +43,50 @@
   {{end}}
 </ul>
 {{else}}<p class="muted">You are in every public channel of this team.</p>{{end}}
+{{if .Archived}}
+<h3 class="subhead">Archived channels</h3>
+<ul class="list">
+  {{range .Archived}}
+  <li>
+    <div><strong>#{{.DisplayName}}</strong>{{with .Purpose}}<br><small class="muted">{{.}}</small>{{end}}</div>
+    <a class="btn sm" href="/t/{{$.Team.Name}}/ch/{{.Id}}" hx-get="/t/{{$.Team.Name}}/ch/{{.Id}}" hx-target="#main" hx-push-url="true" data-close-modal>View</a>
+  </li>
+  {{end}}
+</ul>
+{{end}}
+{{template "modal-end"}}
+{{end}}
+
+{{define "channel-settings"}}
+{{template "modal-start" "Channel settings"}}
+<form class="stack" hx-post="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/settings" hx-target="#modal">
+  {{with .Error}}<p class="form-error" role="alert">{{.}}</p>{{end}}
+  <label>Name<input name="display_name" required maxlength="64" value="{{.Channel.DisplayName}}"></label>
+  <label>URL name<input name="name" required minlength="2" maxlength="50" pattern="[a-z0-9][a-z0-9\-]{1,49}" value="{{.Channel.Name}}"{{if eq .Channel.Name "town-square"}} readonly{{end}}>
+    <small>Lowercase letters, digits and '-'. Search finds the channel's messages with in:{{.Channel.Name}}</small></label>
+  <label>Purpose<input name="purpose" maxlength="250" value="{{.Channel.Purpose}}"><small>Shown under the channel's name.</small></label>
+  <div class="row"><button class="btn primary" type="submit">Save</button>{{with .Status}}<span class="status ok" role="status">{{.}}</span>{{end}}</div>
+</form>
+{{if ne .Channel.Name "town-square"}}
+<section class="setting">
+  <h3 class="subhead">Who can join</h3>
+  {{if isPrivate .Channel}}
+  <p class="muted">Private: only the people its members add see it.</p>
+  {{if .TeamAdmin}}<button class="btn" hx-post="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/privacy" hx-vals='{"private": "0"}' hx-target="#modal"
+    hx-confirm="Make this channel public? Everyone in the team will be able to find it, join it and read its history.">Make public</button>
+  {{else}}<p class="muted">Only team admins can make it public.</p>{{end}}
+  {{else}}
+  <p class="muted">Public: anyone in the team can find and join it.</p>
+  <button class="btn" hx-post="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/privacy" hx-vals='{"private": "1"}' hx-target="#modal"
+    hx-confirm="Make this channel private? Only its members will see it from now on.">Make private</button>
+  {{end}}
+</section>
+<section class="setting">
+  <h3 class="subhead">Archive</h3>
+  <p class="muted">An archived channel keeps its messages for its members to read, takes no new ones and leaves the sidebar. Browse channels lists it.</p>
+  <button class="btn danger" hx-post="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/archive" hx-vals='{"archived": "1"}' hx-confirm="Archive this channel?">Archive channel</button>
+</section>
+{{end}}
 {{template "modal-end"}}
 {{end}}
 

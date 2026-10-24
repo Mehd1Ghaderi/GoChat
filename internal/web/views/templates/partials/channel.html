@@ -1,22 +1,6 @@
 {{define "channel"}}
 <section class="channel" id="channel-view" data-team="{{.Team.Id}}" data-team-name="{{.Team.Name}}" data-channel="{{.Channel.Id}}" data-title="{{.Title}}" data-newest="{{.Newest}}"{{if .Moderator}} data-moderator="1"{{end}}{{with .OpenThread}} data-open-thread="{{.}}"{{end}}{{if .Anchored}} data-anchored="1"{{end}}>
-  <header class="channel-header">
-    <label for="nav-toggle" class="icon-btn menu-btn" aria-label="Open navigation">{{icon "menu"}}</label>
-    <div class="channel-title">
-      <h1>{{if isDirect .Channel}}<span class="presence{{if .PeerOnline}} on{{end}}" aria-hidden="true"></span>{{else if isGroup .Channel}}<span class="glyph" aria-hidden="true">{{icon "members"}}</span>{{else if isPrivate .Channel}}<span class="glyph" aria-hidden="true">{{icon "lock"}}</span>{{else}}<span class="glyph" aria-hidden="true">{{icon "hash"}}</span>{{end}}<span class="title-text">{{.Title}}</span></h1>
-      {{with .Channel.Purpose}}<p class="purpose">{{.}}</p>{{end}}
-    </div>
-    <div class="channel-actions">
-      <button class="icon-btn" hx-get="/t/{{.Team.Name}}/search" hx-target="#thread" aria-label="Search messages" title="Search (Ctrl+Shift+F)">{{icon "search"}}</button>
-      {{if .Member}}{{template "mute-button" (dict "Team" .Team.Name "Channel" .Channel.Id "Muted" .Channel.Muted)}}{{end}}
-      {{if and .Member (not (isDirect .Channel))}}
-      <button class="icon-btn" hx-get="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/members" hx-target="#modal" aria-label="Members" title="Members">{{icon "members"}}</button>
-      {{if and (ne .Channel.Name "town-square") (not (isGroup .Channel))}}
-      <button class="icon-btn" hx-post="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/leave" hx-confirm="Leave this channel?" aria-label="Leave channel" title="Leave channel">{{icon "leave"}}</button>
-      {{end}}
-      {{end}}
-    </div>
-  </header>
+  {{template "channel-header" .}}
   {{if .Member}}
   <div class="messages" id="msgs-{{.Channel.Id}}" role="log" aria-label="Messages">
     {{if .Anchored}}<div class="jump-recent"><a href="/t/{{.Team.Name}}/ch/{{.Channel.Id}}" hx-get="/t/{{.Team.Name}}/ch/{{.Channel.Id}}" hx-target="#main" hx-push-url="true">You are viewing older messages. Jump to recent</a></div>{{end}}
@@ -24,14 +8,47 @@
     {{if .HasMore}}{{template "older" .}}{{else}}{{template "channel-start" .}}{{end}}
   </div>
   <div class="typing" id="typing-{{.Channel.Id}}" aria-live="polite"></div>
-  {{template "composer" .}}
+  {{template "composer-area" .}}
   {{else}}
   <div class="join-prompt">
-    <p>You are not a member of <strong>{{.Title}}</strong>.</p>
-    <button class="btn primary" hx-post="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/join">Join channel</button>
+    {{if .Archived}}<p><strong>{{.Title}}</strong> is archived.</p>
+    {{else}}<p>You are not a member of <strong>{{.Title}}</strong>.</p>
+    <button class="btn primary" hx-post="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/join">Join channel</button>{{end}}
   </div>
   {{end}}
 </section>
+{{end}}
+
+{{define "channel-header"}}
+<header class="channel-header" id="channel-header-{{.Channel.Id}}"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>
+  <label for="nav-toggle" class="icon-btn menu-btn" aria-label="Open navigation">{{icon "menu"}}</label>
+  <div class="channel-title">
+    <h1>{{if isDirect .Channel}}<span class="presence{{if .PeerOnline}} on{{end}}" aria-hidden="true"></span>{{else if isGroup .Channel}}<span class="glyph" aria-hidden="true">{{icon "members"}}</span>{{else if isPrivate .Channel}}<span class="glyph" aria-hidden="true">{{icon "lock"}}</span>{{else}}<span class="glyph" aria-hidden="true">{{icon "hash"}}</span>{{end}}<span class="title-text">{{.Title}}</span>{{if .Archived}}<span class="pill">Archived</span>{{end}}</h1>
+    {{with .Channel.Purpose}}<p class="purpose">{{.}}</p>{{end}}
+  </div>
+  <div class="channel-actions">
+    <button class="icon-btn" hx-get="/t/{{.Team.Name}}/search" hx-target="#thread" aria-label="Search messages" title="Search (Ctrl+Shift+F)">{{icon "search"}}</button>
+    {{if .Member}}{{template "mute-button" (dict "Team" .Team.Name "Channel" .Channel.Id "Muted" .Channel.Muted)}}{{end}}
+    {{if and .Manage (not .Archived)}}<button class="icon-btn" hx-get="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/settings" hx-target="#modal" aria-label="Channel settings" title="Channel settings">{{icon "settings"}}</button>{{end}}
+    {{if and .Member (not (isDirect .Channel))}}
+    <button class="icon-btn" hx-get="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/members" hx-target="#modal" aria-label="Members" title="Members">{{icon "members"}}</button>
+    {{if and (ne .Channel.Name "town-square") (not (isGroup .Channel))}}
+    <button class="icon-btn" hx-post="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/leave" hx-confirm="Leave this channel?" aria-label="Leave channel" title="Leave channel">{{icon "leave"}}</button>
+    {{end}}
+    {{end}}
+  </div>
+</header>
+{{end}}
+
+{{define "composer-area"}}
+<div class="composer-area" id="composer-area-{{.Channel.Id}}"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>
+  {{if .Archived}}
+  <div class="archived-note" role="status">
+    <span>This channel is archived: you can read it, but not write in it.</span>
+    {{if .Manage}}<button class="btn sm" hx-post="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/archive" hx-vals='{"archived": "0"}'>Restore</button>{{end}}
+  </div>
+  {{else}}{{template "composer" .}}{{end}}
+</div>
 {{end}}
 
 {{define "channel-start"}}

@@ -559,7 +559,9 @@ type Channel struct {
 	MentionCount int32 `protobuf:"varint,12,opt,name=mention_count,json=mentionCount,proto3" json:"mention_count,omitempty"`
 	Muted        bool  `protobuf:"varint,13,opt,name=muted,proto3" json:"muted,omitempty"`
 	// The others of a group conversation.
-	Peers         []*User `protobuf:"bytes,14,rep,name=peers,proto3" json:"peers,omitempty"`
+	Peers []*User `protobuf:"bytes,14,rep,name=peers,proto3" json:"peers,omitempty"`
+	// Set while the channel is archived: read only.
+	ArchivedAt    *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=archived_at,json=archivedAt,proto3" json:"archived_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -688,6 +690,13 @@ func (x *Channel) GetMuted() bool {
 func (x *Channel) GetPeers() []*User {
 	if x != nil {
 		return x.Peers
+	}
+	return nil
+}
+
+func (x *Channel) GetArchivedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ArchivedAt
 	}
 	return nil
 }
@@ -1031,7 +1040,7 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"TeamMember\x12#\n" +
 	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user\x12'\n" +
 	"\x04role\x18\x02 \x01(\x0e2\x13.gochat.v1.TeamRoleR\x04role\x127\n" +
-	"\tjoined_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bjoinedAt\"\xe7\x03\n" +
+	"\tjoined_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bjoinedAt\"\xa4\x04\n" +
 	"\aChannel\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
 	"\ateam_id\x18\x02 \x01(\tR\x06teamId\x12\x12\n" +
@@ -1049,7 +1058,9 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"created_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12#\n" +
 	"\rmention_count\x18\f \x01(\x05R\fmentionCount\x12\x14\n" +
 	"\x05muted\x18\r \x01(\bR\x05muted\x12%\n" +
-	"\x05peers\x18\x0e \x03(\v2\x0f.gochat.v1.UserR\x05peers\"\x99\x01\n" +
+	"\x05peers\x18\x0e \x03(\v2\x0f.gochat.v1.UserR\x05peers\x12;\n" +
+	"\varchived_at\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"archivedAt\"\x99\x01\n" +
 	"\rChannelMember\x12#\n" +
 	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user\x12*\n" +
 	"\x04role\x18\x02 \x01(\x0e2\x16.gochat.v1.ChannelRoleR\x04role\x127\n" +
@@ -1146,20 +1157,21 @@ var file_gochat_v1_types_proto_depIdxs = []int32{
 	4,  // 10: gochat.v1.Channel.peer:type_name -> gochat.v1.User
 	13, // 11: gochat.v1.Channel.created_at:type_name -> google.protobuf.Timestamp
 	4,  // 12: gochat.v1.Channel.peers:type_name -> gochat.v1.User
-	4,  // 13: gochat.v1.ChannelMember.user:type_name -> gochat.v1.User
-	2,  // 14: gochat.v1.ChannelMember.role:type_name -> gochat.v1.ChannelRole
-	13, // 15: gochat.v1.ChannelMember.joined_at:type_name -> google.protobuf.Timestamp
-	4,  // 16: gochat.v1.Message.author:type_name -> gochat.v1.User
-	10, // 17: gochat.v1.Message.attachments:type_name -> gochat.v1.Attachment
-	13, // 18: gochat.v1.Message.created_at:type_name -> google.protobuf.Timestamp
-	13, // 19: gochat.v1.Message.edited_at:type_name -> google.protobuf.Timestamp
-	13, // 20: gochat.v1.Message.last_reply_at:type_name -> google.protobuf.Timestamp
-	12, // 21: gochat.v1.Message.reactions:type_name -> gochat.v1.Reaction
-	22, // [22:22] is the sub-list for method output_type
-	22, // [22:22] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	13, // 13: gochat.v1.Channel.archived_at:type_name -> google.protobuf.Timestamp
+	4,  // 14: gochat.v1.ChannelMember.user:type_name -> gochat.v1.User
+	2,  // 15: gochat.v1.ChannelMember.role:type_name -> gochat.v1.ChannelRole
+	13, // 16: gochat.v1.ChannelMember.joined_at:type_name -> google.protobuf.Timestamp
+	4,  // 17: gochat.v1.Message.author:type_name -> gochat.v1.User
+	10, // 18: gochat.v1.Message.attachments:type_name -> gochat.v1.Attachment
+	13, // 19: gochat.v1.Message.created_at:type_name -> google.protobuf.Timestamp
+	13, // 20: gochat.v1.Message.edited_at:type_name -> google.protobuf.Timestamp
+	13, // 21: gochat.v1.Message.last_reply_at:type_name -> google.protobuf.Timestamp
+	12, // 22: gochat.v1.Message.reactions:type_name -> gochat.v1.Reaction
+	23, // [23:23] is the sub-list for method output_type
+	23, // [23:23] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_gochat_v1_types_proto_init() }

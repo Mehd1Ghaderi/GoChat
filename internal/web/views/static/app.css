@@ -515,6 +515,21 @@ kbd {
 .thread-root { padding-bottom: .75rem; margin-bottom: .35rem; border-bottom: 1px solid var(--border); }
 .replies { display: flex; flex-direction: column; }
 
+/* Channel settings and archived channels. */
+.composer-area { display: contents; }
+.pill {
+  display: inline-flex; align-items: center; height: 22px; padding: 0 .55rem; margin-left: .5rem; border-radius: 99px; flex: none;
+  background: var(--bg-hover); color: var(--fg-muted); font-size: .72rem; font-weight: 700; letter-spacing: .02em;
+}
+.archived-note {
+  display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap;
+  margin: 8px 16px; margin-bottom: max(12px, env(safe-area-inset-bottom)); padding: .7rem .9rem;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-soft); color: var(--fg-muted); font-size: .92rem;
+}
+.setting { display: grid; gap: .5rem; justify-items: start; padding-top: 1rem; border-top: 1px solid var(--border); }
+.setting .subhead { margin: 0; }
+.setting p { margin: 0; }
+
 /* Search: the query on top of the side pane, results as quiet cards. */
 .search-form { position: relative; margin: 12px 12px 4px; }
 .search-form .glyph { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--fg-muted); pointer-events: none; }

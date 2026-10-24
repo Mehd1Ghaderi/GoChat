@@ -184,6 +184,12 @@ func (a *channel) handle(c *actor.Context, req Request) {
 		out, err = a.react(msg)
 	case Mute:
 		out, err = a.mute(msg)
+	case Settings:
+		out, err = a.settings(msg)
+	case Privacy:
+		out, err = a.privacy(msg)
+	case Archive:
+		out, err = a.archive(msg)
 	case MarkRead:
 		err = a.markRead(c, msg)
 	case Join:
@@ -325,6 +331,9 @@ func (a *channel) post(msg Post) (*pb.Message, error) {
 	}
 	if !a.Authz.Can(authz.ObjMessage, authz.ActCreate, string(role), string(msg.P.Role)) {
 		return nil, ierrors.PermissionDenied()
+	}
+	if a.archived() {
+		return nil, errArchived
 	}
 	if !a.poster(msg.P.UserID).Allow() {
 		return nil, ierrors.ResourceExhausted("you are posting too fast")
@@ -596,6 +605,9 @@ func (a *channel) edit(msg Edit) (*pb.Message, error) {
 	if !a.Authz.Can(authz.ObjMessage, authz.ActEditOwn, string(role), string(msg.P.Role)) {
 		return nil, ierrors.PermissionDenied()
 	}
+	if a.archived() {
+		return nil, errArchived
+	}
 	content, err := validate.Text("message", msg.Content, a.Cfg.MaxMessageLength)
 	if err != nil {
 		return nil, err
@@ -746,6 +758,9 @@ const maxReactionKinds = 20
 func (a *channel) react(msg React) ([]*pb.Reaction, error) {
 	if _, err := a.member(msg.P); err != nil {
 		return nil, err
+	}
+	if a.archived() {
+		return nil, errArchived
 	}
 	if !emoji.Valid(msg.Emoji) {
 		return nil, ierrors.InvalidArgument("unknown emoji")
@@ -1033,7 +1048,7 @@ func (a *channel) render(ctx context.Context, list []*models.Message) ([]*pb.Mes
 }
 
 func (a *channel) typingEvent(msg Typing) (Done, error) {
-	if _, err := a.member(msg.P); err != nil {
+	if _, err := a.member(msg.P); err != nil || a.archived() {
 		return Done{}, err
 	}
 	now := time.Now()
@@ -1121,6 +1136,9 @@ func (a *channel) join(msg Join) (*pb.Channel, error) {
 	if a.ch.Kind != models.ChannelPublic {
 		return nil, ierrors.NotFound("channel not found")
 	}
+	if a.archived() && !msg.System {
+		return nil, errArchived
+	}
 	ctx, cancel := a.ctx()
 	defer cancel()
 	tr, err := a.teamRole(ctx, msg.P.UserID)
@@ -1168,6 +1186,9 @@ func (a *channel) addMember(msg AddMember) (Done, error) {
 	}
 	if !a.Authz.Can(authz.ObjChannelMember, authz.ActAdd, string(role), string(msg.P.Role)) {
 		return Done{}, ierrors.PermissionDenied()
+	}
+	if a.archived() {
+		return Done{}, errArchived
 	}
 	target, ok := ids.Parse(msg.UserID)
 	if !ok {

@@ -106,6 +106,8 @@ type Channel struct {
 	CreatedBy     gocql.UUID  `db:"created_by"`
 	CreatedAt     time.Time   `db:"created_at"`
 	LastMessageID gocql.UUID  `db:"last_message_id"`
+	// ArchivedAt is set while the channel is archived: read only.
+	ArchivedAt time.Time `db:"archived_at"`
 }
 
 type ChannelMember struct {

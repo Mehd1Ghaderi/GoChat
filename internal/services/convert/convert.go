@@ -138,6 +138,7 @@ func Channel(ch *models.Channel, role models.ChannelRole, lastRead gocql.UUID, p
 		LastReadId:    ID(lastRead),
 		Peer:          peer,
 		CreatedAt:     Time(ch.CreatedAt),
+		ArchivedAt:    Time(ch.ArchivedAt),
 	}
 }
 

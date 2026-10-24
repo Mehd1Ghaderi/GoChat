@@ -22,6 +22,42 @@ service ChannelService {
   // A muted channel neither notifies nor shows its unread messages.
   rpc SetChannelMuted(SetChannelMutedRequest) returns (SetChannelMutedResponse);
   rpc ListMutedChannels(ListMutedChannelsRequest) returns (ListMutedChannelsResponse);
+  // UpdateChannel renames a channel and sets its purpose.
+  rpc UpdateChannel(UpdateChannelRequest) returns (UpdateChannelResponse);
+  rpc SetChannelPrivacy(SetChannelPrivacyRequest) returns (SetChannelPrivacyResponse);
+  // An archived channel can be read but takes no new messages.
+  rpc ArchiveChannel(ArchiveChannelRequest) returns (ArchiveChannelResponse);
+}
+
+message UpdateChannelRequest {
+  string channel_id = 1;
+  string display_name = 2;
+  // The URL name.
+  string name = 3;
+  string purpose = 4;
+}
+
+message UpdateChannelResponse {
+  Channel channel = 1;
+}
+
+message SetChannelPrivacyRequest {
+  string channel_id = 1;
+  bool private = 2;
+}
+
+message SetChannelPrivacyResponse {
+  Channel channel = 1;
+}
+
+message ArchiveChannelRequest {
+  string channel_id = 1;
+  // False restores an archived channel.
+  bool archived = 2;
+}
+
+message ArchiveChannelResponse {
+  Channel channel = 1;
 }
 
 message SetChannelMutedRequest {
@@ -53,6 +89,8 @@ message BrowseChannelsRequest {
 message BrowseChannelsResponse {
   // Public channels of the team the caller has not joined.
   repeated Channel channels = 1;
+  // Archived channels the caller belongs to.
+  repeated Channel archived = 2;
 }
 
 message CreateChannelRequest {

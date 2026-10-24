@@ -86,6 +86,8 @@ message Channel {
   bool muted = 13;
   // The others of a group conversation.
   repeated User peers = 14;
+  // Set while the channel is archived: read only.
+  google.protobuf.Timestamp archived_at = 15;
 }
 
 message ChannelMember {

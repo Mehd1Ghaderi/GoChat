@@ -7,13 +7,14 @@ import (
 	"time"
 
 	"github.com/gocql/gocql"
+	"go.uber.org/zap"
 
 	"github.com/ssenerg/gochat/internal/core/ids"
 	"github.com/ssenerg/gochat/internal/core/models"
 	ierrors "github.com/ssenerg/gochat/internal/errors"
 )
 
-const channelColumns = "id, team_id, name, display_name, purpose, kind, created_by, created_at, last_message_id"
+const channelColumns = "id, team_id, name, display_name, purpose, kind, created_by, created_at, last_message_id, archived_at"
 
 // NoTeam is the team of direct channels, which belong to none.
 var NoTeam = gocql.UUID{}
@@ -87,6 +88,48 @@ func (r *Repository) CreateDirectChannel(ctx context.Context, pair string, ch *m
 		return gocql.UUID{}, err
 	}
 	return ch.ID, nil
+}
+
+func (r *Repository) UpdateChannelInfo(ctx context.Context, id gocql.UUID, displayName, purpose string) error {
+	return wrap(r.query(ctx, "UPDATE channels SET display_name = ?, purpose = ? WHERE id = ?", displayName, purpose, id).ExecRelease())
+}
+
+// RenameChannel moves a channel's URL name in its team to name.
+func (r *Repository) RenameChannel(ctx context.Context, ch *models.Channel, name string) error {
+	ok, err := r.claim(ctx, "INSERT INTO channel_names (team_id, name, channel_id) VALUES (?, ?, ?) IF NOT EXISTS",
+		"SELECT channel_id FROM channel_names WHERE team_id = ? AND name = ?", "channel_id", ch.ID, ch.TeamID, name)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ierrors.AlreadyExists("a channel with this name exists")
+	}
+	if err := r.query(ctx, "UPDATE channels SET name = ? WHERE id = ?", name, ch.ID).ExecRelease(); err != nil {
+		r.release(err, "DELETE FROM channel_names WHERE team_id = ? AND name = ? IF channel_id = ?", ch.TeamID, name, ch.ID)
+		return wrap(err)
+	}
+	// The old name, once free, can name another channel.
+	if _, err := r.query(ctx, "DELETE FROM channel_names WHERE team_id = ? AND name = ? IF channel_id = ?", ch.TeamID, ch.Name, ch.ID).ExecCASRelease(); err != nil {
+		r.logger.Warn("failed to free a channel's old name", zap.Error(err))
+	}
+	return nil
+}
+
+// SetChannelKind makes a channel public or private.
+func (r *Repository) SetChannelKind(ctx context.Context, ch *models.Channel, kind models.ChannelKind) error {
+	b := r.batch(ctx, true)
+	b.Query("UPDATE channels SET kind = ? WHERE id = ?", string(kind), ch.ID)
+	b.Query("INSERT INTO team_channels (team_id, channel_id, kind) VALUES (?, ?, ?)", ch.TeamID, ch.ID, string(kind))
+	return r.execBatch(b)
+}
+
+// SetArchived archives a channel at at, or with a zero at restores it.
+func (r *Repository) SetArchived(ctx context.Context, id gocql.UUID, at time.Time) error {
+	var v *time.Time
+	if !at.IsZero() {
+		v = &at
+	}
+	return wrap(r.query(ctx, "UPDATE channels SET archived_at = ? WHERE id = ?", v, id).ExecRelease())
 }
 
 func addMemberQueries(b *gocql.Batch, m *models.ChannelMember) {

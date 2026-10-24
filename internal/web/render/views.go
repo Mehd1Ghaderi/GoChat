@@ -115,6 +115,13 @@ type ChannelView struct {
 	// Anchored is set when newer messages than those shown exist: the view
 	// shows an older part of the channel and takes no new messages.
 	Anchored bool
+	Archived bool
+	OOB      bool
+}
+
+// Manage reports whether the viewer may change the channel's settings.
+func (v *ChannelView) Manage() bool {
+	return v.Moderator && v.Member && !Conversation(v.Channel)
 }
 
 func Title(ch *pb.Channel) string {

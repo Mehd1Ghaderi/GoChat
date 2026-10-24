@@ -85,9 +85,16 @@ type ListChannels struct {
 	TeamID string
 }
 
+// BrowseChannels replies with *Browsed.
 type BrowseChannels struct {
 	P      *models.Principal
 	TeamID string
+}
+
+// Browsed holds the public channels the caller may join, and the archived
+// ones they belong to.
+type Browsed struct {
+	Open, Archived []*pb.Channel
 }
 
 type CreateChannel struct {

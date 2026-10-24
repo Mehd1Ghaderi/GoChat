@@ -218,6 +218,7 @@ func (h *Handler) channelView(ctx context.Context, u *pb.User, team *pb.Team, ch
 		Title:     render.Title(ch),
 		Member:    ch.Role != pb.ChannelRole_CHANNEL_ROLE_UNSPECIFIED,
 		Moderator: moderator(u, team, ch),
+		Archived:  ch.ArchivedAt != nil,
 	}
 	if msgs != nil {
 		view.Messages = h.render.Messages(msgs.Messages, u, view.Moderator)
@@ -474,9 +475,9 @@ func (h *Handler) browseModal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.fragment(w, http.StatusOK, "browse", struct {
-		Team     *pb.Team
-		Channels []*pb.Channel
-	}{team, res.Channels})
+		Team               *pb.Team
+		Channels, Archived []*pb.Channel
+	}{team, res.Channels, res.Archived})
 }
 
 func (h *Handler) channelTarget(w http.ResponseWriter, r *http.Request) (string, bool) {

@@ -11,6 +11,7 @@ import (
 	"github.com/coder/websocket"
 	"go.uber.org/zap"
 	"golang.org/x/time/rate"
+	"google.golang.org/protobuf/proto"
 
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
 	"github.com/ssenerg/gochat/internal/client/drpc"
@@ -648,6 +649,21 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 		}
 		if (d.RootId == "" && d.ChannelId == s.channelID) || (d.RootId != "" && d.RootId == s.threadID) {
 			s.fragment("message-deleted", d.MessageId)
+		}
+	case *pb.Event_ChannelUpdated:
+		// The payload is shared by every socket: read only.
+		ch := proto.CloneOf(p.ChannelUpdated.Channel)
+		if s.sidebar[ch.Id] || (ch.ArchivedAt == nil && ch.TeamId == s.teamID) {
+			s.loadSidebar(c, true)
+		}
+		if ch.Id == s.channelID {
+			ch.Muted = s.muted[ch.Id]
+			view := &render.ChannelView{
+				Team: &pb.Team{Id: s.teamID, Name: s.teamName}, Channel: ch, Title: render.Title(ch),
+				Member: true, Moderator: s.moderator, Archived: ch.ArchivedAt != nil, OOB: true,
+			}
+			s.fragment("channel-header", view)
+			s.fragment("composer-area", view)
 		}
 	case *pb.Event_ChannelMuted:
 		s.muted[p.ChannelMuted.ChannelId] = p.ChannelMuted.Muted

@@ -158,6 +158,8 @@ func (c *client) socket(origin string) (*socket, *http.Response, error) {
 	if err != nil {
 		return nil, res, err
 	}
+	// A sidebar of many channels outgrows the library's default limit.
+	conn.SetReadLimit(4 << 20)
 	s := &socket{t: c.t, conn: conn, in: make(chan string, 256)}
 	go func() {
 		for {
@@ -693,6 +695,50 @@ func TestEndToEnd(t *testing.T) {
 		}
 		if _, modal := bob.do(http.MethodGet, "/t/"+teamName+"/switch", nil, "", true); !strings.Contains(modal, "data-switch-input") || !strings.Contains(modal, "Town Square") {
 			t.Fatalf("switcher: %s", modal)
+		}
+	})
+
+	t.Run("channel settings, privacy and archiving", func(t *testing.T) {
+		res, _ := admin.hx("/t/"+teamName+"/channels", url.Values{"name": {"proj-" + random(3)}, "display_name": {"Project"}, "type": {"public"}})
+		proj := channelRe.FindStringSubmatch(res.Header.Get("HX-Location"))[1]
+		base := "/t/" + teamName + "/ch/" + proj
+		bob.hx(base+"/join", url.Values{})
+		view(bobWS, proj)
+		defer view(bobWS, town)
+		if res, _ := bob.hx(base+"/settings", url.Values{"display_name": {"Mine"}, "name": {"mine-" + random(3)}}); res.StatusCode != http.StatusForbidden {
+			t.Fatalf("a member changed the settings: %d", res.StatusCode)
+		}
+		newName := "launch-" + random(3)
+		res, body := admin.hx(base+"/settings", url.Values{"display_name": {"Launch"}, "name": {newName}, "purpose": {"Ship it"}})
+		if res.StatusCode != http.StatusOK || !strings.Contains(body, "Saved.") {
+			t.Fatalf("settings: %d %s", res.StatusCode, body)
+		}
+		bobWS.expect(5*time.Second, `id="channel-header-`+proj+`"`, "Launch", "Ship it")
+		if _, body := admin.hx("/t/"+teamName+"/channels", url.Values{"name": {newName}, "display_name": {"Again"}, "type": {"public"}}); !strings.Contains(body, "exists") {
+			t.Fatalf("a renamed channel's name was free: %s", body)
+		}
+		if _, body := admin.hx(base+"/privacy", url.Values{"private": {"1"}}); !strings.Contains(body, "private now") {
+			t.Fatalf("make private: %s", body)
+		}
+		if res, _ := bob.hx(base+"/privacy", url.Values{"private": {"0"}}); res.StatusCode != http.StatusForbidden {
+			t.Fatalf("a member made the channel public: %d", res.StatusCode)
+		}
+		if res, _ := admin.hx(base+"/archive", url.Values{"archived": {"1"}}); res.Header.Get("HX-Location") == "" {
+			t.Fatalf("archive: %d", res.StatusCode)
+		}
+		bobWS.expect(5*time.Second, `id="composer-area-`+proj+`"`, "is archived")
+		bobWS.send(map[string]string{"op": "post", "channel_id": proj, "content": "too late"})
+		bobWS.expect(5*time.Second, "this channel is archived")
+		if _, page := bob.get("/t/" + teamName + "/ch/" + town); strings.Contains(page, `data-channel="`+proj+`"`) {
+			t.Fatal("an archived channel stayed in the sidebar")
+		}
+		if _, modal := bob.do(http.MethodGet, "/t/"+teamName+"/channels/browse", nil, "", true); !strings.Contains(modal, "Archived channels") || !strings.Contains(modal, "Launch") {
+			t.Fatalf("browse: %s", modal)
+		}
+		admin.hx(base+"/archive", url.Values{"archived": {"0"}})
+		bobWS.expect(5*time.Second, `id="composer-area-`+proj+`"`, `id="composer"`)
+		if res, _ := admin.hx("/t/"+teamName+"/ch/"+town+"/archive", url.Values{"archived": {"1"}}); res.StatusCode < 400 {
+			t.Fatalf("the town square was archived: %d", res.StatusCode)
 		}
 	})
 

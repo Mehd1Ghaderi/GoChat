@@ -731,6 +731,9 @@ func (w *worker) listChannels(ctx context.Context, msg ListChannels) ([]*pb.Chan
 	}
 	out := make([]*pb.Channel, 0, len(all))
 	for _, ch := range all {
+		if !ch.ArchivedAt.IsZero() {
+			continue
+		}
 		view := convert.Conversation(ch, roles[ch.ID], lastRead[ch.ID], msg.P.UserID, peers)
 		if ch.Kind.Conversation() && view.Peer == nil && len(view.Peers) == 0 {
 			continue
@@ -757,7 +760,7 @@ func sortKey(ch *pb.Channel) string {
 	return strings.ToLower(ch.DisplayName)
 }
 
-func (w *worker) browseChannels(ctx context.Context, msg BrowseChannels) ([]*pb.Channel, error) {
+func (w *worker) browseChannels(ctx context.Context, msg BrowseChannels) (*Browsed, error) {
 	teamID, err := parseID(msg.TeamID, "team")
 	if err != nil {
 		return nil, err
@@ -781,23 +784,32 @@ func (w *worker) browseChannels(ctx context.Context, msg BrowseChannels) ([]*pb.
 	for _, cm := range mine {
 		joined[cm.ChannelID] = true
 	}
-	var open []gocql.UUID
+	var visible []gocql.UUID
 	for _, tc := range listed {
-		if tc.Kind == models.ChannelPublic && !joined[tc.ChannelID] {
-			open = append(open, tc.ChannelID)
+		if tc.Kind == models.ChannelPublic || joined[tc.ChannelID] {
+			visible = append(visible, tc.ChannelID)
 		}
 	}
-	out := make([]*pb.Channel, 0, len(open))
-	for start := 0; start < len(open); start += 100 {
-		found, err := w.Repo.GetChannels(ctx, open[start:min(start+100, len(open))])
+	out := &Browsed{}
+	for start := 0; start < len(visible); start += 100 {
+		found, err := w.Repo.GetChannels(ctx, visible[start:min(start+100, len(visible))])
 		if err != nil {
 			return nil, err
 		}
 		for _, ch := range found {
-			out = append(out, convert.Channel(ch, "", gocql.UUID{}, nil))
+			switch {
+			case !ch.ArchivedAt.IsZero():
+				if joined[ch.ID] {
+					out.Archived = append(out.Archived, convert.Channel(ch, "", gocql.UUID{}, nil))
+				}
+			case !joined[ch.ID]:
+				out.Open = append(out.Open, convert.Channel(ch, "", gocql.UUID{}, nil))
+			}
 		}
 	}
-	slices.SortFunc(out, func(a, b *pb.Channel) int { return cmp.Compare(sortKey(a), sortKey(b)) })
+	byName := func(a, b *pb.Channel) int { return cmp.Compare(sortKey(a), sortKey(b)) }
+	slices.SortFunc(out.Open, byName)
+	slices.SortFunc(out.Archived, byName)
 	return out, nil
 }
 

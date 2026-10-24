@@ -21,6 +21,10 @@ import (
 
 type Repo interface {
 	GetChannel(ctx context.Context, id gocql.UUID) (*models.Channel, error)
+	UpdateChannelInfo(ctx context.Context, id gocql.UUID, displayName, purpose string) error
+	RenameChannel(ctx context.Context, ch *models.Channel, name string) error
+	SetChannelKind(ctx context.Context, ch *models.Channel, kind models.ChannelKind) error
+	SetArchived(ctx context.Context, id gocql.UUID, at time.Time) error
 	ListChannelMembers(ctx context.Context, channelID gocql.UUID) ([]*models.ChannelMember, error)
 	AddChannelMember(ctx context.Context, m *models.ChannelMember) error
 	RemoveChannelMember(ctx context.Context, m *models.ChannelMember) error
