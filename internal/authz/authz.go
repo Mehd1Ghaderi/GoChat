@@ -48,6 +48,9 @@ const (
 	ActDeleteAny     Action = "delete_any"
 	ActUpload        Action = "upload"
 	ActUpdate        Action = "update"
+	ActArchive       Action = "archive"
+	ActMakePrivate   Action = "make_private"
+	ActMakePublic    Action = "make_public"
 	ActCreateVoice   Action = "create_voice"
 	// ActConnect joins the talk of a voice channel; ActMove disconnects
 	// others from it.

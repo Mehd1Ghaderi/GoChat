@@ -17,6 +17,7 @@ import (
 	"github.com/ssenerg/gochat/internal/services/directory"
 	"github.com/ssenerg/gochat/internal/services/files"
 	"github.com/ssenerg/gochat/internal/services/hub"
+	"github.com/ssenerg/gochat/internal/services/index"
 	"github.com/ssenerg/gochat/internal/services/users"
 	"github.com/ssenerg/gochat/internal/services/voice"
 )
@@ -32,10 +33,13 @@ type System struct {
 	Auth      *actor.PID
 	Directory *actor.PID
 	Files     *actor.PID
+	Search    *actor.PID
 	Voice     *actor.PID
 	Sessions  *accounts.Deps
 	Users     *users.Cache
 	janitor   *actor.PID
+	filing    *actor.PID
+	backfill  *actor.PID
 	events    *actor.PID
 }
 
@@ -53,12 +57,18 @@ func Start(logger *zap.Logger, cfg *Config, repo *scylla.Repository, storage *mi
 	// with their state lost.
 	recovered := actor.WithMiddleware(actors.Recover(logger))
 	s.Hub = engine.Spawn(hub.New(logger.Named("hub"), cfg.Hub), "hub", actor.WithID("main"), recovered)
+	indexDeps := &index.Deps{Logger: logger.Named("search"), Cfg: cfg.Search, Repo: repo, Users: userCache}
+	s.filing = engine.Spawn(index.Writer(indexDeps), "search", actor.WithID("writer"), recovered)
+	s.Search = engine.Spawn(index.Searcher(indexDeps), "search", actor.WithID("main"))
+	if cfg.Search.Backfill {
+		s.backfill = engine.Spawn(index.Backfill(indexDeps), "search", actor.WithID("backfill"), recovered)
+	}
 	s.Voice = engine.Spawn(voice.New(&voice.Deps{
 		Logger: logger.Named("voice"), Cfg: cfg.Voice, Repo: repo, Engine: engine, Hub: s.Hub,
 	}), "voice", actor.WithID("main"), recovered)
 	s.Channels = engine.Spawn(channels.New(&channels.Deps{
 		Logger: logger.Named("channels"), Cfg: cfg.Channels, Repo: repo, Storage: storage,
-		Authz: az, Users: userCache, Engine: engine, Hub: s.Hub,
+		Authz: az, Users: userCache, Engine: engine, Hub: s.Hub, Search: s.filing,
 	}), "channels", actor.WithID("main"), recovered)
 	fileDeps := &files.Deps{
 		Logger: logger.Named("files"), Cfg: cfg.Files, Repo: repo, Storage: storage,
@@ -89,7 +99,7 @@ func (s *System) Stop(timeout time.Duration) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	for _, pid := range []*actor.PID{s.Accounts, s.Auth, s.Directory, s.Files, s.janitor, s.Channels, s.Voice, s.Hub, s.events} {
+	for _, pid := range []*actor.PID{s.Accounts, s.Auth, s.Directory, s.Files, s.Search, s.backfill, s.janitor, s.Channels, s.Voice, s.filing, s.Hub, s.events} {
 		if pid == nil {
 			continue
 		}

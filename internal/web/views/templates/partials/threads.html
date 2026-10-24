@@ -1,0 +1,55 @@
+{{define "threads"}}
+<section class="channel threads-view" id="threads-view" data-team="{{.Team.Id}}" data-team-name="{{.Team.Name}}" data-title="Threads">
+  <header class="channel-header">
+    <label for="nav-toggle" class="icon-btn menu-btn" aria-label="Open navigation">{{icon "menu"}}</label>
+    <div class="channel-title">
+      <h1><span class="glyph" aria-hidden="true">{{icon "reply"}}</span><span class="title-text">Threads</span></h1>
+      <p class="purpose">Threads you started, replied to, followed or were mentioned in</p>
+    </div>
+    <div class="channel-actions">
+      <button class="icon-btn" hx-get="/t/{{.Team.Name}}/search" hx-target="#thread" aria-label="Search messages" title="Search (Ctrl+Shift+F)">{{icon "search"}}</button>
+    </div>
+  </header>
+  {{template "threads-list" .}}
+</section>
+{{end}}
+
+{{define "threads-list"}}
+<div class="threads-list" id="threads-list">
+  {{if .Threads}}{{template "threads-page" .}}
+  {{else}}<div class="threads-empty"><h2>No threads yet</h2><p class="muted">Reply to a message, or follow its thread, and it shows up here with every new reply.</p></div>{{end}}
+</div>
+{{end}}
+
+{{define "threads-page"}}
+{{range .Threads}}{{template "thread-card" .}}{{end}}
+{{with .MoreURL}}<div class="older" hx-get="{{.}}" hx-trigger="intersect once" hx-swap="outerHTML"><span class="spinner" aria-label="Loading more threads"></span></div>{{end}}
+{{end}}
+
+{{define "thread-card"}}
+<button type="button" class="thread-card{{if .Unread}} unread{{end}}" hx-get="/m/{{.Channel.Id}}/{{.Root.Id}}/thread" hx-target="#thread" data-thread-card>
+  <span class="hit-where">
+    {{if isConversation .Channel}}{{icon "members"}}{{else if isPrivate .Channel}}{{icon "lock"}}{{else}}{{icon "hash"}}{{end}}
+    <span class="hit-channel">{{.Where}}</span>
+    {{if .Unread}}<span class="dot on" aria-label="New replies"></span>{{end}}
+  </span>
+  <span class="hit-body">
+    {{template "avatar" (dict "User" .Root.Author "Size" "sm")}}
+    <span class="hit-text">
+      <span class="hit-meta"><strong>{{name .Root.Author}}</strong></span>
+      <span class="hit-excerpt">{{.Excerpt}}</span>
+      <span class="thread-foot">
+        <span class="faces" aria-hidden="true">{{range .Participants}}{{template "avatar" (dict "User" . "Size" "xs")}}{{end}}</span>
+        <span class="thread-count">{{.Root.ReplyCount}} {{if eq .Root.ReplyCount 1}}reply{{else}}replies{{end}}</span>
+        {{with .Root.LastReplyAt}}<time datetime="{{iso .AsTime}}" title="{{date .AsTime}}">{{date .AsTime}}</time>{{end}}
+      </span>
+    </span>
+  </span>
+</button>
+{{end}}
+
+{{define "threads-unread"}}<span id="threads-unread" class="dot{{if .}} on{{end}}" aria-hidden="true" hx-swap-oob="outerHTML"></span>{{end}}
+
+{{define "threads-refresh"}}<div id="threads-refresh" hidden hx-swap-oob="outerHTML" hx-get="/t/{{.}}/threads?list=1" hx-trigger="load" hx-target="#threads-list" hx-swap="outerHTML"></div>{{end}}
+
+{{define "follow-button"}}<button class="btn sm follow-btn{{if .Following}} on{{end}}" type="button" hx-post="/m/{{.Channel}}/{{.Root}}/follow" hx-vals='{"follow": "{{if .Following}}0{{else}}1{{end}}"}' hx-swap="outerHTML" aria-pressed="{{if .Following}}true{{else}}false{{end}}" title="{{if .Following}}You get this thread's replies in Threads. Click to stop{{else}}Get this thread's replies in Threads{{end}}">{{if .Following}}{{icon "check"}}Following{{else}}Follow{{end}}</button>{{end}}

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
@@ -36,6 +37,8 @@ type appPage struct {
 	OOB     bool
 	Lists   *render.Lists
 	Channel *render.ChannelView
+	// Threads, when set, shows the threads view in place of a channel.
+	Threads *threadsView
 }
 
 // signedIn returns the user, or answers with a sign-in redirect.
@@ -137,7 +140,7 @@ func (h *Handler) defaultChannel(ctx context.Context, team *pb.Team) (string, er
 	}
 	var first string
 	for _, ch := range res.Channels {
-		if ch.Type == pb.ChannelType_CHANNEL_TYPE_DIRECT {
+		if render.Conversation(ch) {
 			continue
 		}
 		if ch.Name == defaultChannel {
@@ -178,12 +181,14 @@ func moderator(u *pb.User, team *pb.Team, ch *pb.Channel) bool {
 		ch.GetRole() == pb.ChannelRole_CHANNEL_ROLE_ADMIN
 }
 
-// channelView loads one channel and its newest messages as u sees them.
-func (h *Handler) channelView(ctx context.Context, u *pb.User, team *pb.Team, chID string) (*render.ChannelView, error) {
+// channelView loads one channel and its newest messages as u sees them, or
+// with focus the messages around that one.
+func (h *Handler) channelView(ctx context.Context, u *pb.User, team *pb.Team, chID, focus string) (*render.ChannelView, error) {
 	g, gctx := errgroup.WithContext(ctx)
 	var (
-		ch   *pb.Channel
-		msgs *pb.ListMessagesResponse
+		ch       *pb.Channel
+		msgs     *pb.ListMessagesResponse
+		anchored bool
 	)
 	g.Go(func() error {
 		res, err := h.client.Channels.GetChannel(gctx, &pb.GetChannelRequest{ChannelId: chID})
@@ -194,7 +199,7 @@ func (h *Handler) channelView(ctx context.Context, u *pb.User, team *pb.Team, ch
 		return nil
 	})
 	g.Go(func() error {
-		res, err := h.client.Messages.ListMessages(gctx, &pb.ListMessagesRequest{ChannelId: chID, Limit: pageSize})
+		res, more, err := h.history(gctx, chID, focus)
 		if err != nil {
 			// A voice channel has no messages to list.
 			if code := drpc.Err(err).Code; code == ierrors.CodePermissionDenied || code == ierrors.CodeFailedPrecondition {
@@ -202,7 +207,7 @@ func (h *Handler) channelView(ctx context.Context, u *pb.User, team *pb.Team, ch
 			}
 			return err
 		}
-		msgs = res
+		msgs, anchored = res, more
 		return nil
 	})
 	if err := g.Wait(); err != nil {
@@ -217,6 +222,7 @@ func (h *Handler) channelView(ctx context.Context, u *pb.User, team *pb.Team, ch
 		Title:     render.Title(ch),
 		Member:    ch.Role != pb.ChannelRole_CHANNEL_ROLE_UNSPECIFIED,
 		Moderator: moderator(u, team, ch),
+		Archived:  ch.ArchivedAt != nil,
 		MeID:      u.GetId(),
 	}
 	if ch.Type == pb.ChannelType_CHANNEL_TYPE_VOICE {
@@ -228,17 +234,61 @@ func (h *Handler) channelView(ctx context.Context, u *pb.User, team *pb.Team, ch
 	}
 	if msgs != nil {
 		view.Messages = h.render.Messages(msgs.Messages, u, view.Moderator)
-		view.HasMore = msgs.HasMore
+		view.HasMore, view.Anchored = msgs.HasMore, anchored
 		if n := len(msgs.Messages); n > 0 {
 			view.Newest, view.Oldest = msgs.Messages[0].Id, msgs.Messages[n-1].Id
+		}
+		for _, m := range view.Messages {
+			m.Focus = focus != "" && m.Id == focus
 		}
 	}
 	if ch.Peer != nil {
 		if p, err := h.client.Users.GetPresence(ctx, &pb.GetPresenceRequest{UserIds: []string{ch.Peer.Id}}); err == nil {
-			view.PeerOnline = len(p.OnlineUserIds) > 0
+			view.PeerStatus = p.Statuses[ch.Peer.Id]
 		}
 	}
 	return view, nil
+}
+
+// history loads a channel's newest messages, or with focus the messages
+// around that one; more reports newer messages beyond those loaded.
+func (h *Handler) history(ctx context.Context, chID, focus string) (*pb.ListMessagesResponse, bool, error) {
+	if focus == "" {
+		res, err := h.client.Messages.ListMessages(ctx, &pb.ListMessagesRequest{ChannelId: chID, Limit: pageSize})
+		return res, false, err
+	}
+	g, gctx := errgroup.WithContext(ctx)
+	var (
+		target       *pb.Message
+		older, newer *pb.ListMessagesResponse
+	)
+	g.Go(func() error {
+		res, err := h.client.Messages.GetMessage(gctx, &pb.GetMessageRequest{ChannelId: chID, MessageId: focus})
+		if err != nil {
+			if code := drpc.Err(err).Code; code == ierrors.CodeNotFound || code == ierrors.CodeInvalidArgument {
+				return nil
+			}
+			return err
+		}
+		target = res.Message
+		return nil
+	})
+	g.Go(func() (err error) {
+		older, err = h.client.Messages.ListMessages(gctx, &pb.ListMessagesRequest{ChannelId: chID, BeforeId: focus, Limit: pageSize / 2})
+		return
+	})
+	g.Go(func() (err error) {
+		newer, err = h.client.Messages.ListMessages(gctx, &pb.ListMessagesRequest{ChannelId: chID, AfterId: focus, Limit: pageSize / 2})
+		return
+	})
+	if err := g.Wait(); err != nil {
+		return nil, false, err
+	}
+	if target == nil || target.RootId != "" {
+		return h.history(ctx, chID, "")
+	}
+	list := append(append(newer.Messages, target), older.Messages...)
+	return &pb.ListMessagesResponse{Messages: list, HasMore: older.HasMore}, newer.HasMore, nil
 }
 
 func (h *Handler) channelPage(w http.ResponseWriter, r *http.Request) {
@@ -260,7 +310,7 @@ func (h *Handler) channelPage(w http.ResponseWriter, r *http.Request) {
 			h.fail(w, r, err)
 			return
 		}
-		view, err := h.channelView(ctx, u, team, chID)
+		view, err := h.channelView(ctx, u, team, chID, msgParam(r))
 		if err != nil {
 			h.fail(w, r, err)
 			return
@@ -299,7 +349,7 @@ func (h *Handler) channelPage(w http.ResponseWriter, r *http.Request) {
 	})
 	g.Go(func() error {
 		var err error
-		view, err = h.channelView(gctx, u, team, chID)
+		view, err = h.channelView(gctx, u, team, chID, msgParam(r))
 		return err
 	})
 	if err := g.Wait(); err != nil {
@@ -321,16 +371,18 @@ func (h *Handler) lists(ctx context.Context, team *pb.Team, active string) (*ren
 	if err != nil {
 		return nil, err
 	}
+	var unread int
+	if t, err := h.client.Messages.ListThreads(ctx, &pb.ListThreadsRequest{TeamId: team.Id}); err == nil {
+		unread = int(t.UnreadCount)
+	}
 	channels, voice, direct := render.Split(res.Channels)
-	online := map[string]bool{}
+	var status map[string]pb.Status
 	if peers := render.Peers(direct); len(peers) > 0 {
 		if p, err := h.client.Users.GetPresence(ctx, &pb.GetPresenceRequest{UserIds: peers}); err == nil {
-			for _, id := range p.OnlineUserIds {
-				online[id] = true
-			}
+			status = p.Statuses
 		}
 	}
-	lists := &render.Lists{Team: team, Channels: channels, Voice: voice, DMs: direct, Active: active, Online: online}
+	lists := &render.Lists{Team: team, Channels: channels, Voice: voice, DMs: direct, Active: active, Status: status, ThreadsUnread: unread}
 	// Who talks where is a nicety: the page shows without it.
 	if len(voice) > 0 {
 		if vs, err := h.client.Voice.ListVoiceStates(ctx, &pb.ListVoiceStatesRequest{TeamId: team.Id}); err == nil {
@@ -450,9 +502,9 @@ func (h *Handler) browseModal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.fragment(w, http.StatusOK, "browse", struct {
-		Team     *pb.Team
-		Channels []*pb.Channel
-	}{team, res.Channels})
+		Team               *pb.Team
+		Channels, Archived []*pb.Channel
+	}{team, res.Channels, res.Archived})
 }
 
 func (h *Handler) channelTarget(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -503,55 +555,6 @@ func (h *Handler) leaveChannel(w http.ResponseWriter, r *http.Request) {
 	h.navigate(w, r, "/t/"+team.Name+"/ch/"+next, true)
 }
 
-type channelSettingsData struct {
-	Team    *pb.Team
-	Channel *pb.Channel
-	Saved   bool
-}
-
-// channelSettings shows the settings of a channel to those who may change
-// them.
-func (h *Handler) channelSettings(w http.ResponseWriter, r *http.Request) {
-	u, team, ctx, cancel := h.teamFor(w, r)
-	if team == nil {
-		return
-	}
-	defer cancel()
-	chID, ok := h.channelTarget(w, r)
-	if !ok {
-		return
-	}
-	res, err := h.client.Channels.GetChannel(ctx, &pb.GetChannelRequest{ChannelId: chID})
-	if err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	ch := res.Channel
-	if ch.TeamId != team.Id || ch.Role == pb.ChannelRole_CHANNEL_ROLE_UNSPECIFIED || !moderator(u, team, ch) {
-		h.fail(w, r, ierrors.PermissionDenied())
-		return
-	}
-	h.fragment(w, http.StatusOK, "channel-settings", channelSettingsData{Team: team, Channel: ch})
-}
-
-func (h *Handler) setChannelVoice(w http.ResponseWriter, r *http.Request) {
-	_, team, ctx, cancel := h.teamFor(w, r)
-	if team == nil {
-		return
-	}
-	defer cancel()
-	chID, ok := h.channelTarget(w, r)
-	if !ok {
-		return
-	}
-	res, err := h.client.Channels.SetChannelVoice(ctx, &pb.SetChannelVoiceRequest{ChannelId: chID, Enabled: r.PostFormValue("enabled") == "1"})
-	if err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	h.fragment(w, http.StatusOK, "channel-settings", channelSettingsData{Team: team, Channel: res.Channel, Saved: true})
-}
-
 type peopleData struct {
 	Heading     string
 	SearchURL   string
@@ -588,10 +591,7 @@ func (h *Handler) peopleModal(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "people", peopleData{
-		Heading: "Message someone", SearchURL: "/t/" + team.Name + "/people/search",
-		ActionURL: "/t/" + team.Name + "/dm", ActionLabel: "Message", Members: members,
-	})
+	h.fragment(w, http.StatusOK, "dm-picker", peopleData{SearchURL: "/t/" + team.Name + "/people/search", ActionURL: "/t/" + team.Name + "/dm", Members: members})
 }
 
 func (h *Handler) peopleSearch(w http.ResponseWriter, r *http.Request) {
@@ -605,16 +605,27 @@ func (h *Handler) peopleSearch(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "people-results", peopleData{ActionURL: "/t/" + team.Name + "/dm", ActionLabel: "Message", Members: members})
+	h.fragment(w, http.StatusOK, "dm-results", peopleData{Members: members})
 }
 
+// maxPicked bounds the people a conversation is started with.
+const maxPicked = 7
+
+// openDirect opens the conversation with the people picked: one for a
+// direct message, more for a group.
 func (h *Handler) openDirect(w http.ResponseWriter, r *http.Request) {
 	_, team, ctx, cancel := h.teamFor(w, r)
 	if team == nil {
 		return
 	}
 	defer cancel()
-	res, err := h.client.Channels.OpenDirectChannel(ctx, &pb.OpenDirectChannelRequest{UserId: r.PostFormValue("user_id")})
+	_ = r.ParseForm()
+	picked := r.PostForm["user_id"]
+	if len(picked) == 0 || len(picked) > maxPicked {
+		h.fail(w, r, ierrors.InvalidArgument("pick one to seven people"))
+		return
+	}
+	res, err := h.client.Channels.OpenGroupChannel(ctx, &pb.OpenGroupChannelRequest{UserIds: picked})
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -806,8 +817,8 @@ func (h *Handler) renderChannelMembers(w http.ResponseWriter, r *http.Request, c
 	}
 	h.fragment(w, http.StatusOK, "channel-members", channelMembersData{
 		Team: team, ChannelID: chID, Members: members,
-		CanAdd:    ch.Type != pb.ChannelType_CHANNEL_TYPE_DIRECT,
-		CanRemove: ch.Type != pb.ChannelType_CHANNEL_TYPE_DIRECT && moderator(u, team, ch),
+		CanAdd:    !render.Conversation(ch),
+		CanRemove: !render.Conversation(ch) && moderator(u, team, ch),
 	})
 }
 
@@ -988,13 +999,14 @@ func (h *Handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 type threadView struct {
-	Root    *render.Message
-	Replies []*render.Message
-	HasMore bool
-	Oldest  string
-	Title   string
-	Member  bool
-	Voice   bool
+	Root      *render.Message
+	Replies   []*render.Message
+	HasMore   bool
+	Oldest    string
+	Title     string
+	Member    bool
+	Following bool
+	Voice     bool
 }
 
 // threadPanel shows a thread, or with ?before its older replies.
@@ -1041,12 +1053,13 @@ func (h *Handler) threadPanel(w http.ResponseWriter, r *http.Request) {
 	}
 	mod := moderator(u, team, ch)
 	view := threadView{
-		Root:    h.render.Message(thread.Root, u, mod),
-		Replies: h.render.Messages(thread.Replies, u, mod),
-		HasMore: thread.HasMore,
-		Title:   render.Title(ch),
-		Member:  ch.Role != pb.ChannelRole_CHANNEL_ROLE_UNSPECIFIED,
-		Voice:   ch.VoiceEnabled,
+		Root:      h.render.Message(thread.Root, u, mod),
+		Replies:   h.render.Messages(thread.Replies, u, mod),
+		HasMore:   thread.HasMore,
+		Title:     render.Title(ch),
+		Member:    ch.Role != pb.ChannelRole_CHANNEL_ROLE_UNSPECIFIED,
+		Following: thread.Following,
+		Voice:     ch.VoiceEnabled,
 	}
 	if len(thread.Replies) > 0 {
 		view.Oldest = thread.Replies[0].Id
@@ -1054,6 +1067,11 @@ func (h *Handler) threadPanel(w http.ResponseWriter, r *http.Request) {
 	if before != "" {
 		h.fragment(w, http.StatusOK, "older-replies-page", view)
 		return
+	}
+	if thread.Following {
+		if _, err := h.client.Messages.MarkThreadRead(ctx, &pb.MarkThreadReadRequest{ChannelId: chID, RootId: rootID}); err != nil {
+			h.logger.Debug("failed to mark a thread read", zap.Error(err))
+		}
 	}
 	h.fragment(w, http.StatusOK, "thread", view)
 }
@@ -1124,7 +1142,7 @@ func (h *Handler) mentionSuggestions(w http.ResponseWriter, r *http.Request) {
 			items = append(items, suggestion{Name: u.Username, User: u})
 		}
 	}
-	if ch.Type != pb.ChannelType_CHANNEL_TYPE_DIRECT {
+	if !render.Conversation(ch) {
 		for _, e := range everyone {
 			if strings.HasPrefix(e.Name, q) && len(items) < maxSuggestions {
 				items = append(items, e)

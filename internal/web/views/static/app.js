@@ -12,6 +12,11 @@
     return document.getElementById("channel-view");
   }
 
+  // The main pane: a channel, or the threads the user follows.
+  function place() {
+    return view() || document.getElementById("threads-view");
+  }
+
   function send(msg) {
     if (socket) socket.send(JSON.stringify(msg));
   }
@@ -19,15 +24,16 @@
   // Tell the server what this tab shows, so it knows where new messages go
   // and what to mark read.
   function announce(resync) {
-    var v = view();
+    var v = place();
     if (!v) return;
     send({
       op: "view",
       team_id: v.dataset.team,
       team_name: v.dataset.teamName,
-      channel_id: v.dataset.channel,
+      channel_id: v.dataset.channel || "",
       last_id: v.dataset.newest || "",
       moderator: v.dataset.moderator ? "1" : "",
+      anchored: v.dataset.anchored ? "1" : "",
       resync: resync ? "1" : ""
     });
   }
@@ -39,7 +45,8 @@
   }
 
   function announceThread() {
-    send({ op: "thread", root_id: threadRoot() });
+    var t = document.getElementById("thread-view");
+    send({ op: "thread", root_id: threadRoot(), channel_id: t ? t.dataset.channel : "" });
   }
 
   function closeThread() {
@@ -51,6 +58,30 @@
     return true;
   }
 
+  var wide = window.matchMedia("(min-width: 821px)");
+  // Where the side pane sits beside the channel rather than over it.
+  var roomy = window.matchMedia("(min-width: 1181px)");
+
+  // Search shares the side pane with threads; it stays open beside the
+  // channel a result opened, where there is room.
+  function openSearch() {
+    var v = place();
+    var input = document.querySelector("[data-search-input]");
+    if (input) {
+      input.focus();
+      input.select();
+      return;
+    }
+    if (v) htmx.ajax("GET", "/t/" + v.dataset.teamName + "/search", { target: "#thread", swap: "innerHTML" });
+  }
+
+  // A link to a message opens its channel around it. htmx settles a
+  // message's new class late, so its data attribute marks it.
+  function focusMessage() {
+    var m = document.querySelector("#main .msg[data-focus]");
+    if (m) m.scrollIntoView({ block: "center" });
+  }
+
   function scrollThread(always) {
     var box = document.getElementById("thread-scroll");
     if (!box) return;
@@ -59,7 +90,7 @@
 
   // The tab's title counts unread mentions, so they show from any tab.
   function updateTitle() {
-    var v = view();
+    var v = place();
     if (!v || !v.dataset.title) return;
     var count = 0;
     document.querySelectorAll(".channel-lists .mentions").forEach(function (b) {
@@ -123,24 +154,22 @@
   }
 
   function markActive() {
-    var v = view();
+    var v = place();
     if (!v) return;
     updateTitle();
-    var id = v.dataset.channel;
+    var id = v.dataset.channel || "threads";
     document.querySelectorAll(".sb-link").forEach(function (a) {
-      var on = a.dataset.channel === id;
+      var on = (a.dataset.channel || a.dataset.place) === id;
       a.classList.toggle("active", on);
-      if (on) {
-        a.setAttribute("aria-current", "page");
-        var dot = a.querySelector(".dot, .mentions");
-        if (dot) {
-          dot.className = "dot";
-          dot.textContent = "";
-          dot.removeAttribute("title");
-          dot.setAttribute("aria-hidden", "true");
-        }
-      } else {
-        a.removeAttribute("aria-current");
+      if (on) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
+      // Opening a channel reads it; opening Threads does not read them.
+      var dot = on && a.dataset.channel ? a.querySelector(".dot, .mentions") : null;
+      if (dot) {
+        dot.className = "dot";
+        dot.textContent = "";
+        dot.removeAttribute("title");
+        dot.setAttribute("aria-hidden", "true");
       }
     });
     var toggle = document.getElementById("nav-toggle");
@@ -236,14 +265,6 @@
         })
         .catch(function () { closeSuggest(box); });
     }, 120);
-  }
-
-  function moveSuggest(box, step) {
-    var items = Array.prototype.slice.call(box.querySelectorAll("[role=option]"));
-    var at = items.findIndex(function (li) { return li.getAttribute("aria-selected") === "true"; });
-    var next = (at + step + items.length) % items.length;
-    items.forEach(function (li, i) { li.setAttribute("aria-selected", i === next ? "true" : "false"); });
-    items[next].scrollIntoView({ block: "nearest" });
   }
 
   function acceptSuggest(ta, li) {
@@ -491,8 +512,85 @@
     }, true);
   });
 
+  // The people picked for a conversation are chips in its form.
+  var maxPicked = 7;
+
+  function pickedIDs() {
+    var box = document.getElementById("dm-picked");
+    if (!box) return [];
+    return Array.prototype.map.call(box.querySelectorAll("input[name=user_id]"), function (i) { return i.value; });
+  }
+
+  function syncPicks() {
+    var ids = pickedIDs();
+    document.querySelectorAll(".pick[data-pick]").forEach(function (b) {
+      b.setAttribute("aria-pressed", ids.indexOf(b.dataset.pick) >= 0 ? "true" : "false");
+    });
+    var go = document.querySelector("[data-dm-go]");
+    if (go) {
+      go.disabled = ids.length === 0;
+      go.textContent = ids.length > 1 ? "Start a group of " + (ids.length + 1) : "Start conversation";
+    }
+  }
+
+  function togglePick(button) {
+    var box = document.getElementById("dm-picked");
+    if (!box) return;
+    var id = button.dataset.pick;
+    var chip = Array.prototype.find.call(box.querySelectorAll(".chip"), function (c) { return c.dataset.id === id; });
+    if (chip) {
+      chip.remove();
+    } else if (pickedIDs().length >= maxPicked) {
+      toast("A group holds up to eight people.", "error");
+      expireToasts();
+      return;
+    } else {
+      chip = document.createElement("span");
+      chip.className = "chip";
+      chip.dataset.id = id;
+      var input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "user_id";
+      input.value = id;
+      var name = document.createElement("span");
+      name.className = "chip-name";
+      name.textContent = button.dataset.pickName;
+      var remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "chip-remove";
+      remove.setAttribute("aria-label", "Remove " + button.dataset.pickName);
+      remove.textContent = "\u00d7";
+      chip.append(input, name, remove);
+      box.appendChild(chip);
+    }
+    syncPicks();
+  }
+
+  // The quick switcher: Ctrl or Cmd and K.
+  function openSwitcher() {
+    var input = document.querySelector("[data-switch-input]");
+    if (input) {
+      input.select();
+      return;
+    }
+    var v = place();
+    if (v) htmx.ajax("GET", "/t/" + v.dataset.teamName + "/switch", { target: "#modal", swap: "innerHTML" });
+  }
+
+  function moveOption(list, step) {
+    var items = Array.prototype.slice.call(list.querySelectorAll("[role=option]"));
+    if (!items.length) return;
+    var at = items.findIndex(function (li) { return li.getAttribute("aria-selected") === "true"; });
+    var next = (at + step + items.length) % items.length;
+    items.forEach(function (li, i) { li.setAttribute("aria-selected", i === next ? "true" : "false"); });
+    items[next].scrollIntoView({ block: "nearest" });
+  }
+
+  var mac = /Mac|iPhone|iPad/.test(navigator.platform);
+
   htmx.onLoad(function (elt) {
     localTimes(elt);
+    if (mac) elt.querySelectorAll("[data-shortcut]").forEach(function (k) { k.textContent = "\u2318K"; });
   });
 
   document.body.addEventListener("htmx:wsOpen", function (e) {
@@ -523,19 +621,33 @@
   document.body.addEventListener("htmx:afterSwap", function (e) {
     dropDetachedRecording();
     if (e.detail.target && e.detail.target.id === "thread") {
+      var toggle = document.getElementById("nav-toggle");
+      if (toggle) toggle.checked = false;
       announceThread();
+      var input = document.querySelector("[data-search-input]");
+      if (input) {
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+        return;
+      }
       scrollThread(true);
       var reply = document.querySelector("#reply-composer textarea");
-      if (reply && window.matchMedia("(min-width: 821px)").matches) reply.focus();
+      if (reply && wide.matches) reply.focus();
+      return;
+    }
+    if (e.detail.target && e.detail.target.id === "people-results") {
+      syncPicks();
       return;
     }
     if (e.detail.target && e.detail.target.id === "main") {
-      closeThread();
+      if (document.getElementById("switcher")) closeModal();
+      if (!(roomy.matches && document.querySelector("#thread [data-keep]"))) closeThread();
       markActive();
       announce(false);
       openLinkedThread();
+      focusMessage();
       var ta = document.querySelector("#composer textarea");
-      if (ta && window.matchMedia("(min-width: 821px)").matches) ta.focus();
+      if (ta && wide.matches && !document.querySelector("#main .msg[data-focus]")) ta.focus();
     }
   });
 
@@ -550,6 +662,10 @@
     if (t.id.indexOf("replies-") === 0) scrollThread(false);
     if (t.id === "notify") showNotice(t.dataset);
     if (t.id === "channel-lists" || t.id.indexOf("unread-") === 0) updateTitle();
+    // A pin or save elsewhere refreshes the list showing it.
+    var list = t.id.indexOf("pins-btn-") === 0 ? document.querySelector('[data-pins="' + t.id.slice(9) + '"]')
+      : t.id === "saved-changed" ? document.getElementById("saved-list") : null;
+    if (list) htmx.trigger(list, "refresh");
   });
 
   document.body.addEventListener("closeModal", closeModal);
@@ -622,6 +738,15 @@
       closeThread();
       return;
     }
+    var preset = target.closest("[data-status-emoji]");
+    var clear = target.closest("[data-status-clear]");
+    if (preset || clear) {
+      var fields = (preset || clear).closest("form").elements;
+      fields.emoji.value = preset ? preset.dataset.statusEmoji : "";
+      fields.text.value = preset ? preset.dataset.statusText : "";
+      fields.text.focus();
+      return;
+    }
     var closer = target.closest("[data-close-modal]");
     if (closer && (closer === target || closer.tagName === "BUTTON")) {
       closeModal();
@@ -648,7 +773,21 @@
     var remove = target.closest(".chip-remove");
     if (remove) {
       remove.closest(".chip").remove();
+      syncPicks();
       return;
+    }
+    var pick = target.closest(".pick[data-pick]");
+    if (pick) {
+      togglePick(pick);
+      return;
+    }
+    var card = target.closest("[data-thread-card]");
+    if (card && card.classList.contains("unread")) {
+      card.classList.remove("unread");
+      var mark = card.querySelector(".dot");
+      if (mark) mark.remove();
+      var dot = document.getElementById("threads-unread");
+      if (dot && !document.querySelector("[data-thread-card].unread")) dot.className = "dot";
     }
     var copy = target.closest("[data-copy]");
     if (copy && navigator.clipboard) {
@@ -700,7 +839,7 @@
     if (box && !box.hidden) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
-        moveSuggest(box, e.key === "ArrowDown" ? 1 : -1);
+        moveOption(box, e.key === "ArrowDown" ? 1 : -1);
         return;
       }
       if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey && !e.isComposing) {
@@ -721,6 +860,30 @@
       var m = document.getElementById("modal");
       if (m && m.innerHTML !== "") closeModal();
       else closeThread();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "F" || e.key === "f")) {
+      e.preventDefault();
+      openSearch();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === "k" || e.key === "K")) {
+      e.preventDefault();
+      openSwitcher();
+      return;
+    }
+    if (t instanceof HTMLInputElement && t.hasAttribute("data-switch-input")) {
+      var list = document.getElementById("switch-results");
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        moveOption(list, e.key === "ArrowDown" ? 1 : -1);
+        return;
+      }
+      if (e.key === "Enter" && !e.isComposing) {
+        e.preventDefault();
+        var item = list.querySelector("[aria-selected=true] .switch-item");
+        if (item) item.click();
+        return;
+      }
     }
     if (!(t instanceof HTMLTextAreaElement) || !isComposer(t.form)) return;
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !touch.matches) {
@@ -754,5 +917,6 @@
     markActive();
     refreshNotifySetting();
     openLinkedThread();
+    focusMessage();
   });
 })();

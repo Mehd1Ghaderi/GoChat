@@ -175,3 +175,16 @@ func TestReactions(t *testing.T) {
 		t.Fatalf("empty bar: %q %v", buf.String(), err)
 	}
 }
+
+func TestHighlight(t *testing.T) {
+	got := string(Highlight("Deploying <b>now</b>,\n then deploy & rest", []string{"deploy"}))
+	want := "<mark>Deploying</mark> &lt;b&gt;now&lt;/b&gt;, then <mark>deploy</mark> &amp; rest"
+	if got != want {
+		t.Fatalf("Highlight = %q, want %q", got, want)
+	}
+	long := strings.Repeat("filler words here ", 40) + "the needle sits here " + strings.Repeat("and more after ", 40)
+	got = string(Highlight(long, []string{"needl"}))
+	if !strings.HasPrefix(got, "…") || !strings.HasSuffix(got, "…") || !strings.Contains(got, "<mark>needle</mark>") {
+		t.Fatalf("long Highlight = %q", got)
+	}
+}

@@ -19,10 +19,14 @@ type Message struct {
 	Edited    bool
 	Mine      bool
 	CanDelete bool
-	// Mentioned is set when the message calls out its reader.
+	// Mentioned is set when the message calls out its reader, Focus when it
+	// is the one a link opened.
 	Mentioned bool
+	Focus     bool
 	OOB       bool
-	bar       ReactionsView
+	// Saved is whether the reader saved the message.
+	Saved bool
+	bar   ReactionsView
 }
 
 // Message prepares m for the viewer meID; moderators may delete any message.
@@ -36,6 +40,7 @@ func (r *Renderer) Message(m *pb.Message, me *pb.User, moderator bool) *Message 
 		Mine:      mine,
 		CanDelete: mine || moderator,
 		Mentioned: !mine && Mentions(m, me),
+		Saved:     m.GetSaved(),
 		bar:       Reactions(m.GetChannelId(), m.GetId(), m.GetRootId(), m.GetReactions(), me, false),
 	}
 }
@@ -67,19 +72,28 @@ type Lists struct {
 	DMs      []*pb.Channel
 	// VoiceStates holds who talks in each voice channel, by channel id.
 	VoiceStates map[string]*pb.VoiceChannelState
-	Active      string
-	Online      map[string]bool
-	OOB         bool
+	// Active is the open channel's id, or "threads".
+	Active string
+	// Status holds the peers who are not offline.
+	Status map[string]pb.Status
+	// ThreadsUnread counts the followed threads with unread replies.
+	ThreadsUnread int
+	OOB           bool
+}
+
+// Conversation reports whether ch is a direct or group conversation.
+func Conversation(ch *pb.Channel) bool {
+	return ch != nil && (ch.Type == pb.ChannelType_CHANNEL_TYPE_DIRECT || ch.Type == pb.ChannelType_CHANNEL_TYPE_GROUP)
 }
 
 // Split separates a team's text channels, its voice channels and the
-// direct ones.
+// conversations.
 func Split(all []*pb.Channel) (channels, voice, direct []*pb.Channel) {
 	for _, ch := range all {
-		switch ch.Type {
-		case pb.ChannelType_CHANNEL_TYPE_DIRECT:
+		switch {
+		case Conversation(ch):
 			direct = append(direct, ch)
-		case pb.ChannelType_CHANNEL_TYPE_VOICE:
+		case ch.Type == pb.ChannelType_CHANNEL_TYPE_VOICE:
 			voice = append(voice, ch)
 		default:
 			channels = append(channels, ch)
@@ -130,17 +144,34 @@ type ChannelView struct {
 	Oldest     string
 	Newest     string
 	Moderator  bool
-	PeerOnline bool
+	PeerStatus pb.Status
 	// OpenThread is the root of a thread to open with the channel.
 	OpenThread string
+	// Anchored is set when newer messages than those shown exist: the view
+	// shows an older part of the channel and takes no new messages.
+	Anchored bool
+	Archived bool
 	// Voice is who talks in a voice channel, MeID the viewer.
 	Voice *pb.VoiceChannelState
 	MeID  string
+	OOB   bool
+}
+
+// Manage reports whether the viewer may change the channel's settings.
+func (v *ChannelView) Manage() bool {
+	return v.Moderator && v.Member && !Conversation(v.Channel)
 }
 
 func Title(ch *pb.Channel) string {
 	if ch.Peer != nil {
 		return DisplayName(ch.Peer)
+	}
+	if len(ch.Peers) > 0 {
+		names := make([]string, len(ch.Peers))
+		for i, p := range ch.Peers {
+			names[i] = DisplayName(p)
+		}
+		return strings.Join(names, ", ")
 	}
 	return ch.DisplayName
 }
@@ -152,7 +183,7 @@ type Typing struct {
 
 type Presence struct {
 	ID     string
-	Online bool
+	Status pb.Status
 }
 
 type Toast struct {
@@ -245,4 +276,28 @@ func Excerpt(m *pb.Message) string {
 		}
 	}
 	return text
+}
+
+// ThreadCard is a followed thread as the threads view lists it.
+type ThreadCard struct {
+	Root         *pb.Message
+	Channel      *pb.Channel
+	Where        string
+	Excerpt      template.HTML
+	Unread       bool
+	Participants []*pb.User
+}
+
+func ThreadCards(list []*pb.ThreadSummary) []ThreadCard {
+	out := make([]ThreadCard, 0, len(list))
+	for _, t := range list {
+		if t.GetRoot() == nil || t.GetChannel() == nil {
+			continue
+		}
+		out = append(out, ThreadCard{
+			Root: t.Root, Channel: t.Channel, Where: Title(t.Channel), Excerpt: Highlight(t.Root.Content, nil),
+			Unread: t.Unread, Participants: t.Participants,
+		})
+	}
+	return out
 }

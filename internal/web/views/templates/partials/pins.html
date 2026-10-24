@@ -1,0 +1,49 @@
+{{define "pins"}}
+<section class="thread-view" id="pins-view" data-keep aria-labelledby="pins-title">
+  <header class="thread-header">
+    <h2 id="pins-title">Pinned</h2>
+    <span class="thread-where">{{.Title}}</span>
+    <button class="icon-btn" type="button" data-close-thread aria-label="Close pinned messages" title="Close">{{icon "close"}}</button>
+  </header>
+  {{template "pins-list" .}}
+</section>
+{{end}}
+
+{{define "pins-list"}}
+<div class="thread-scroll kept-list" id="pins-list" data-pins="{{.Channel.Id}}" hx-get="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/pins?list=1" hx-trigger="refresh" hx-swap="outerHTML">
+  {{range .Hits}}{{template "kept" (dict "Hit" . "Pin" true)}}{{else}}
+  <div class="kept-empty">{{icon "pin"}}<p>Nothing is pinned yet.</p><p class="muted">Pin a message from its menu to keep it at hand for everyone here.</p></div>
+  {{end}}
+</div>
+{{end}}
+
+{{define "saved"}}
+<section class="thread-view" id="saved-view" data-keep aria-labelledby="saved-title">
+  <header class="thread-header">
+    <h2 id="saved-title">Saved</h2>
+    <span class="thread-where">Only you see these</span>
+    <button class="icon-btn" type="button" data-close-thread aria-label="Close saved messages" title="Close">{{icon "close"}}</button>
+  </header>
+  {{template "saved-list" .}}
+</section>
+{{end}}
+
+{{define "saved-list"}}
+<div class="thread-scroll kept-list" id="saved-list" hx-get="/t/{{.Team.Name}}/saved?list=1" hx-trigger="refresh" hx-swap="outerHTML">
+  {{range .Hits}}{{template "kept" (dict "Hit" . "Pin" false)}}{{else}}
+  <div class="kept-empty">{{icon "bookmark"}}<p>No saved messages.</p><p class="muted">Save a message from its menu to come back to it later.</p></div>
+  {{end}}
+</div>
+{{end}}
+
+{{define "kept"}}{{$m := .Hit.Message}}
+<div class="kept">
+  {{template "hit" .Hit}}
+  {{if .Pin}}<button class="icon-btn sm kept-drop" hx-post="/m/{{$m.ChannelId}}/{{$m.Id}}/pin{{with $m.RootId}}?root={{.}}{{end}}" hx-vals='{"pinned": "0"}' hx-target="closest .kept" hx-swap="delete" aria-label="Unpin message" title="Unpin">{{icon "close"}}</button>
+  {{else}}<button class="icon-btn sm kept-drop" hx-post="/m/{{$m.ChannelId}}/{{$m.Id}}/save{{with $m.RootId}}?root={{.}}{{end}}" hx-vals='{"saved": "0"}' hx-target="closest .kept" hx-swap="delete" aria-label="Remove from saved" title="Remove from saved">{{icon "close"}}</button>{{end}}
+</div>
+{{end}}
+
+{{define "pins-button"}}<button class="icon-btn pins-btn" id="pins-btn-{{.Channel}}" type="button"{{if .OOB}} hx-swap-oob="outerHTML"{{end}} hx-get="/t/{{.Team}}/ch/{{.Channel}}/pins" hx-target="#thread" aria-label="Pinned messages{{with .Count}}: {{.}}{{end}}" title="Pinned messages">{{icon "pin"}}{{with .Count}}<span class="count">{{.}}</span>{{end}}</button>{{end}}
+
+{{define "saved-changed"}}<div id="saved-changed" hidden hx-swap-oob="outerHTML"></div>{{end}}

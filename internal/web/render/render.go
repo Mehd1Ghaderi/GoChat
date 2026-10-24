@@ -121,8 +121,8 @@ func (r *Renderer) Fragment(w io.Writer, name string, data any) error {
 // MessageBytes renders a message fragment once per message, edit and
 // variant, for every socket that shows it. The bytes are shared: read only.
 func (r *Renderer) MessageBytes(name string, m *Message) ([]byte, error) {
-	key := fmt.Sprintf("%s/%s/%s/%t/%t/%t/%t/%d/%d/%s", name, m.Id, m.GetEditedAt().AsTime().Format(time.RFC3339Nano), m.Mine, m.CanDelete, m.Mentioned, m.OOB,
-		m.ReplyCount, m.GetLastReplyAt().AsTime().UnixNano(), m.bar.key())
+	key := fmt.Sprintf("%s/%s/%s/%t/%t/%t/%t/%t/%t/%d/%d/%s", name, m.Id, m.GetEditedAt().AsTime().Format(time.RFC3339Nano), m.Mine, m.CanDelete, m.Mentioned, m.OOB,
+		m.Pinned, m.Saved, m.ReplyCount, m.GetLastReplyAt().AsTime().UnixNano(), m.bar.key())
 	if b, ok := r.events.Get(key); ok {
 		return b, nil
 	}
@@ -166,10 +166,7 @@ func (r *Renderer) funcs() template.FuncMap {
 			if ch == nil {
 				return ""
 			}
-			if ch.Peer != nil {
-				return DisplayName(ch.Peer)
-			}
-			return ch.DisplayName
+			return Title(ch)
 		},
 		"unread": Unread,
 		"dict": func(kv ...any) (map[string]any, error) {
@@ -186,10 +183,17 @@ func (r *Renderer) funcs() template.FuncMap {
 			}
 			return m, nil
 		},
-		"isPrivate": func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_PRIVATE },
-		"isDirect":  func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_DIRECT },
-		"isVoice":   func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_VOICE },
-		"isAdmin":   func(t *pb.Team) bool { return t != nil && t.Role == pb.TeamRole_TEAM_ROLE_ADMIN },
+		"isPrivate":      func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_PRIVATE },
+		"isDirect":       func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_DIRECT },
+		"isVoice":        func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_VOICE },
+		"isGroup":        func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_GROUP },
+		"isConversation": Conversation,
+		"inc":            func(n int) int { return n + 1 },
+		"statusClass":    StatusClass,
+		"statusLabel":    StatusLabel,
+		"chosen":         Chosen,
+		"emojiChar":      EmojiChar,
+		"isAdmin":        func(t *pb.Team) bool { return t != nil && t.Role == pb.TeamRole_TEAM_ROLE_ADMIN },
 		"isSystemAdmin": func(u *pb.User) bool {
 			return u != nil && u.Role == pb.SystemRole_SYSTEM_ROLE_ADMIN
 		},

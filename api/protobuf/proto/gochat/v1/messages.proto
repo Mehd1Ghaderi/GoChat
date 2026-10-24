@@ -14,6 +14,122 @@ service MessageService {
   // ListThread returns a thread's root and its replies.
   rpc ListThread(ListThreadRequest) returns (ListThreadResponse);
   rpc React(ReactRequest) returns (ReactResponse);
+  // SearchMessages finds the messages of a team, and of the caller's direct
+  // conversations, that match a query, newest first.
+  rpc SearchMessages(SearchMessagesRequest) returns (SearchMessagesResponse);
+  // ListThreads lists the threads the caller follows in a team and its
+  // conversations, latest reply first.
+  rpc ListThreads(ListThreadsRequest) returns (ListThreadsResponse);
+  rpc MarkThreadRead(MarkThreadReadRequest) returns (MarkThreadReadResponse);
+  rpc FollowThread(FollowThreadRequest) returns (FollowThreadResponse);
+  // PinMessage pins a message in its channel for everyone, or unpins it.
+  rpc PinMessage(PinMessageRequest) returns (PinMessageResponse);
+  rpc ListPinned(ListPinnedRequest) returns (ListPinnedResponse);
+  // SaveMessage keeps a message in the caller's own list, or drops it.
+  rpc SaveMessage(SaveMessageRequest) returns (SaveMessageResponse);
+  rpc ListSaved(ListSavedRequest) returns (ListSavedResponse);
+}
+
+message PinMessageRequest {
+  string channel_id = 1;
+  string message_id = 2;
+  string root_id = 3;
+  bool pinned = 4;
+}
+
+message PinMessageResponse {
+  Message message = 1;
+}
+
+message ListPinnedRequest {
+  string channel_id = 1;
+}
+
+message ListPinnedResponse {
+  // Newest first.
+  repeated Message messages = 1;
+}
+
+message SaveMessageRequest {
+  string channel_id = 1;
+  string message_id = 2;
+  string root_id = 3;
+  bool saved = 4;
+}
+
+message SaveMessageResponse {
+  Message message = 1;
+}
+
+message ListSavedRequest {
+  // The team whose channels, and the conversations, to list saves from.
+  string team_id = 1;
+  // Only the ids of every message the caller saved.
+  bool ids_only = 2;
+}
+
+message ListSavedResponse {
+  repeated SearchHit hits = 1;
+  repeated string message_ids = 2;
+}
+
+message ListThreadsRequest {
+  string team_id = 1;
+  uint32 offset = 2;
+  // Zero counts the unread threads only.
+  uint32 limit = 3;
+}
+
+message ThreadSummary {
+  Message root = 1;
+  Channel channel = 2;
+  bool unread = 3;
+  // Some of the people in the thread, its starter first.
+  repeated User participants = 4;
+}
+
+message ListThreadsResponse {
+  repeated ThreadSummary threads = 1;
+  uint32 unread_count = 2;
+  // Where the next page starts; zero at the end.
+  uint32 next_offset = 3;
+}
+
+message MarkThreadReadRequest {
+  string channel_id = 1;
+  string root_id = 2;
+}
+
+message MarkThreadReadResponse {}
+
+message FollowThreadRequest {
+  string channel_id = 1;
+  string root_id = 2;
+  // False stops following.
+  bool follow = 3;
+}
+
+message FollowThreadResponse {}
+
+message SearchMessagesRequest {
+  string team_id = 1;
+  string query = 2;
+  // The next_cursor of the page before.
+  string cursor = 3;
+  uint32 limit = 4;
+}
+
+message SearchHit {
+  Message message = 1;
+  Channel channel = 2;
+}
+
+message SearchMessagesResponse {
+  repeated SearchHit hits = 1;
+  // The words looked for, to mark in the results.
+  repeated string terms = 2;
+  // Empty at the end of the results.
+  string next_cursor = 3;
 }
 
 // ReactRequest adds the caller's reaction, or with remove takes it back.
@@ -66,11 +182,14 @@ message ListMessagesRequest {
   // Exclusive upper bound; empty starts at the newest message.
   string before_id = 2;
   uint32 limit = 3;
+  // Exclusive lower bound: the messages just newer than it instead.
+  string after_id = 4;
 }
 
 message ListMessagesResponse {
   // Newest first.
   repeated Message messages = 1;
+  // Whether older messages remain, or with after_id newer ones.
   bool has_more = 2;
 }
 
@@ -94,6 +213,8 @@ message ListThreadResponse {
   repeated Message replies = 2;
   // Whether replies older than the first exist.
   bool has_more = 3;
+  // Whether the caller follows the thread.
+  bool following = 4;
 }
 
 message GetMessageResponse {

@@ -19,6 +19,7 @@ import (
 	"github.com/ssenerg/gochat/internal/services/channels"
 	"github.com/ssenerg/gochat/internal/services/convert"
 	"github.com/ssenerg/gochat/internal/services/directory"
+	"github.com/ssenerg/gochat/internal/services/index"
 )
 
 type base struct {
@@ -386,11 +387,11 @@ func (s *channelService) BrowseChannels(ctx context.Context, req *pb.BrowseChann
 	if err != nil {
 		return nil, err
 	}
-	list, err := actors.Ask[[]*pb.Channel](ctx, s.sys.Engine, s.sys.Directory, directory.BrowseChannels{P: p, TeamID: req.TeamId})
+	res, err := actors.Ask[*directory.Browsed](ctx, s.sys.Engine, s.sys.Directory, directory.BrowseChannels{P: p, TeamID: req.TeamId})
 	if err != nil {
 		return nil, err
 	}
-	return &pb.BrowseChannelsResponse{Channels: list}, nil
+	return &pb.BrowseChannelsResponse{Channels: res.Open, Archived: res.Archived}, nil
 }
 
 func (s *channelService) CreateChannel(ctx context.Context, req *pb.CreateChannelRequest) (*pb.CreateChannelResponse, error) {
@@ -504,6 +505,57 @@ func (s *channelService) OpenDirectChannel(ctx context.Context, req *pb.OpenDire
 	return &pb.OpenDirectChannelResponse{Channel: ch}, nil
 }
 
+func (s *channelService) UpdateChannel(ctx context.Context, req *pb.UpdateChannelRequest) (*pb.UpdateChannelResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Channels, channels.Settings{Target: t, DisplayName: req.DisplayName, Name: req.Name, Purpose: req.Purpose})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.UpdateChannelResponse{Channel: ch}, nil
+}
+
+func (s *channelService) SetChannelPrivacy(ctx context.Context, req *pb.SetChannelPrivacyRequest) (*pb.SetChannelPrivacyResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Channels, channels.Privacy{Target: t, Private: req.Private})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.SetChannelPrivacyResponse{Channel: ch}, nil
+}
+
+func (s *channelService) ArchiveChannel(ctx context.Context, req *pb.ArchiveChannelRequest) (*pb.ArchiveChannelResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Channels, channels.Archive{Target: t, Archived: req.Archived})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ArchiveChannelResponse{Channel: ch}, nil
+}
+
+func (s *channelService) OpenGroupChannel(ctx context.Context, req *pb.OpenGroupChannelRequest) (*pb.OpenGroupChannelResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(req.UserIds) > 16 {
+		return nil, ierrors.InvalidArgument("too many people")
+	}
+	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Directory, directory.OpenGroup{P: p, UserIDs: req.UserIds})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.OpenGroupChannelResponse{Channel: ch}, nil
+}
+
 func (s *channelService) MarkChannelRead(ctx context.Context, req *pb.MarkChannelReadRequest) (*pb.MarkChannelReadResponse, error) {
 	t, err := channelTarget(ctx, req.ChannelId)
 	if err != nil {
@@ -592,7 +644,7 @@ func (s *messageService) ListMessages(ctx context.Context, req *pb.ListMessagesR
 	if err != nil {
 		return nil, err
 	}
-	res, err := actors.Ask[*channels.HistoryResult](ctx, s.sys.Engine, s.sys.Channels, channels.History{Target: t, BeforeID: req.BeforeId, Limit: int(req.Limit)})
+	res, err := actors.Ask[*channels.HistoryResult](ctx, s.sys.Engine, s.sys.Channels, channels.History{Target: t, BeforeID: req.BeforeId, AfterID: req.AfterId, Limit: int(req.Limit)})
 	if err != nil {
 		return nil, err
 	}
@@ -620,7 +672,7 @@ func (s *messageService) ListThread(ctx context.Context, req *pb.ListThreadReque
 	if err != nil {
 		return nil, err
 	}
-	return &pb.ListThreadResponse{Root: res.Root, Replies: res.Replies, HasMore: res.HasMore}, nil
+	return &pb.ListThreadResponse{Root: res.Root, Replies: res.Replies, HasMore: res.HasMore, Following: res.Following}, nil
 }
 
 func (s *messageService) React(ctx context.Context, req *pb.ReactRequest) (*pb.ReactResponse, error) {
@@ -635,6 +687,110 @@ func (s *messageService) React(ctx context.Context, req *pb.ReactRequest) (*pb.R
 		return nil, err
 	}
 	return &pb.ReactResponse{Reactions: out}, nil
+}
+
+func (s *messageService) SearchMessages(ctx context.Context, req *pb.SearchMessagesRequest) (*pb.SearchMessagesResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	res, err := actors.Ask[*index.Result](ctx, s.sys.Engine, s.sys.Search, index.Search{
+		P: p, TeamID: req.TeamId, Query: req.Query, Cursor: req.Cursor, Limit: int(req.Limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.SearchMessagesResponse{Hits: res.Hits, Terms: res.Terms, NextCursor: res.Next}, nil
+}
+
+func (s *messageService) ListThreads(ctx context.Context, req *pb.ListThreadsRequest) (*pb.ListThreadsResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	res, err := actors.Ask[*directory.ThreadsResult](ctx, s.sys.Engine, s.sys.Directory, directory.ListThreads{
+		P: p, TeamID: req.TeamId, Offset: int(req.Offset), Limit: int(req.Limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ListThreadsResponse{Threads: res.Threads, UnreadCount: uint32(res.Unread), NextOffset: uint32(res.Next)}, nil //nolint:gosec // bounded counts
+}
+
+func (s *messageService) PinMessage(ctx context.Context, req *pb.PinMessageRequest) (*pb.PinMessageResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	out, err := actors.Ask[*pb.Message](ctx, s.sys.Engine, s.sys.Channels, channels.Pin{
+		Target: t, MessageID: req.MessageId, RootID: req.RootId, Pinned: req.Pinned,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.PinMessageResponse{Message: out}, nil
+}
+
+func (s *messageService) ListPinned(ctx context.Context, req *pb.ListPinnedRequest) (*pb.ListPinnedResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	out, err := actors.Ask[[]*pb.Message](ctx, s.sys.Engine, s.sys.Channels, channels.Pins{Target: t})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ListPinnedResponse{Messages: out}, nil
+}
+
+func (s *messageService) SaveMessage(ctx context.Context, req *pb.SaveMessageRequest) (*pb.SaveMessageResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	out, err := actors.Ask[*pb.Message](ctx, s.sys.Engine, s.sys.Channels, channels.Save{
+		Target: t, MessageID: req.MessageId, RootID: req.RootId, Saved: req.Saved,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.SaveMessageResponse{Message: out}, nil
+}
+
+func (s *messageService) ListSaved(ctx context.Context, req *pb.ListSavedRequest) (*pb.ListSavedResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	res, err := actors.Ask[*directory.SavedResult](ctx, s.sys.Engine, s.sys.Directory, directory.ListSaved{
+		P: p, TeamID: req.TeamId, IDsOnly: req.IdsOnly,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ListSavedResponse{Hits: res.Hits, MessageIds: res.IDs}, nil
+}
+
+func (s *messageService) MarkThreadRead(ctx context.Context, req *pb.MarkThreadReadRequest) (*pb.MarkThreadReadResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := actors.Ask[channels.Done](ctx, s.sys.Engine, s.sys.Channels, channels.ThreadRead{Target: t, RootID: req.RootId}); err != nil {
+		return nil, err
+	}
+	return &pb.MarkThreadReadResponse{}, nil
+}
+
+func (s *messageService) FollowThread(ctx context.Context, req *pb.FollowThreadRequest) (*pb.FollowThreadResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := actors.Ask[channels.Done](ctx, s.sys.Engine, s.sys.Channels, channels.Follow{Target: t, RootID: req.RootId, Follow: req.Follow}); err != nil {
+		return nil, err
+	}
+	return &pb.FollowThreadResponse{}, nil
 }
 
 func (s *messageService) SendTyping(ctx context.Context, req *pb.SendTypingRequest) (*pb.SendTypingResponse, error) {
@@ -706,9 +862,39 @@ func (s *userService) GetPresence(ctx context.Context, req *pb.GetPresenceReques
 	if err != nil {
 		return nil, err
 	}
-	online, err := actors.Ask[[]string](ctx, s.sys.Engine, s.sys.Directory, directory.Presence{P: p, UserIDs: req.UserIds})
+	statuses, err := actors.Ask[map[string]pb.Status](ctx, s.sys.Engine, s.sys.Directory, directory.Presence{P: p, UserIDs: req.UserIds})
 	if err != nil {
 		return nil, err
 	}
-	return &pb.GetPresenceResponse{OnlineUserIds: online}, nil
+	online := make([]string, 0, len(statuses))
+	for id := range statuses {
+		online = append(online, id)
+	}
+	return &pb.GetPresenceResponse{OnlineUserIds: online, Statuses: statuses}, nil
+}
+
+func (s *userService) SetStatus(ctx context.Context, req *pb.SetStatusRequest) (*pb.SetStatusResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	u, err := actors.Ask[*pb.User](ctx, s.sys.Engine, s.sys.Directory, directory.SetStatus{P: p, Status: req.Status, DNDMinutes: int(req.DndMinutes)})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.SetStatusResponse{User: u}, nil
+}
+
+func (s *userService) SetCustomStatus(ctx context.Context, req *pb.SetCustomStatusRequest) (*pb.SetCustomStatusResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	u, err := actors.Ask[*pb.User](ctx, s.sys.Engine, s.sys.Directory, directory.SetCustomStatus{
+		P: p, Emoji: req.Emoji, Text: req.Text, Minutes: int(req.Minutes),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.SetCustomStatusResponse{User: u}, nil
 }

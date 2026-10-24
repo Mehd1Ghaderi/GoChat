@@ -81,12 +81,34 @@ type RevokeSessions struct {
 	SessionIDs []string
 }
 
-// Online replies with the online users among UserIDs.
-type Online struct{ UserIDs []string }
+// Online replies with the users among UserIDs who are not offline, and
+// Statuses with their statuses.
+type (
+	Online   struct{ UserIDs []string }
+	Statuses struct{ UserIDs []string }
+)
+
+// SetStatus records the availability a connected user chose.
+type SetStatus struct {
+	UserID   string
+	Status   pb.Status
+	DNDUntil time.Time
+}
 
 type Registered struct{}
 
-type checkOffline struct{ userID string }
+type (
+	checkOffline struct{ userID string }
+	dndEnded     struct {
+		userID string
+		until  time.Time
+	}
+)
+
+type choice struct {
+	status   pb.Status
+	dndUntil time.Time
+}
 
 // revokedTTL is how long a revoked session stays refused, covering attaches
 // authenticated just before the revocation.
@@ -111,8 +133,10 @@ type hub struct {
 	gateways map[string]*gateway
 	// online counts each user's connections per gateway.
 	online map[string]map[string]int
-	// announced holds the users last announced online.
-	announced map[string]bool
+	// announced holds the status last announced of each user not offline,
+	// chosen the statuses connected users chose.
+	announced map[string]pb.Status
+	chosen    map[string]choice
 	// revoked holds recently revoked session ids and when they were revoked.
 	revoked map[string]time.Time
 }
@@ -124,7 +148,8 @@ func New(logger *zap.Logger, cfg *Config) actor.Producer {
 			logger:    logger,
 			gateways:  make(map[string]*gateway),
 			online:    make(map[string]map[string]int),
-			announced: make(map[string]bool),
+			announced: make(map[string]pb.Status),
+			chosen:    make(map[string]choice),
 			revoked:   make(map[string]time.Time),
 		}
 	}
@@ -156,18 +181,33 @@ func (h *hub) Receive(c *actor.Context) {
 	case Online:
 		online := make([]string, 0, len(msg.UserIDs))
 		for _, id := range msg.UserIDs {
-			if len(h.online[id]) > 0 {
+			if h.status(id) != pb.Status_STATUS_OFFLINE {
 				online = append(online, id)
 			}
 		}
 		actors.Reply(c, online)
+	case Statuses:
+		out := make(map[string]pb.Status, len(msg.UserIDs))
+		for _, id := range msg.UserIDs {
+			if s := h.status(id); s != pb.Status_STATUS_OFFLINE {
+				out[id] = s
+			}
+		}
+		actors.Reply(c, out)
+	case SetStatus:
+		if len(h.online[msg.UserID]) > 0 {
+			h.choose(c, msg.UserID, choice{status: msg.Status, dndUntil: msg.DNDUntil})
+			h.announce(c, msg.UserID)
+		}
+	case dndEnded:
+		if ch, ok := h.chosen[msg.userID]; ok && ch.status == pb.Status_STATUS_DND && ch.dndUntil.Equal(msg.until) {
+			h.announce(c, msg.userID)
+		}
 	case checkOffline:
 		if len(h.online[msg.userID]) == 0 {
 			delete(h.online, msg.userID)
-			if h.announced[msg.userID] {
-				delete(h.announced, msg.userID)
-				h.presence(c, msg.userID, false)
-			}
+			delete(h.chosen, msg.userID)
+			h.announce(c, msg.userID)
 		}
 	case actor.Stopped:
 		for _, gw := range h.gateways {
@@ -240,10 +280,38 @@ func (h *hub) attach(c *actor.Context, msg Attach) {
 	h.send(c, gw, &pb.ConnectResponse{Frame: &pb.ConnectResponse_Attached{Attached: &pb.Attached{
 		ConnId: msg.ConnID, User: msg.User, SessionId: msg.SessionID, ExpiresAt: timestamppb.New(msg.ExpiresAt),
 	}}})
-	if !h.announced[userID] {
-		h.announced[userID] = true
-		h.presence(c, userID, true)
+	if _, ok := h.chosen[userID]; !ok {
+		h.choose(c, userID, choice{status: msg.User.GetStatus(), dndUntil: msg.User.GetDndUntil().AsTime()})
 	}
+	h.announce(c, userID)
+}
+
+func (h *hub) choose(c *actor.Context, userID string, ch choice) {
+	if ch.status != pb.Status_STATUS_DND || ch.dndUntil.Unix() <= 0 {
+		ch.dndUntil = time.Time{}
+	}
+	h.chosen[userID] = ch
+	if wait := time.Until(ch.dndUntil); wait > 0 {
+		pid, engine, ended := c.PID(), c.Engine(), dndEnded{userID: userID, until: ch.dndUntil}
+		time.AfterFunc(wait, func() { engine.Send(pid, ended) })
+	}
+}
+
+// status is how available userID is now.
+func (h *hub) status(userID string) pb.Status {
+	if len(h.online[userID]) == 0 {
+		return pb.Status_STATUS_OFFLINE
+	}
+	ch := h.chosen[userID]
+	switch ch.status {
+	case pb.Status_STATUS_AWAY, pb.Status_STATUS_OFFLINE:
+		return ch.status
+	case pb.Status_STATUS_DND:
+		if ch.dndUntil.IsZero() || time.Now().Before(ch.dndUntil) {
+			return ch.status
+		}
+	}
+	return pb.Status_STATUS_ONLINE
 }
 
 func (h *hub) detach(c *actor.Context, msg Detach) {
@@ -325,8 +393,20 @@ func (h *hub) revoke(c *actor.Context, msg RevokeSessions) {
 	}
 }
 
-func (h *hub) presence(c *actor.Context, userID string, online bool) {
-	ev := &pb.Event{Broadcast: true, Payload: &pb.Event_Presence{Presence: &pb.Presence{UserId: userID, Online: online}}}
+// announce tells everyone a user's status, when it changed.
+func (h *hub) announce(c *actor.Context, userID string) {
+	s := h.status(userID)
+	if was, ok := h.announced[userID]; (ok && was == s) || (!ok && s == pb.Status_STATUS_OFFLINE) {
+		return
+	}
+	if s == pb.Status_STATUS_OFFLINE {
+		delete(h.announced, userID)
+	} else {
+		h.announced[userID] = s
+	}
+	ev := &pb.Event{Broadcast: true, Payload: &pb.Event_Presence{Presence: &pb.Presence{
+		UserId: userID, Online: s != pb.Status_STATUS_OFFLINE, Status: s,
+	}}}
 	resp := &pb.ConnectResponse{Frame: &pb.ConnectResponse_Event{Event: ev}}
 	for _, gw := range h.gateways {
 		h.send(c, gw, resp)

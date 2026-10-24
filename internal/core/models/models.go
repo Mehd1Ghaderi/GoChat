@@ -34,10 +34,17 @@ const (
 	ChannelPublic  ChannelKind = "public"
 	ChannelPrivate ChannelKind = "private"
 	ChannelDirect  ChannelKind = "direct"
+	ChannelGroup   ChannelKind = "group"
 	// ChannelVoice is a room to talk in. Everyone in its team may join the
 	// talk; it carries no messages.
 	ChannelVoice ChannelKind = "voice"
 )
+
+// Conversation reports whether channels of k belong to no team and have a
+// fixed set of people: direct and group conversations.
+func (k ChannelKind) Conversation() bool {
+	return k == ChannelDirect || k == ChannelGroup
+}
 
 type User struct {
 	ID           gocql.UUID `db:"id"`
@@ -55,6 +62,12 @@ type User struct {
 	UpdatedAt    time.Time  `db:"updated_at"`
 	// Photo is the version of the profile photo, empty when there is none.
 	Photo string `db:"photo"`
+	// Status is the availability the user chose, empty for online.
+	Status      string    `db:"status"`
+	DNDUntil    time.Time `db:"dnd_until"`
+	StatusEmoji string    `db:"status_emoji"`
+	StatusText  string    `db:"status_text"`
+	StatusUntil time.Time `db:"status_until"`
 }
 
 type Session struct {
@@ -102,6 +115,8 @@ type Channel struct {
 	CreatedBy     gocql.UUID  `db:"created_by"`
 	CreatedAt     time.Time   `db:"created_at"`
 	LastMessageID gocql.UUID  `db:"last_message_id"`
+	// ArchivedAt is set while the channel is archived: read only.
+	ArchivedAt time.Time `db:"archived_at"`
 	// VoiceDisabled stops members posting voice messages; channels allow
 	// them unless set.
 	VoiceDisabled bool `db:"voice_disabled"`
@@ -129,6 +144,7 @@ type Message struct {
 	ReplyCount   int          `db:"reply_count"`
 	LastReplyAt  time.Time    `db:"last_reply_at"`
 	Participants []gocql.UUID `db:"participants"`
+	Pinned       bool         `db:"pinned"`
 }
 
 type Attachment struct {

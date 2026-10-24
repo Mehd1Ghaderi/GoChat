@@ -1,5 +1,5 @@
 {{define "message"}}
-<article class="msg{{if .Mine}} mine{{end}}{{if .Mentioned}} mentioned{{end}}" id="msg-{{.Id}}"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>
+<article class="msg{{if .Mine}} mine{{end}}{{if .Mentioned}} mentioned{{end}}{{if .Focus}} focus{{end}}" id="msg-{{.Id}}"{{if .Focus}} data-focus="1"{{end}}{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>
   {{template "avatar" (dict "User" .Author "Size" "")}}
   <div class="msg-main">
     {{template "msg-content" .}}
@@ -11,6 +11,8 @@
   <div class="msg-actions">
     <button class="icon-btn sm" hx-get="{{.Bar.URL}}" hx-target="#modal" aria-label="Add a reaction" title="React">{{icon "smile"}}</button>
     {{if not .RootId}}<button class="icon-btn sm" hx-get="/m/{{.ChannelId}}/{{.Id}}/thread" hx-target="#thread" aria-label="Reply in thread" title="Reply">{{icon "reply"}}</button>{{end}}
+    <button class="icon-btn sm{{if .Saved}} on{{end}}" hx-post="/m/{{.ChannelId}}/{{.Id}}/save{{with .RootId}}?root={{.}}{{end}}" hx-vals='{"saved": "{{if .Saved}}0{{else}}1{{end}}"{{if .CanDelete}}, "mod": "1"{{end}}}' hx-target="#msg-{{.Id}}" hx-swap="outerHTML" aria-pressed="{{if .Saved}}true{{else}}false{{end}}" aria-label="{{if .Saved}}Remove from saved{{else}}Save message{{end}}" title="{{if .Saved}}Remove from saved{{else}}Save{{end}}">{{icon "bookmark"}}</button>
+    <button class="icon-btn sm{{if .Pinned}} on{{end}}" hx-post="/m/{{.ChannelId}}/{{.Id}}/pin{{with .RootId}}?root={{.}}{{end}}" hx-vals='{"pinned": "{{if .Pinned}}0{{else}}1{{end}}"{{if .CanDelete}}, "mod": "1"{{end}}}' hx-target="#msg-{{.Id}}" hx-swap="outerHTML" aria-pressed="{{if .Pinned}}true{{else}}false{{end}}" aria-label="{{if .Pinned}}Unpin message{{else}}Pin to channel{{end}}" title="{{if .Pinned}}Unpin{{else}}Pin to channel{{end}}">{{icon "pin"}}</button>
     {{if .Mine}}<button class="icon-btn sm" hx-get="/m/{{.ChannelId}}/{{.Id}}/edit{{with .RootId}}?root={{.}}{{end}}" hx-target="#msg-{{.Id}}" hx-swap="outerHTML" aria-label="Edit message" title="Edit">{{icon "edit"}}</button>{{end}}
     {{if .CanDelete}}<button class="icon-btn sm" hx-post="/m/{{.ChannelId}}/{{.Id}}/delete{{with .RootId}}?root={{.}}{{end}}" hx-confirm="{{if .ReplyCount}}Delete this message and its thread?{{else}}Delete this message?{{end}}" hx-target="#msg-{{.Id}}" hx-swap="outerHTML" aria-label="Delete message" title="Delete">{{icon "trash"}}</button>{{end}}
   </div>
@@ -23,6 +25,8 @@
   {{with .Author}}<span class="handle">@{{.Username}}</span>{{end}}
   <time datetime="{{iso .Time}}" title="{{date .Time}}">{{clock .Time}}</time>
   {{if .Edited}}<span class="edited">(edited)</span>{{end}}
+  {{if .Pinned}}<span class="flag">{{icon "pin"}}Pinned</span>{{end}}
+  {{if .Saved}}<span class="flag saved">{{icon "bookmark"}}Saved</span>{{end}}
 </header>
 {{if .Content}}<div class="body">{{.Body}}</div>{{end}}
 {{with .Attachments}}<ul class="files">{{range .}}{{template "attachment" .}}{{end}}</ul>{{end}}

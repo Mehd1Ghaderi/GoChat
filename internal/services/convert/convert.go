@@ -2,6 +2,7 @@
 package convert
 
 import (
+	"strings"
 	"time"
 
 	"github.com/gocql/gocql"
@@ -74,6 +75,8 @@ func ChannelType(k models.ChannelKind) pb.ChannelType {
 		return pb.ChannelType_CHANNEL_TYPE_PRIVATE
 	case models.ChannelDirect:
 		return pb.ChannelType_CHANNEL_TYPE_DIRECT
+	case models.ChannelGroup:
+		return pb.ChannelType_CHANNEL_TYPE_GROUP
 	case models.ChannelVoice:
 		return pb.ChannelType_CHANNEL_TYPE_VOICE
 	default:
@@ -86,14 +89,17 @@ func User(u *models.User) *pb.User {
 		return nil
 	}
 	return &pb.User{
-		Id:          u.ID.String(),
-		Username:    u.Username,
-		DisplayName: u.DisplayName,
-		Role:        SystemRole(u.Role),
-		TotpEnabled: u.TOTPEnabled,
-		CreatedAt:   Time(u.CreatedAt),
-		Deactivated: u.Deactivated,
-		Photo:       u.Photo,
+		Id:           u.ID.String(),
+		Username:     u.Username,
+		DisplayName:  u.DisplayName,
+		Role:         SystemRole(u.Role),
+		TotpEnabled:  u.TOTPEnabled,
+		CreatedAt:    Time(u.CreatedAt),
+		Deactivated:  u.Deactivated,
+		Photo:        u.Photo,
+		Status:       Status(u.Status),
+		DndUntil:     Time(u.DNDUntil),
+		CustomStatus: Custom(u, time.Now()),
 	}
 }
 
@@ -103,13 +109,35 @@ func PublicUser(u *models.User) *pb.User {
 		return nil
 	}
 	return &pb.User{
-		Id:          u.ID.String(),
-		Username:    u.Username,
-		DisplayName: u.DisplayName,
-		Role:        SystemRole(u.Role),
-		Deactivated: u.Deactivated,
-		Photo:       u.Photo,
+		Id:           u.ID.String(),
+		Username:     u.Username,
+		DisplayName:  u.DisplayName,
+		Role:         SystemRole(u.Role),
+		Deactivated:  u.Deactivated,
+		Photo:        u.Photo,
+		CustomStatus: Custom(u, time.Now()),
 	}
+}
+
+// Status is the availability a user chose.
+func Status(s string) pb.Status {
+	switch s {
+	case "away":
+		return pb.Status_STATUS_AWAY
+	case "dnd":
+		return pb.Status_STATUS_DND
+	case "offline":
+		return pb.Status_STATUS_OFFLINE
+	}
+	return pb.Status_STATUS_ONLINE
+}
+
+// Custom is the custom status of u, nil when it has none or it ran out.
+func Custom(u *models.User, now time.Time) *pb.CustomStatus {
+	if u.StatusEmoji == "" || (!u.StatusUntil.IsZero() && !now.Before(u.StatusUntil)) {
+		return nil
+	}
+	return &pb.CustomStatus{Emoji: u.StatusEmoji, Text: u.StatusText, ExpiresAt: Time(u.StatusUntil)}
 }
 
 func Team(t *models.Team, role models.TeamRole) *pb.Team {
@@ -137,6 +165,7 @@ func Channel(ch *models.Channel, role models.ChannelRole, lastRead gocql.UUID, p
 		LastReadId:    ID(lastRead),
 		Peer:          peer,
 		CreatedAt:     Time(ch.CreatedAt),
+		ArchivedAt:    Time(ch.ArchivedAt),
 		VoiceEnabled:  !ch.VoiceDisabled,
 	}
 }
@@ -161,9 +190,39 @@ func Message(m *models.Message, author *pb.User, atts []*models.Attachment) *pb.
 		// Counts are small; int32 cannot overflow here.
 		ReplyCount:  int32(m.ReplyCount), //nolint:gosec
 		LastReplyAt: Time(m.LastReplyAt),
+		Pinned:      m.Pinned,
 	}
 	for _, a := range atts {
 		out.Attachments = append(out.Attachments, Attachment(a))
+	}
+	return out
+}
+
+// Conversation renders ch as self sees it, naming the others of a direct
+// or group conversation from people, which holds them.
+func Conversation(ch *models.Channel, role models.ChannelRole, lastRead, self gocql.UUID, people map[gocql.UUID]*models.User) *pb.Channel {
+	out := Channel(ch, role, lastRead, nil)
+	for _, id := range PeerIDs(ch, self) {
+		if u := PublicUser(people[id]); u != nil {
+			switch ch.Kind {
+			case models.ChannelDirect:
+				out.Peer = u
+			case models.ChannelGroup:
+				out.Peers = append(out.Peers, u)
+			}
+		}
+	}
+	return out
+}
+
+// PeerIDs returns the other people of a conversation, whose name lists its
+// members' ids.
+func PeerIDs(ch *models.Channel, self gocql.UUID) []gocql.UUID {
+	var out []gocql.UUID
+	for _, raw := range strings.Split(ch.Name, ":") {
+		if id, ok := ids.Parse(raw); ok && id != self {
+			out = append(out, id)
+		}
 	}
 	return out
 }

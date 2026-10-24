@@ -63,10 +63,12 @@ type Delete struct {
 	RootID    string
 }
 
-// History replies with *HistoryResult.
+// History replies with *HistoryResult: the messages before BeforeID, or
+// with AfterID those just after it, newest first either way.
 type History struct {
 	Target
 	BeforeID string
+	AfterID  string
 	Limit    int
 }
 
@@ -92,9 +94,24 @@ type Thread struct {
 type ThreadResult struct {
 	Root *pb.Message
 	// Replies are oldest first.
-	Replies []*pb.Message
-	HasMore bool
+	Replies   []*pb.Message
+	HasMore   bool
+	Following bool
 }
+
+// ThreadRead notes that the caller read a thread; Follow follows it, or
+// with Follow false stops.
+type (
+	ThreadRead struct {
+		Target
+		RootID string
+	}
+	Follow struct {
+		Target
+		RootID string
+		Follow bool
+	}
+)
 
 // React adds the caller's reaction to a message, or with Remove takes it
 // back. It replies with the message's reactions.

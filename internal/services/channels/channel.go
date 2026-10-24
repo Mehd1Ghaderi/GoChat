@@ -9,6 +9,7 @@ import (
 	"github.com/gocql/gocql"
 	"go.uber.org/zap"
 	"golang.org/x/time/rate"
+	"google.golang.org/protobuf/proto"
 
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
 	"github.com/ssenerg/gochat/internal/actors"
@@ -22,6 +23,7 @@ import (
 	"github.com/ssenerg/gochat/internal/repos/scylla"
 	"github.com/ssenerg/gochat/internal/services/convert"
 	"github.com/ssenerg/gochat/internal/services/hub"
+	"github.com/ssenerg/gochat/internal/services/index"
 )
 
 // DefaultChannel is the channel every team member stays in.
@@ -39,6 +41,7 @@ type channel struct {
 	hasBucket bool
 	typing    map[gocql.UUID]time.Time
 	posters   map[gocql.UUID]*rate.Limiter
+	pins      int
 	active    time.Time
 	loaded    bool
 	loadErr   error
@@ -129,6 +132,13 @@ func (a *channel) load() {
 		a.loadErr = ierrors.Unavailable("channel is unavailable, try again")
 		return
 	}
+	pins, err := a.Repo.ListPins(ctx, a.id, maxPins)
+	if err != nil {
+		a.Logger.Error("failed to load channel pins", zap.String("channel", a.id.String()), zap.Error(err))
+		a.loadErr = ierrors.Unavailable("channel is unavailable, try again")
+		return
+	}
+	a.pins = len(pins)
 	a.ch = ch
 	a.bucket, a.hasBucket = bucket, has
 	a.members = make(map[gocql.UUID]models.ChannelRole, len(members))
@@ -189,6 +199,22 @@ func (a *channel) handle(c *actor.Context, req Request) {
 		out, err = a.react(msg)
 	case Mute:
 		out, err = a.mute(msg)
+	case Settings:
+		out, err = a.settings(msg)
+	case Privacy:
+		out, err = a.privacy(msg)
+	case Archive:
+		out, err = a.archive(msg)
+	case ThreadRead:
+		err = a.threadRead(c, msg)
+	case Pin:
+		out, err = a.pin(msg)
+	case Pins:
+		err = a.listPins(c, msg)
+	case Save:
+		out, err = a.save(msg)
+	case Follow:
+		out, err = a.follow(msg)
 	case SetVoice:
 		out, err = a.setVoice(msg)
 	case MarkRead:
@@ -228,6 +254,8 @@ func (a *channel) voiceRefuses(req Request) error {
 		return ierrors.FailedPrecondition("voice channels carry no messages")
 	case Join, AddMember:
 		return ierrors.FailedPrecondition("everyone in the team may talk in a voice channel: join the talk instead")
+	case Settings, Privacy, Archive:
+		return ierrors.FailedPrecondition("voice channels have no settings")
 	}
 	return nil
 }
@@ -273,7 +301,7 @@ func (a *channel) member(p *models.Principal) (models.ChannelRole, error) {
 }
 
 func (a *channel) teamRole(ctx context.Context, userID gocql.UUID) (models.TeamRole, error) {
-	if a.ch.Kind == models.ChannelDirect {
+	if a.ch.Kind.Conversation() {
 		return "", nil
 	}
 	tm, err := a.Repo.GetTeamMember(ctx, a.ch.TeamID, userID)
@@ -329,58 +357,22 @@ func (a *channel) mute(msg Mute) (Done, error) {
 	return Done{}, nil
 }
 
-// setVoice changes whether members may post voice messages. Messages posted
-// before stay as they are.
-func (a *channel) setVoice(msg SetVoice) (*pb.Channel, error) {
-	role, err := a.member(msg.P)
-	if err != nil {
-		return nil, err
-	}
-	if a.ch.Kind == models.ChannelDirect {
-		return nil, ierrors.FailedPrecondition("direct conversations always allow voice messages")
-	}
-	// Each change reaches every member.
-	if !a.poster(msg.P.UserID).Allow() {
-		return nil, ierrors.ResourceExhausted("you are changing settings too fast")
+// channelFor renders the channel as userID sees it.
+func (a *channel) channelFor(userID gocql.UUID, role models.ChannelRole) (*pb.Channel, error) {
+	if !a.ch.Kind.Conversation() {
+		out := convert.Channel(a.ch, role, gocql.UUID{}, nil)
+		out.PinnedCount = int32(a.pins) //nolint:gosec // at most maxPins
+		return out, nil
 	}
 	ctx, cancel := a.ctx()
 	defer cancel()
-	tr, err := a.teamRole(ctx, msg.P.UserID)
+	people, err := a.Users.GetMany(ctx, convert.PeerIDs(a.ch, userID))
 	if err != nil {
 		return nil, err
 	}
-	if !a.Authz.Can(authz.ObjChannel, authz.ActUpdate, string(role), string(tr), string(msg.P.Role)) {
-		return nil, ierrors.PermissionDenied()
-	}
-	if disabled := !msg.Enabled; disabled != a.ch.VoiceDisabled {
-		if err := a.Repo.SetVoiceDisabled(ctx, a.id, disabled); err != nil {
-			return nil, err
-		}
-		a.ch.VoiceDisabled = disabled
-		a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_ChannelUpdated{ChannelUpdated: &pb.ChannelUpdated{
-			ChannelId: a.id.String(), VoiceEnabled: msg.Enabled,
-		}}})
-	}
-	return a.channelFor(msg.P.UserID, role)
-}
-
-// channelFor renders the channel as userID sees it.
-func (a *channel) channelFor(userID gocql.UUID, role models.ChannelRole) (*pb.Channel, error) {
-	var peer *pb.User
-	if a.ch.Kind == models.ChannelDirect {
-		for id := range a.members {
-			if id != userID {
-				ctx, cancel := a.ctx()
-				u, err := a.Users.Get(ctx, id)
-				cancel()
-				if err != nil {
-					return nil, err
-				}
-				peer = convert.PublicUser(u)
-			}
-		}
-	}
-	return convert.Channel(a.ch, role, gocql.UUID{}, peer), nil
+	out := convert.Conversation(a.ch, role, gocql.UUID{}, userID, people)
+	out.PinnedCount = int32(a.pins) //nolint:gosec // at most maxPins
+	return out, nil
 }
 
 func (a *channel) poster(userID gocql.UUID) *rate.Limiter {
@@ -415,6 +407,9 @@ func (a *channel) post(msg Post) (*pb.Message, error) {
 	}
 	if !a.Authz.Can(authz.ObjMessage, authz.ActCreate, string(role), string(msg.P.Role)) {
 		return nil, ierrors.PermissionDenied()
+	}
+	if a.archived() {
+		return nil, errArchived
 	}
 	if !a.poster(msg.P.UserID).Allow() {
 		return nil, ierrors.ResourceExhausted("you are posting too fast")
@@ -498,19 +493,39 @@ func (a *channel) post(msg Post) (*pb.Message, error) {
 	out := convert.Message(m, convert.PublicUser(author), atts)
 	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessagePosted{MessagePosted: &pb.MessagePosted{Message: out}}})
 	a.recordMentions(m)
+	a.file(index.Add{Doc: a.doc(m)})
 	return out, nil
 }
 
+func (a *channel) doc(m *models.Message) index.Doc {
+	members := make([]gocql.UUID, 0, len(a.members))
+	for id := range a.members {
+		members = append(members, id)
+	}
+	return index.Doc{
+		Scopes:  index.Scopes(a.ch, members),
+		Posting: scylla.Posting{MessageID: m.ID, ChannelID: a.id, RootID: m.RootID, UserID: m.UserID},
+		Content: m.Content,
+	}
+}
+
+// file hands a change of a message to the search index.
+func (a *channel) file(msg any) {
+	if a.Search != nil {
+		a.Engine.Send(a.Search, msg)
+	}
+}
+
 // recordMentions notes, off the actor, whom m calls out: named members,
-// everyone for @channel, those online for @here, and the other person of a
-// direct conversation.
+// everyone for @channel, those online for @here, and the others of a
+// conversation.
 func (a *channel) recordMentions(m *models.Message) {
 	found := mention.Parse(m.Content)
-	direct := a.ch.Kind == models.ChannelDirect
+	direct := a.ch.Kind.Conversation()
 	if !direct && len(found.Usernames) == 0 && !found.Channel && !found.Here {
 		return
 	}
-	members, author := a.memberIDs, m.UserID.String()
+	members, author, teamID := a.memberIDs, m.UserID.String(), a.ch.TeamID
 	go func() {
 		ctx, cancel := a.ctx()
 		defer cancel()
@@ -548,6 +563,12 @@ func (a *channel) recordMentions(m *models.Message) {
 		if err := a.Repo.AddMentions(ctx, a.id, m.ID, userIDs); err != nil {
 			a.Logger.Warn("failed to record mentions", zap.String("channel", a.id.String()), zap.Error(err))
 		}
+		// Who a reply calls out follows its thread.
+		if !ids.IsZero(m.RootID) {
+			if err := a.Repo.TouchThread(ctx, userIDs, a.id, m.RootID, teamID, m.ID.Time(), gocql.UUID{}); err != nil {
+				a.Logger.Warn("failed to follow a thread", zap.String("channel", a.id.String()), zap.Error(err))
+			}
+		}
 	}()
 }
 
@@ -574,12 +595,14 @@ func (a *channel) reply(ctx context.Context, root, m *models.Message, author *mo
 	out := convert.Message(m, convert.PublicUser(author), atts)
 	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessagePosted{MessagePosted: &pb.MessagePosted{Message: out, ParticipantIds: notify}}})
 	a.recordMentions(m)
+	a.file(index.Add{Doc: a.doc(m)})
 
 	root.ReplyCount++
 	root.LastReplyAt = m.ID.Time()
 	if !slices.Contains(root.Participants, m.UserID) {
 		root.Participants = append(root.Participants, m.UserID)
 	}
+	a.touch(append([]gocql.UUID{root.UserID}, root.Participants...), root.ID, m.ID.Time(), m.UserID)
 	if err := a.Repo.SetThreadSummary(ctx, root, root.ReplyCount, root.LastReplyAt, m.UserID); err != nil {
 		a.Logger.Warn("failed to count a reply", zap.String("channel", a.id.String()), zap.Error(err))
 	}
@@ -686,6 +709,9 @@ func (a *channel) edit(msg Edit) (*pb.Message, error) {
 	if !a.Authz.Can(authz.ObjMessage, authz.ActEditOwn, string(role), string(msg.P.Role)) {
 		return nil, ierrors.PermissionDenied()
 	}
+	if a.archived() {
+		return nil, errArchived
+	}
 	content, err := validate.Text("message", msg.Content, a.Cfg.MaxMessageLength)
 	if err != nil {
 		return nil, err
@@ -719,10 +745,13 @@ func (a *channel) edit(msg Edit) (*pb.Message, error) {
 	if err != nil {
 		return nil, err
 	}
+	old := m.Content
 	m.Content, m.EditedAt = content, now
+	a.file(index.Update{Doc: a.doc(m), Old: old})
 	out := convert.Message(m, convert.PublicUser(author), orderAttachments(m.Attachments, atts))
+	mine := proto.CloneOf(out)
 	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessageEdited{MessageEdited: &pb.MessageEdited{Message: out}}})
-	return out, nil
+	return mine, a.markSaved(ctx, msg.P.UserID, []*pb.Message{mine})
 }
 
 func (a *channel) delete(msg Delete) (Done, error) {
@@ -755,6 +784,8 @@ func (a *channel) delete(msg Delete) (Done, error) {
 	if err := a.Repo.DeleteMessage(ctx, a.id, m.ID); err != nil {
 		return Done{}, err
 	}
+	a.file(index.Remove{Doc: a.doc(m)})
+	a.unpinGone(ctx, m)
 	a.dropReactions(ctx, m.ID)
 	if m.ID == a.ch.LastMessageID {
 		a.rewindLast(ctx)
@@ -762,6 +793,9 @@ func (a *channel) delete(msg Delete) (Done, error) {
 	a.dropAttachments(m.Attachments)
 	if m.ReplyCount > 0 {
 		a.dropThread(ctx, m.ID)
+		if err := a.Repo.UnfollowThreads(ctx, append([]gocql.UUID{m.UserID}, m.Participants...), a.id, m.ID); err != nil {
+			a.Logger.Warn("failed to drop a thread's follows", zap.String("channel", a.id.String()), zap.Error(err))
+		}
 	}
 	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessageDeleted{MessageDeleted: &pb.MessageDeleted{
 		ChannelId: a.id.String(), MessageId: m.ID.String(),
@@ -773,6 +807,8 @@ func (a *channel) deleteReply(ctx context.Context, m *models.Message) error {
 	if err := a.Repo.DeleteReply(ctx, a.id, m.RootID, m.ID); err != nil {
 		return err
 	}
+	a.file(index.Remove{Doc: a.doc(m)})
+	a.unpinGone(ctx, m)
 	a.dropReactions(ctx, m.ID)
 	a.dropAttachments(m.Attachments)
 	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessageDeleted{MessageDeleted: &pb.MessageDeleted{
@@ -803,7 +839,7 @@ func (a *channel) deleteReply(ctx context.Context, m *models.Message) error {
 // dropThread deletes the replies of a deleted root, their reactions and
 // their files.
 func (a *channel) dropThread(ctx context.Context, rootID gocql.UUID) {
-	replies, atts, err := a.Repo.ThreadContents(ctx, a.id, rootID)
+	replies, err := a.Repo.ThreadContents(ctx, a.id, rootID)
 	if err != nil {
 		a.Logger.Warn("failed to list a thread's replies", zap.String("channel", a.id.String()), zap.Error(err))
 	}
@@ -811,8 +847,12 @@ func (a *channel) dropThread(ctx context.Context, rootID gocql.UUID) {
 		a.Logger.Warn("failed to delete a thread", zap.String("channel", a.id.String()), zap.Error(err))
 		return
 	}
-	for _, id := range replies {
-		a.dropReactions(ctx, id)
+	var atts []gocql.UUID
+	for _, m := range replies {
+		a.file(index.Remove{Doc: a.doc(m)})
+		a.unpinGone(ctx, m)
+		a.dropReactions(ctx, m.ID)
+		atts = append(atts, m.Attachments...)
 	}
 	a.dropAttachments(atts)
 }
@@ -829,6 +869,9 @@ const maxReactionKinds = 20
 func (a *channel) react(msg React) ([]*pb.Reaction, error) {
 	if _, err := a.member(msg.P); err != nil {
 		return nil, err
+	}
+	if a.archived() {
+		return nil, errArchived
 	}
 	if !emoji.Valid(msg.Emoji) {
 		return nil, ierrors.InvalidArgument("unknown emoji")
@@ -978,20 +1021,33 @@ func (a *channel) history(c *actor.Context, msg History) error {
 	if err := a.canRead(msg.P); err != nil {
 		return err
 	}
-	var before gocql.UUID
-	if msg.BeforeID != "" {
-		id, ok := ids.ParseTime(msg.BeforeID)
+	var before, after gocql.UUID
+	for raw, into := range map[string]*gocql.UUID{msg.BeforeID: &before, msg.AfterID: &after} {
+		if raw == "" {
+			continue
+		}
+		id, ok := ids.ParseTime(raw)
 		if !ok {
 			return ierrors.InvalidArgument("invalid cursor")
 		}
-		before = id
+		*into = id
 	}
 	limit := msg.Limit
 	if limit <= 0 || limit > a.Cfg.HistoryLimit {
 		limit = a.Cfg.HistoryLimit
 	}
+	userID := msg.P.UserID
 	a.async(c, func(ctx context.Context) (any, error) {
-		list, more, err := a.Repo.ListMessages(ctx, a.id, before, limit)
+		var (
+			list []*models.Message
+			more bool
+			err  error
+		)
+		if ids.IsZero(after) {
+			list, more, err = a.Repo.ListMessages(ctx, a.id, before, limit)
+		} else if list, more, err = a.Repo.ListMessagesAfter(ctx, a.id, after, limit); err == nil {
+			slices.Reverse(list)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -999,7 +1055,7 @@ func (a *channel) history(c *actor.Context, msg History) error {
 		if err != nil {
 			return nil, err
 		}
-		return &HistoryResult{Messages: out, HasMore: more}, nil
+		return &HistoryResult{Messages: out, HasMore: more}, a.markSaved(ctx, userID, out)
 	})
 	return nil
 }
@@ -1017,7 +1073,7 @@ func (a *channel) getMessage(c *actor.Context, msg GetMessage) error {
 		if err != nil {
 			return nil, err
 		}
-		return out[0], nil
+		return out[0], a.markSaved(ctx, msg.P.UserID, out)
 	})
 	return nil
 }
@@ -1052,7 +1108,11 @@ func (a *channel) thread(c *actor.Context, msg Thread) error {
 		if err != nil {
 			return nil, err
 		}
-		return &ThreadResult{Root: out[0], Replies: out[1:], HasMore: more}, nil
+		following, err := a.Repo.GetThreadFollow(ctx, msg.P.UserID, a.id, root.ID)
+		if err != nil {
+			return nil, err
+		}
+		return &ThreadResult{Root: out[0], Replies: out[1:], HasMore: more, Following: following}, a.markSaved(ctx, msg.P.UserID, out)
 	})
 	return nil
 }
@@ -1104,7 +1164,7 @@ func (a *channel) render(ctx context.Context, list []*models.Message) ([]*pb.Mes
 }
 
 func (a *channel) typingEvent(msg Typing) (Done, error) {
-	if _, err := a.member(msg.P); err != nil {
+	if _, err := a.member(msg.P); err != nil || a.archived() {
 		return Done{}, err
 	}
 	now := time.Now()
@@ -1192,6 +1252,9 @@ func (a *channel) join(msg Join) (*pb.Channel, error) {
 	if a.ch.Kind != models.ChannelPublic {
 		return nil, ierrors.NotFound("channel not found")
 	}
+	if a.archived() && !msg.System {
+		return nil, errArchived
+	}
 	ctx, cancel := a.ctx()
 	defer cancel()
 	tr, err := a.teamRole(ctx, msg.P.UserID)
@@ -1214,8 +1277,8 @@ func (a *channel) leave(msg Leave) (Done, error) {
 	if _, err := a.member(msg.P); err != nil {
 		return Done{}, err
 	}
-	if a.ch.Kind == models.ChannelDirect {
-		return Done{}, ierrors.FailedPrecondition("direct conversations cannot be left")
+	if a.ch.Kind.Conversation() {
+		return Done{}, ierrors.FailedPrecondition("conversations cannot be left")
 	}
 	if a.ch.Name == DefaultChannel {
 		return Done{}, ierrors.FailedPrecondition("every team member stays in this channel")
@@ -1234,11 +1297,14 @@ func (a *channel) addMember(msg AddMember) (Done, error) {
 	if err != nil {
 		return Done{}, err
 	}
-	if a.ch.Kind == models.ChannelDirect {
-		return Done{}, ierrors.FailedPrecondition("direct conversations have two members")
+	if a.ch.Kind.Conversation() {
+		return Done{}, ierrors.FailedPrecondition("a conversation keeps the people it started with")
 	}
 	if !a.Authz.Can(authz.ObjChannelMember, authz.ActAdd, string(role), string(msg.P.Role)) {
 		return Done{}, ierrors.PermissionDenied()
+	}
+	if a.archived() {
+		return Done{}, errArchived
 	}
 	target, ok := ids.Parse(msg.UserID)
 	if !ok {
@@ -1272,8 +1338,8 @@ func (a *channel) removeMember(msg RemoveMember) (Done, error) {
 		}
 		return Done{}, ierrors.NotFound("not a member")
 	}
-	if a.ch.Kind == models.ChannelDirect && !msg.System {
-		return Done{}, ierrors.FailedPrecondition("direct conversations have two members")
+	if a.ch.Kind.Conversation() && !msg.System {
+		return Done{}, ierrors.FailedPrecondition("a conversation keeps the people it started with")
 	}
 	ctx, cancel := a.ctx()
 	defer cancel()

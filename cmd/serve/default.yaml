@@ -113,6 +113,14 @@ services:
     max_user_uploads: 4
     orphan_after: 24h
     janitor_interval: 1h
+  search:
+    workers: 8
+    writers: 4
+    op_timeout: 15s
+    # Searches per second one person may run, and in a burst.
+    rate: 1
+    burst: 5
+    backfill: true
   voice:
     token_ttl: 30s
     max_per_channel: 25

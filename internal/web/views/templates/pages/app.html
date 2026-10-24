@@ -25,8 +25,10 @@
         <button class="icon-btn" type="button" data-voice-leave aria-label="Disconnect from voice" title="Disconnect">{{icon "phone-off"}}</button>
       </div>
       <footer class="me">
-        {{template "avatar" (dict "User" .User "Size" "sm")}}
-        <span class="me-name"><strong>{{name .User}}</strong><small>@{{.User.Username}}</small></span>
+        <button type="button" class="me-status" hx-get="/status" hx-target="#modal" aria-label="Set your status" title="Set your status">
+          <span class="me-face">{{template "avatar" (dict "User" .User "Size" "sm")}}{{template "me-presence" (dict "Status" (chosen .User))}}</span>
+          {{template "me-name" (dict "User" .User)}}
+        </button>
         <button class="icon-btn voice-toggle" type="button" data-voice-mute aria-pressed="false" aria-label="Mute" title="Mute"><span class="when-on">{{icon "mic"}}</span><span class="when-off">{{icon "mic-off"}}</span></button>
         <button class="icon-btn voice-toggle" type="button" data-voice-deaf aria-pressed="false" aria-label="Deafen" title="Deafen"><span class="when-on">{{icon "headphones"}}</span><span class="when-off">{{icon "headphones-off"}}</span></button>
         <a class="icon-btn" href="/settings" aria-label="Settings" title="Settings">{{icon "settings"}}</a>
@@ -39,7 +41,7 @@
   </aside>
   <label for="nav-toggle" class="scrim" aria-hidden="true"></label>
   <main id="main" class="main">
-    {{template "channel" .Channel}}
+    {{if .Threads}}{{template "threads" .Threads}}{{else}}{{template "channel" .Channel}}{{end}}
   </main>
   <aside id="thread" class="thread-pane" aria-label="Thread"></aside>
   <div id="modal"></div>
@@ -47,6 +49,8 @@
   <div id="ws-control" hidden></div>
   <div id="resync" hidden></div>
   <div id="notify" hidden></div>
+  <div id="threads-refresh" hidden></div>
+  <div id="saved-changed" hidden></div>
   <div id="voice-audio" hidden></div>
 </div>
 {{end}}
