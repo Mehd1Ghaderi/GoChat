@@ -132,23 +132,36 @@ These use the development configs in [config/](config).
 ## Deploying
 
 Every push to `main` that passes CI is deployed to a Linux server with
-Docker Compose: the `deploy` job builds the image, sends it over SSH and runs
-[`deploy.sh`](deployments/docker/deploy.sh) there, which applies the
-migrations and restarts the server and the web gateway with it. If they do
-not come up healthy, the script puts the image that ran before back and the
-job fails, with their last logs. Scylla and MinIO keep running across
-deploys; the server pulls no GoChat image from a registry.
+Docker Compose. The `image` job publishes the image to
+`ghcr.io/ssenerg/gochat`, for amd64 and arm64, tagged `latest` and
+`sha-COMMIT`; the `deploy` job sends its digest over SSH. The key GitHub
+signs in with runs nothing but [`deploy.sh`](deployments/docker/deploy.sh)
+there, which pulls exactly that image, applies the migrations and restarts
+the server and the web gateway with it. If they do not come up healthy, the
+script puts the image that ran before back and the job fails; the output of
+the migrations, the server and the gateway goes to the server's journal
+(`journalctl -t gochat-deploy`), not to the public CI log. Scylla and MinIO
+keep running across deploys. The server needs to reach `ghcr.io`.
 
-Once, on the server, as root: a user to deploy as (in the `docker` group,
-which is as good as root on that server) and the directory GoChat runs from,
-holding its `.env` (see [`.env.template`](.env.template); generate every
-secret, e.g. with `openssl rand -hex 32`, and keep it, since the data is
-only readable with the same credentials):
+A leaked key can therefore only deploy images published to that
+repository, in the setup the server has: the script,
+`docker-compose.yml` and `.env` belong to root, and the key cannot change
+them. When `deployments/docker/deploy.sh` or
+`deployments/docker/docker-compose.yml` change here, install them on the
+server again, as below.
+
+Once, on the server, as root, in a clone of this repository: a user to
+deploy as (in the `docker` group, which is as good as root on that server)
+and the directory GoChat runs from, which it may read but not change, with
+its `.env` (see [`.env.template`](.env.template); generate every secret,
+e.g. with `openssl rand -hex 32`, and keep it, since the data is only
+readable with the same credentials):
 
 ```sh
 useradd --create-home --groups docker deploy
-install -d -o deploy -g deploy -m 750 /opt/apps/gochat
-install -o deploy -g deploy -m 600 .env /opt/apps/gochat/.env
+install -d -o root -g deploy -m 750 /opt/apps/gochat
+install -o root -g deploy -m 640 deployments/docker/docker-compose.yml .env /opt/apps/gochat/
+install -o root -g deploy -m 750 deployments/docker/deploy.sh /opt/apps/gochat/
 ```
 
 The web gateway listens on `127.0.0.1:$WEB_PORT`: put a TLS-terminating
@@ -156,15 +169,22 @@ proxy or tunnel in front of it, set `WEB_PUBLIC_URL` to the `https` address
 people use and `WEB_TRUSTED_PROXIES` to where the proxy's requests come
 from. Set `SERVICES_ACCOUNTS_SETUP_TOKEN` until the first account exists.
 
-On your computer, a key for GitHub to sign in with. Add `gochat-deploy.pub`
-to `~deploy/.ssh/authorized_keys` on the server, with `restrict ` in front
-of it (no shells, no forwarding), and check the server's key that
-`ssh-keyscan` prints against `ssh-keygen -lf
-/etc/ssh/ssh_host_ed25519_key.pub` on the server:
+On your computer, a key for GitHub to sign in with, and the server's key
+for GitHub to check it by. Check the key `ssh-keyscan` prints against
+`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the server:
 
 ```sh
 ssh-keygen -t ed25519 -N '' -C gochat-deploy -f gochat-deploy
 ssh-keyscan -t ed25519 SERVER > known_hosts   # with -p PORT for another port
+```
+
+Add `gochat-deploy.pub` to `~deploy/.ssh/authorized_keys` on the server,
+with the image it may deploy in front of it. `restrict` takes away shells,
+terminals and forwarding; `command` runs whatever GitHub asks for, with
+what it asked for as the digest:
+
+```
+restrict,command="/opt/apps/gochat/deploy.sh ghcr.io/ssenerg/gochat" ssh-ed25519 AAAA... gochat-deploy
 ```
 
 On GitHub, under Settings → Environments, create the environment
@@ -179,17 +199,18 @@ rm gochat-deploy   # GitHub has it now
 ```
 
 Its variables, all optional: `DEPLOY_USER` (`deploy`), `DEPLOY_PORT`
-(`22`), `DEPLOY_PATH` (`/opt/apps/gochat`), `DEPLOY_PLATFORM`
-(`linux/amd64`; `linux/arm64` when `uname -m` says `aarch64`) and
-`DEPLOY_URL`, the address shown with each deploy. Until the secrets are set,
-the job skips deploying with a warning.
+(`22`) and `DEPLOY_URL`, the address shown with each deploy. Until the
+secrets are set, the job skips deploying with a warning. If the package on
+`ghcr.io` is private, sign the server in to it once with a token that may
+read packages: `sudo -u deploy docker login ghcr.io`.
 
 To deploy again, run the CI workflow on `main` (Actions → CI → Run
-workflow), or from your computer with `just deploy deploy@SERVER`. To go
-back one deploy on the server:
+workflow). To deploy a published image by hand, signed in as the server's
+admin, `just deploy admin@SERVER` takes `latest` or a `sha-COMMIT` tag. To
+go back one deploy on the server:
 
 ```sh
-cd /opt/apps/gochat && docker image tag gochat:previous gochat:latest && docker compose up -d --no-deps --force-recreate server web
+cd /opt/apps/gochat && sudo -u deploy sh -c 'docker image tag gochat:previous gochat:latest && docker compose up -d --no-deps --force-recreate server web'
 ```
 
 Migrations only add to the schema, so going back works as long as they keep
