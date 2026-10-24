@@ -35,6 +35,8 @@ type Config struct {
 	TokenTTL time.Duration `mapstructure:"token_ttl"`
 	// MaxPerChannel bounds how many people talk in one voice channel.
 	MaxPerChannel int `mapstructure:"max_per_channel"`
+	// MaxPendingPerUser bounds the tokens one person holds unclaimed.
+	MaxPendingPerUser int `mapstructure:"max_pending_per_user"`
 	// ServerQueueLimit is how many messages a voice server may lag behind
 	// before it is dropped.
 	ServerQueueLimit int64 `mapstructure:"server_queue_limit"`
@@ -52,6 +54,9 @@ func (c *Config) Validate() error {
 	}
 	if c.MaxPerChannel < 2 || c.MaxPerChannel > 500 {
 		return errors.New("max_per_channel must be between 2 and 500")
+	}
+	if c.MaxPendingPerUser < 1 {
+		return errors.New("max_pending_per_user must be at least 1")
 	}
 	if c.ServerQueueLimit < 16 {
 		return errors.New("server_queue_limit must be at least 16")
@@ -148,6 +153,9 @@ type pending struct {
 	channelID gocql.UUID
 	teamID    gocql.UUID
 	gwSession string
+	// gwExpires is when the sign-in the person joined with ends, and
+	// their talk with it.
+	gwExpires time.Time
 	server    string
 	expires   time.Time
 }
@@ -161,6 +169,7 @@ type state struct {
 	// from.
 	session    string
 	gwSession  string
+	gwExpires  time.Time
 	server     string
 	mute, deaf bool
 }
@@ -186,6 +195,8 @@ type voice struct {
 	*Deps
 	servers map[string]*server
 	pending map[string]*pending
+	// held counts each person's unclaimed tokens.
+	held    map[gocql.UUID]int
 	states  map[gocql.UUID]*state
 	rooms   map[gocql.UUID]*room
 	members *cache.Cache[gocql.UUID, []string]
@@ -198,6 +209,7 @@ func New(d *Deps) actor.Producer {
 			Deps:    d,
 			servers: make(map[string]*server),
 			pending: make(map[string]*pending),
+			held:    make(map[gocql.UUID]int),
 			states:  make(map[gocql.UUID]*state),
 			rooms:   make(map[gocql.UUID]*room),
 			members: cache.New[gocql.UUID, []string](10_000, d.Cfg.MembersTTL),
@@ -284,6 +296,9 @@ func (v *voice) join(msg Join) (*Ticket, error) {
 	if rm != nil && len(rm.users)-inside >= v.Cfg.MaxPerChannel {
 		return nil, ierrors.ResourceExhausted("this voice channel is full")
 	}
+	if v.held[msg.P.UserID] >= v.Cfg.MaxPendingPerUser {
+		return nil, ierrors.ResourceExhausted("you are joining too fast: wait a moment")
+	}
 	if rm == nil {
 		srv := v.leastLoaded()
 		if srv == nil {
@@ -295,8 +310,9 @@ func (v *voice) join(msg Join) (*Ticket, error) {
 	token := secure.Token()
 	v.pending[string(secure.Hash(token))] = &pending{
 		user: msg.User, userID: msg.P.UserID, channelID: chID, teamID: msg.Channel.TeamID,
-		gwSession: msg.P.SessionID, server: rm.server, expires: time.Now().Add(v.Cfg.TokenTTL),
+		gwSession: msg.P.SessionID, gwExpires: msg.P.ExpiresAt, server: rm.server, expires: time.Now().Add(v.Cfg.TokenTTL),
 	}
+	v.held[msg.P.UserID]++
 	rm.pending++
 	return &Ticket{Endpoint: v.servers[rm.server].endpoint, Token: token}, nil
 }
@@ -449,7 +465,7 @@ func (v *voice) claim(c *actor.Context, msg Claim) {
 		refuse("unknown or expired token")
 		return
 	}
-	delete(v.pending, hash)
+	v.forget(hash, p)
 	rm := v.rooms[p.channelID]
 	if rm == nil || rm.server != msg.Key || time.Now().After(p.expires) {
 		if rm != nil {
@@ -472,7 +488,7 @@ func (v *voice) claim(c *actor.Context, msg Claim) {
 	}
 	st := &state{
 		user: p.user, userID: p.userID, channelID: p.channelID, teamID: p.teamID,
-		session: randomID(), gwSession: p.gwSession, server: msg.Key,
+		session: randomID(), gwSession: p.gwSession, gwExpires: p.gwExpires, server: msg.Key,
 	}
 	v.states[p.userID] = st
 	rm.users = append(rm.users, p.userID)
@@ -503,12 +519,25 @@ func (v *voice) sweep() {
 	now := time.Now()
 	for hash, p := range v.pending {
 		if now.After(p.expires) {
-			delete(v.pending, hash)
+			v.forget(hash, p)
 			if rm := v.rooms[p.channelID]; rm != nil {
 				rm.pending--
 			}
 			v.dropIfIdle(p.channelID)
 		}
+	}
+	for _, st := range v.states {
+		if !st.gwExpires.IsZero() && now.After(st.gwExpires) {
+			v.remove(st, "your sign-in expired")
+		}
+	}
+}
+
+// forget drops an unclaimed token.
+func (v *voice) forget(hash string, p *pending) {
+	delete(v.pending, hash)
+	if v.held[p.userID]--; v.held[p.userID] <= 0 {
+		delete(v.held, p.userID)
 	}
 }
 
@@ -536,7 +565,7 @@ func (v *voice) serverDown(c *actor.Context, key string) {
 	}
 	for hash, p := range v.pending {
 		if p.server == key {
-			delete(v.pending, hash)
+			v.forget(hash, p)
 		}
 	}
 	for id, rm := range v.rooms {

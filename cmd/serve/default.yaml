@@ -116,6 +116,7 @@ services:
   voice:
     token_ttl: 30s
     max_per_channel: 25
+    max_pending_per_user: 5
     server_queue_limit: 4096
     members_ttl: 15s
     op_timeout: 10s

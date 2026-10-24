@@ -29,10 +29,16 @@ type Config struct {
 	WriteTimeout    time.Duration `mapstructure:"write_timeout"`
 	// ReadLimit bounds one signaling message, SendQueue how many may wait
 	// for a slow browser.
-	ReadLimit    int64         `mapstructure:"read_limit"`
-	SendQueue    int           `mapstructure:"send_queue"`
-	ReconnectMin time.Duration `mapstructure:"reconnect_min"`
-	ReconnectMax time.Duration `mapstructure:"reconnect_max"`
+	ReadLimit int64 `mapstructure:"read_limit"`
+	// MaxUnidentified bounds the connections waiting to identify, which
+	// anyone may open; MessageRate and MessageBurst how fast a peer may
+	// signal.
+	MaxUnidentified int           `mapstructure:"max_unidentified"`
+	MessageRate     float64       `mapstructure:"message_rate"`
+	MessageBurst    int           `mapstructure:"message_burst"`
+	SendQueue       int           `mapstructure:"send_queue"`
+	ReconnectMin    time.Duration `mapstructure:"reconnect_min"`
+	ReconnectMax    time.Duration `mapstructure:"reconnect_max"`
 }
 
 type HTTPConfig struct {
@@ -109,6 +115,9 @@ func (c *Config) Validate() error {
 	}
 	if c.IdentifyTimeout <= 0 || c.PingInterval <= 0 || c.WriteTimeout <= 0 || c.ReconnectMin <= 0 || c.ReconnectMax < c.ReconnectMin {
 		return errors.New("timeouts must be positive, and reconnect_max at least reconnect_min")
+	}
+	if c.MaxUnidentified < 1 || c.MessageRate <= 0 || c.MessageBurst < 1 {
+		return errors.New("max_unidentified, message_rate and message_burst must be positive")
 	}
 	if c.ReadLimit < 16<<10 || c.SendQueue < 8 {
 		return errors.New("read_limit must be at least 16KiB and send_queue at least 8")

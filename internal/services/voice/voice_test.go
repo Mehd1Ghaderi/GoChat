@@ -121,7 +121,7 @@ func newRig(t *testing.T, maxPerChannel int, member gocql.UUID) *rig {
 	}
 	r := &rig{t: t, engine: engine, hub: &fakeHub{}, team: ids.New(), stream: &fakeStream{}}
 	hubPID := engine.Spawn(func() actor.Receiver { return r.hub }, "hub")
-	cfg := &Config{TokenTTL: time.Minute, MaxPerChannel: maxPerChannel, ServerQueueLimit: 64, MembersTTL: time.Minute, OpTimeout: time.Second}
+	cfg := &Config{TokenTTL: time.Minute, MaxPerChannel: maxPerChannel, MaxPendingPerUser: 3, ServerQueueLimit: 64, MembersTTL: time.Minute, OpTimeout: time.Second}
 	r.voice = engine.Spawn(New(&Deps{Logger: zap.NewNop(), Cfg: cfg, Repo: &fakeRepo{team: r.team, member: member}, Engine: engine, Hub: hubPID}), "voice")
 	return r
 }
@@ -374,5 +374,51 @@ func TestListNeedsTheTeam(t *testing.T) {
 	admin := &models.Principal{UserID: ids.New(), Role: models.SystemRoleAdmin}
 	if _, err := r.ask(List{P: admin, TeamID: r.team}); err != nil {
 		t.Fatalf("a system admin could not list: %v", err)
+	}
+}
+
+func TestUnclaimedTokensAreCapped(t *testing.T) {
+	r := newRig(t, 10, gocql.UUID{})
+	r.serverUp("vs1")
+	p, room := r.user(), ids.New()
+	var first *Ticket
+	for i := range 3 {
+		ticket, err := r.join(p, room)
+		if err != nil {
+			t.Fatalf("join %d: %v", i, err)
+		}
+		if first == nil {
+			first = ticket
+		}
+	}
+	if _, err := r.join(p, room); !ierrors.Is(err, ierrors.CodeResourceExhausted) {
+		t.Fatalf("a fourth unclaimed token: %v", err)
+	}
+	if _, err := r.join(r.user(), room); err != nil {
+		t.Fatalf("someone else was held back: %v", err)
+	}
+	r.claim("vs1", first.Token)
+	if _, err := r.join(p, room); err != nil {
+		t.Fatalf("a claimed token still counted: %v", err)
+	}
+}
+
+func TestExpiredSignInsEndTheTalk(t *testing.T) {
+	r := newRig(t, 10, gocql.UUID{})
+	r.serverUp("vs1")
+	room := ids.New()
+	p := r.user()
+	p.ExpiresAt = time.Now().Add(100 * time.Millisecond)
+	got := r.connect(p, room, "vs1")
+	q := r.user()
+	q.ExpiresAt = time.Now().Add(time.Hour)
+	r.connect(q, room, "vs1")
+	time.Sleep(150 * time.Millisecond)
+	r.engine.Send(r.voice, sweep{})
+	if d := r.disconnected(got.Session); d.Reason != "your sign-in expired" {
+		t.Fatalf("reason %q", d.Reason)
+	}
+	if s := r.hub.last(t, room, 3); len(s.States) != 1 || s.States[0].User.Id != q.UserID.String() {
+		t.Fatalf("left: %v", users(s))
 	}
 }

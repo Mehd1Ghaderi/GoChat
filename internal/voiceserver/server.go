@@ -18,6 +18,7 @@ import (
 	"github.com/anthdm/hollywood/actor"
 	"github.com/coder/websocket"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
 	"github.com/ssenerg/gochat/internal/actors"
 	"github.com/ssenerg/gochat/internal/client/drpc"
@@ -26,23 +27,26 @@ import (
 
 // Server is a running voice server.
 type Server struct {
-	logger   *zap.Logger
-	cfg      *Config
-	engine   *actor.Engine
-	media    *Media
-	link     *actor.PID
-	rooms    *actor.PID
-	ready    *atomic.Bool
-	origins  []string
-	srv      *http.Server
-	failures chan error
-	stopOnce sync.Once
+	logger  *zap.Logger
+	cfg     *Config
+	engine  *actor.Engine
+	media   *Media
+	link    *actor.PID
+	rooms   *actor.PID
+	ready   *atomic.Bool
+	origins []string
+	// unidentified holds a place for each connection yet to identify.
+	unidentified chan struct{}
+	srv          *http.Server
+	failures     chan error
+	stopOnce     sync.Once
 }
 
 func New(logger *zap.Logger, cfg *Config, client *drpc.Client, engine *actor.Engine, media *Media) *Server {
 	s := &Server{
 		logger: logger.Named("voice"), cfg: cfg, engine: engine, media: media,
 		ready: new(atomic.Bool), failures: make(chan error, 1),
+		unidentified: make(chan struct{}, cfg.MaxUnidentified),
 	}
 	for _, o := range cfg.AllowedOrigins {
 		if u, err := url.Parse(o); err == nil {
@@ -109,16 +113,29 @@ type toRoom struct {
 
 // rtc serves one browser's signaling websocket.
 func (s *Server) rtc(w http.ResponseWriter, r *http.Request) {
+	select {
+	case s.unidentified <- struct{}{}:
+	default:
+		http.Error(w, "too many connections, try again", http.StatusServiceUnavailable)
+		return
+	}
 	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: s.origins})
 	if err != nil {
+		<-s.unidentified
 		return
 	}
 	ws.SetReadLimit(s.cfg.ReadLimit)
 	ctx := r.Context()
 
-	ictx, cancel := context.WithTimeout(ctx, s.cfg.IdentifyTimeout)
-	first, err := read(ictx, ws)
-	cancel()
+	// A cancelled read drops the connection without a word: the timer
+	// closes it with the reason instead.
+	late := time.AfterFunc(s.cfg.IdentifyTimeout, func() { _ = ws.Close(closeIdentify, "identify first, with a valid token") })
+	first, err := read(ctx, ws)
+	in := late.Stop()
+	<-s.unidentified
+	if !in {
+		return
+	}
 	if err != nil || first.Op != opIdentify || !secure.ValidToken(first.Token) {
 		_ = ws.Close(closeIdentify, "identify first, with a valid token")
 		return
@@ -154,9 +171,15 @@ func (s *Server) rtc(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.engine.Send(s.rooms, toRoom{channelID: cl.channelID, msg: removePeer{session: cl.session, code: closeDisconnected, reason: "left"}})
+	limit := rate.NewLimiter(rate.Limit(s.cfg.MessageRate), s.cfg.MessageBurst)
 	for {
 		msg, err := read(ctx, ws)
 		if err != nil {
+			return
+		}
+		if !limit.Allow() {
+			out.close(closeFailed, "too many messages")
+			<-written
 			return
 		}
 		var m any

@@ -40,6 +40,9 @@ voice:
   write_timeout: 10s
   read_limit: 65536
   send_queue: 128
+  max_unidentified: 256
+  message_rate: 50
+  message_burst: 200
   reconnect_min: 500ms
   reconnect_max: 15s
 

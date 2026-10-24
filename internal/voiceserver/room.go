@@ -216,6 +216,11 @@ func (r *room) add(c *actor.Context, msg addPeer) error {
 
 var errFull = errors.New("the voice channel is full")
 
+// maxVoiceRate bounds the bytes a peer's voice may carry per second, which
+// the room repeats to everyone else: Opus tops out at 510 kbit/s, and a
+// peer sending more is flooding the room, not talking.
+const maxVoiceRate = 64 << 10
+
 // forward relays a peer's voice to the track the others receive, until the
 // peer goes. It runs on Pion's goroutine for the track.
 func forward(engine *actor.Engine, room *actor.PID, session, userID string, remote *webrtc.TrackRemote) {
@@ -229,11 +234,15 @@ func forward(engine *actor.Engine, room *actor.PID, session, userID string, remo
 	}
 	engine.Send(room, trackAdded{session: session, track: local})
 	defer engine.Send(room, trackRemoved{session: session, id: local.ID()})
+	limit := rate.NewLimiter(maxVoiceRate, maxVoiceRate)
 	buf := make([]byte, 1500)
 	for {
 		n, _, err := remote.Read(buf)
 		if err != nil {
 			return
+		}
+		if !limit.AllowN(time.Now(), n) {
+			continue
 		}
 		if _, err := local.Write(buf[:n]); err != nil && !errors.Is(err, io.ErrClosedPipe) {
 			return
