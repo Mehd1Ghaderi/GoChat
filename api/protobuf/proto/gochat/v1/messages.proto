@@ -11,12 +11,16 @@ service MessageService {
   rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse);
   rpc GetMessage(GetMessageRequest) returns (GetMessageResponse);
   rpc SendTyping(SendTypingRequest) returns (SendTypingResponse);
+  // ListThread returns a thread's root and its replies.
+  rpc ListThread(ListThreadRequest) returns (ListThreadResponse);
 }
 
 message PostMessageRequest {
   string channel_id = 1;
   string content = 2;
   repeated string attachment_ids = 3;
+  // Set to reply in the thread of that root message.
+  string root_id = 4;
 }
 
 message PostMessageResponse {
@@ -27,6 +31,8 @@ message EditMessageRequest {
   string channel_id = 1;
   string message_id = 2;
   string content = 3;
+  // Set when the message is a reply.
+  string root_id = 4;
 }
 
 message EditMessageResponse {
@@ -36,6 +42,7 @@ message EditMessageResponse {
 message DeleteMessageRequest {
   string channel_id = 1;
   string message_id = 2;
+  string root_id = 3;
 }
 
 message DeleteMessageResponse {}
@@ -56,6 +63,23 @@ message ListMessagesResponse {
 message GetMessageRequest {
   string channel_id = 1;
   string message_id = 2;
+  string root_id = 3;
+}
+
+message ListThreadRequest {
+  string channel_id = 1;
+  string root_id = 2;
+  // Exclusive upper bound; empty starts at the newest reply.
+  string before_id = 3;
+  uint32 limit = 4;
+}
+
+message ListThreadResponse {
+  Message root = 1;
+  // Oldest first.
+  repeated Message replies = 2;
+  // Whether replies older than the first exist.
+  bool has_more = 3;
 }
 
 message GetMessageResponse {

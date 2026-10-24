@@ -117,6 +117,12 @@ type Message struct {
 	Content     string       `db:"content"`
 	Attachments []gocql.UUID `db:"attachments"`
 	EditedAt    time.Time    `db:"edited_at"`
+	// RootID is set on a reply. A root counts its replies and knows who
+	// took part in its thread.
+	RootID       gocql.UUID   `db:"root_id"`
+	ReplyCount   int          `db:"reply_count"`
+	LastReplyAt  time.Time    `db:"last_reply_at"`
+	Participants []gocql.UUID `db:"participants"`
 }
 
 type Attachment struct {

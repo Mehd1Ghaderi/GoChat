@@ -32,6 +32,30 @@
     });
   }
 
+  // The open thread, if any, so its replies arrive as they are written.
+  function threadRoot() {
+    var t = document.getElementById("thread-view");
+    return t ? t.dataset.root : "";
+  }
+
+  function announceThread() {
+    send({ op: "thread", root_id: threadRoot() });
+  }
+
+  function closeThread() {
+    var pane = document.getElementById("thread");
+    if (!pane || pane.innerHTML === "") return false;
+    pane.innerHTML = "";
+    announceThread();
+    return true;
+  }
+
+  function scrollThread(always) {
+    var box = document.getElementById("thread-scroll");
+    if (!box) return;
+    if (always || box.scrollHeight - box.scrollTop - box.clientHeight < 120) box.scrollTop = box.scrollHeight;
+  }
+
   function markActive() {
     var v = view();
     if (!v) return;
@@ -78,10 +102,15 @@
 
   function resetComposer(form) {
     form.reset();
-    var pending = document.querySelector(".composer-wrap .pending");
+    var wrap = form.closest(".composer-wrap");
+    var pending = wrap && wrap.querySelector(".pending");
     if (pending) pending.innerHTML = "";
     var ta = form.querySelector("textarea");
     if (ta) ta.style.height = "";
+  }
+
+  function isComposer(form) {
+    return !!form && form.classList.contains("composer");
   }
 
   htmx.onLoad(function (elt) {
@@ -91,6 +120,7 @@
   document.body.addEventListener("htmx:wsOpen", function (e) {
     socket = e.detail.socketWrapper;
     announce(opened);
+    if (threadRoot()) announceThread();
     opened = true;
   });
 
@@ -101,7 +131,7 @@
   // Validate and clear the composer around a send.
   document.body.addEventListener("htmx:wsConfigSend", function (e) {
     var form = e.detail.elt;
-    if (!form || form.id !== "composer") return;
+    if (!isComposer(form)) return;
     var p = e.detail.parameters;
     if (p.op !== "post") return;
     var hasText = (p.content || "").trim() !== "";
@@ -113,7 +143,15 @@
   });
 
   document.body.addEventListener("htmx:afterSwap", function (e) {
+    if (e.detail.target && e.detail.target.id === "thread") {
+      announceThread();
+      scrollThread(true);
+      var reply = document.querySelector("#reply-composer textarea");
+      if (reply && window.matchMedia("(min-width: 821px)").matches) reply.focus();
+      return;
+    }
     if (e.detail.target && e.detail.target.id === "main") {
+      closeThread();
       markActive();
       announce(false);
       var ta = document.querySelector("#composer textarea");
@@ -129,6 +167,7 @@
       window.location.assign(t.dataset.redirect);
     }
     if (t.classList.contains("toast")) expireToasts();
+    if (t.id.indexOf("replies-") === 0) scrollThread(false);
   });
 
   document.body.addEventListener("closeModal", closeModal);
@@ -150,8 +189,12 @@
   });
 
   // Upload progress and cleanup.
+  function progressOf(elt) {
+    var wrap = elt instanceof Element ? elt.closest(".composer-wrap") : null;
+    return wrap && wrap.querySelector(".upload-progress");
+  }
   document.body.addEventListener("htmx:xhr:progress", function (e) {
-    var bar = document.querySelector(".upload-progress");
+    var bar = progressOf(e.target);
     if (!bar || !e.detail.lengthComputable) return;
     bar.hidden = false;
     bar.value = Math.round((e.detail.loaded / e.detail.total) * 100);
@@ -160,7 +203,7 @@
     var elt = e.detail.elt;
     if (elt && elt.classList && elt.classList.contains("upload-form")) {
       elt.reset();
-      var bar = document.querySelector(".upload-progress");
+      var bar = progressOf(elt);
       if (bar) { bar.hidden = true; bar.value = 0; }
     }
   });
@@ -175,6 +218,10 @@
   document.addEventListener("click", function (e) {
     var target = e.target;
     if (!(target instanceof Element)) return;
+    if (target.closest("[data-close-thread]")) {
+      closeThread();
+      return;
+    }
     var closer = target.closest("[data-close-modal]");
     if (closer && (closer === target || closer.tagName === "BUTTON")) {
       closeModal();
@@ -213,9 +260,13 @@
   });
 
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") closeModal();
+    if (e.key === "Escape") {
+      var m = document.getElementById("modal");
+      if (m && m.innerHTML !== "") closeModal();
+      else closeThread();
+    }
     var t = e.target;
-    if (!(t instanceof HTMLTextAreaElement) || !t.form || t.form.id !== "composer") return;
+    if (!(t instanceof HTMLTextAreaElement) || !isComposer(t.form)) return;
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !touch.matches) {
       e.preventDefault();
       t.form.requestSubmit();
@@ -227,7 +278,7 @@
   var lastTyping = 0;
   document.addEventListener("input", function (e) {
     var t = e.target;
-    if (!(t instanceof HTMLTextAreaElement) || !t.form || t.form.id !== "composer") return;
+    if (!(t instanceof HTMLTextAreaElement) || !isComposer(t.form)) return;
     t.style.height = "auto";
     t.style.height = Math.min(t.scrollHeight, window.innerHeight * 0.4) + "px";
     var now = Date.now();

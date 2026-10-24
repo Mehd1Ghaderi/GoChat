@@ -150,6 +150,10 @@ func Message(m *models.Message, author *pb.User, atts []*models.Attachment) *pb.
 		Content:   m.Content,
 		CreatedAt: Time(m.ID.Time()),
 		EditedAt:  Time(m.EditedAt),
+		RootId:    ID(m.RootID),
+		// Counts are small; int32 cannot overflow here.
+		ReplyCount:  int32(m.ReplyCount), //nolint:gosec
+		LastReplyAt: Time(m.LastReplyAt),
 	}
 	for _, a := range atts {
 		out.Attachments = append(out.Attachments, Attachment(a))

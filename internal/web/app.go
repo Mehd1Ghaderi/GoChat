@@ -825,13 +825,15 @@ func (h *Handler) removeMember(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (h *Handler) messageTarget(w http.ResponseWriter, r *http.Request) (string, string, bool) {
-	chID, msgID := r.PathValue("channel"), r.PathValue("message")
-	if !uuidRe.MatchString(chID) || !uuidRe.MatchString(msgID) {
+// messageTarget reads a message's channel and id, and for a reply the id of
+// its thread's root from the query.
+func (h *Handler) messageTarget(w http.ResponseWriter, r *http.Request) (string, string, string, bool) {
+	chID, msgID, rootID := r.PathValue("channel"), r.PathValue("message"), r.URL.Query().Get("root")
+	if !uuidRe.MatchString(chID) || !uuidRe.MatchString(msgID) || (rootID != "" && !uuidRe.MatchString(rootID)) {
 		h.notFound(w, r)
-		return "", "", false
+		return "", "", "", false
 	}
-	return chID, msgID, true
+	return chID, msgID, rootID, true
 }
 
 func (h *Handler) loadMessage(w http.ResponseWriter, r *http.Request) (*pb.User, *pb.Message) {
@@ -839,13 +841,13 @@ func (h *Handler) loadMessage(w http.ResponseWriter, r *http.Request) (*pb.User,
 	if u == nil {
 		return nil, nil
 	}
-	chID, msgID, ok := h.messageTarget(w, r)
+	chID, msgID, rootID, ok := h.messageTarget(w, r)
 	if !ok {
 		return nil, nil
 	}
 	ctx, cancel := h.ctx(r)
 	defer cancel()
-	res, err := h.client.Messages.GetMessage(ctx, &pb.GetMessageRequest{ChannelId: chID, MessageId: msgID})
+	res, err := h.client.Messages.GetMessage(ctx, &pb.GetMessageRequest{ChannelId: chID, MessageId: msgID, RootId: rootID})
 	if err != nil {
 		h.fail(w, r, err)
 		return nil, nil
@@ -878,13 +880,13 @@ func (h *Handler) editMessage(w http.ResponseWriter, r *http.Request) {
 	if u == nil {
 		return
 	}
-	chID, msgID, ok := h.messageTarget(w, r)
+	chID, msgID, rootID, ok := h.messageTarget(w, r)
 	if !ok {
 		return
 	}
 	ctx, cancel := h.ctx(r)
 	defer cancel()
-	res, err := h.client.Messages.EditMessage(ctx, &pb.EditMessageRequest{ChannelId: chID, MessageId: msgID, Content: r.PostFormValue("content")})
+	res, err := h.client.Messages.EditMessage(ctx, &pb.EditMessageRequest{ChannelId: chID, MessageId: msgID, RootId: rootID, Content: r.PostFormValue("content")})
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -896,15 +898,84 @@ func (h *Handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
 	if h.signedIn(w, r) == nil {
 		return
 	}
-	chID, msgID, ok := h.messageTarget(w, r)
+	chID, msgID, rootID, ok := h.messageTarget(w, r)
 	if !ok {
 		return
 	}
 	ctx, cancel := h.ctx(r)
 	defer cancel()
-	if _, err := h.client.Messages.DeleteMessage(ctx, &pb.DeleteMessageRequest{ChannelId: chID, MessageId: msgID}); err != nil {
+	if _, err := h.client.Messages.DeleteMessage(ctx, &pb.DeleteMessageRequest{ChannelId: chID, MessageId: msgID, RootId: rootID}); err != nil {
 		h.fail(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+type threadView struct {
+	Root    *render.Message
+	Replies []*render.Message
+	HasMore bool
+	Oldest  string
+	Title   string
+	Member  bool
+}
+
+// threadPanel shows a thread, or with ?before its older replies.
+func (h *Handler) threadPanel(w http.ResponseWriter, r *http.Request) {
+	u := h.signedIn(w, r)
+	if u == nil {
+		return
+	}
+	chID, rootID, before := r.PathValue("channel"), r.PathValue("message"), r.URL.Query().Get("before")
+	if !uuidRe.MatchString(chID) || !uuidRe.MatchString(rootID) || (before != "" && !uuidRe.MatchString(before)) {
+		h.notFound(w, r)
+		return
+	}
+	ctx, cancel := h.ctx(r)
+	defer cancel()
+	g, gctx := errgroup.WithContext(ctx)
+	var (
+		ch     *pb.Channel
+		team   *pb.Team
+		thread *pb.ListThreadResponse
+	)
+	g.Go(func() error {
+		res, err := h.client.Channels.GetChannel(gctx, &pb.GetChannelRequest{ChannelId: chID})
+		if err != nil {
+			return err
+		}
+		ch = res.Channel
+		if ch.TeamId != "" {
+			t, err := h.client.Teams.GetTeam(gctx, &pb.GetTeamRequest{Key: &pb.GetTeamRequest_Id{Id: ch.TeamId}})
+			if err != nil {
+				return err
+			}
+			team = t.Team
+		}
+		return nil
+	})
+	g.Go(func() (err error) {
+		thread, err = h.client.Messages.ListThread(gctx, &pb.ListThreadRequest{ChannelId: chID, RootId: rootID, BeforeId: before, Limit: pageSize})
+		return
+	})
+	if err := g.Wait(); err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	mod := moderator(u, team, ch)
+	view := threadView{
+		Root:    h.render.Message(thread.Root, u.Id, mod),
+		Replies: h.render.Messages(thread.Replies, u.Id, mod),
+		HasMore: thread.HasMore,
+		Title:   render.Title(ch),
+		Member:  ch.Role != pb.ChannelRole_CHANNEL_ROLE_UNSPECIFIED,
+	}
+	if len(thread.Replies) > 0 {
+		view.Oldest = thread.Replies[0].Id
+	}
+	if before != "" {
+		h.fragment(w, http.StatusOK, "older-replies-page", view)
+		return
+	}
+	h.fragment(w, http.StatusOK, "thread", view)
 }

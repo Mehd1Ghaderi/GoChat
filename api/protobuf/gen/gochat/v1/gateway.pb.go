@@ -805,10 +805,12 @@ func (*Event_TeamJoined) isEvent_Payload() {}
 func (*Event_TeamLeft) isEvent_Payload() {}
 
 type MessagePosted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Message       *Message               `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Message *Message               `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	// For a reply: the people taking part in its thread.
+	ParticipantIds []string `protobuf:"bytes,2,rep,name=participant_ids,json=participantIds,proto3" json:"participant_ids,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *MessagePosted) Reset() {
@@ -844,6 +846,13 @@ func (*MessagePosted) Descriptor() ([]byte, []int) {
 func (x *MessagePosted) GetMessage() *Message {
 	if x != nil {
 		return x.Message
+	}
+	return nil
+}
+
+func (x *MessagePosted) GetParticipantIds() []string {
+	if x != nil {
+		return x.ParticipantIds
 	}
 	return nil
 }
@@ -896,6 +905,7 @@ type MessageDeleted struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ChannelId     string                 `protobuf:"bytes,1,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
 	MessageId     string                 `protobuf:"bytes,2,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	RootId        string                 `protobuf:"bytes,3,opt,name=root_id,json=rootId,proto3" json:"root_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -940,6 +950,13 @@ func (x *MessageDeleted) GetChannelId() string {
 func (x *MessageDeleted) GetMessageId() string {
 	if x != nil {
 		return x.MessageId
+	}
+	return ""
+}
+
+func (x *MessageDeleted) GetRootId() string {
+	if x != nil {
+		return x.RootId
 	}
 	return ""
 }
@@ -1294,16 +1311,18 @@ const file_gochat_v1_gateway_proto_rawDesc = "" +
 	" \x01(\v2\x15.gochat.v1.TeamJoinedH\x00R\n" +
 	"teamJoined\x122\n" +
 	"\tteam_left\x18\v \x01(\v2\x13.gochat.v1.TeamLeftH\x00R\bteamLeftB\t\n" +
-	"\apayload\"=\n" +
+	"\apayload\"f\n" +
 	"\rMessagePosted\x12,\n" +
-	"\amessage\x18\x01 \x01(\v2\x12.gochat.v1.MessageR\amessage\"=\n" +
+	"\amessage\x18\x01 \x01(\v2\x12.gochat.v1.MessageR\amessage\x12'\n" +
+	"\x0fparticipant_ids\x18\x02 \x03(\tR\x0eparticipantIds\"=\n" +
 	"\rMessageEdited\x12,\n" +
-	"\amessage\x18\x01 \x01(\v2\x12.gochat.v1.MessageR\amessage\"N\n" +
+	"\amessage\x18\x01 \x01(\v2\x12.gochat.v1.MessageR\amessage\"g\n" +
 	"\x0eMessageDeleted\x12\x1d\n" +
 	"\n" +
 	"channel_id\x18\x01 \x01(\tR\tchannelId\x12\x1d\n" +
 	"\n" +
-	"message_id\x18\x02 \x01(\tR\tmessageId\"L\n" +
+	"message_id\x18\x02 \x01(\tR\tmessageId\x12\x17\n" +
+	"\aroot_id\x18\x03 \x01(\tR\x06rootId\"L\n" +
 	"\x06Typing\x12\x1d\n" +
 	"\n" +
 	"channel_id\x18\x01 \x01(\tR\tchannelId\x12#\n" +

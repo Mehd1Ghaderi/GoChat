@@ -53,7 +53,7 @@
 <div class="composer-wrap">
   <div class="pending" id="pending-{{.Channel.Id}}"></div>
   <div class="composer-row">
-    <form class="upload-form" hx-post="/upload?channel={{.Channel.Id}}" hx-encoding="multipart/form-data"
+    <form class="upload-form" hx-post="/upload?channel={{.Channel.Id}}&amp;form=composer" hx-encoding="multipart/form-data"
           hx-target="#pending-{{.Channel.Id}}" hx-swap="beforeend" hx-trigger="change">
       <label class="icon-btn attach" title="Attach files" aria-label="Attach files">
         <input type="file" name="file" multiple class="visually-hidden">{{icon "attach"}}
@@ -73,10 +73,61 @@
 
 {{define "chip"}}
 <span class="chip">
-  <input type="hidden" name="attachment" value="{{.Id}}" form="composer">
+  <input type="hidden" name="attachment" value="{{.Id}}" form="{{.Form}}">
   <span class="chip-name">{{.Name}}</span><small>{{size .Size}}</small>
   <button type="button" class="chip-remove" aria-label="Remove {{.Name}}">{{icon "close"}}</button>
 </span>
 {{end}}
 
 {{define "typing"}}<div class="typing" id="typing-{{.ChannelID}}" aria-live="polite" hx-swap-oob="outerHTML">{{with .Name}}<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span> {{.}} is typing…{{end}}</div>{{end}}
+
+{{define "thread"}}
+<section class="thread-view" id="thread-view" data-root="{{.Root.Id}}" aria-labelledby="thread-title">
+  <header class="thread-header">
+    <h2 id="thread-title">Thread</h2>
+    <span class="thread-where">{{.Title}}</span>
+    <button class="icon-btn" type="button" data-close-thread aria-label="Close thread" title="Close">{{icon "close"}}</button>
+  </header>
+  <div class="thread-scroll" id="thread-scroll">
+    <article class="msg thread-root" id="root-{{.Root.Id}}">
+      {{template "avatar" (dict "User" .Root.Author "Size" "")}}
+      <div class="msg-main">{{template "msg-content" .Root}}</div>
+    </article>
+    <div class="replies" id="replies-{{.Root.Id}}">
+      {{if .HasMore}}{{template "older-replies" .}}{{end}}
+      {{range .Replies}}{{template "message" .}}{{end}}
+    </div>
+  </div>
+  {{if .Member}}
+  <div class="composer-wrap">
+    <div class="pending" id="pending-reply-{{.Root.Id}}"></div>
+    <div class="composer-row">
+      <form class="upload-form" hx-post="/upload?channel={{.Root.ChannelId}}&amp;form=reply-composer" hx-encoding="multipart/form-data"
+            hx-target="#pending-reply-{{.Root.Id}}" hx-swap="beforeend" hx-trigger="change">
+        <label class="icon-btn attach" title="Attach files" aria-label="Attach files">
+          <input type="file" name="file" multiple class="visually-hidden">{{icon "attach"}}
+        </label>
+      </form>
+      <form id="reply-composer" class="composer" ws-send>
+        <input type="hidden" name="op" value="post">
+        <input type="hidden" name="channel_id" value="{{.Root.ChannelId}}">
+        <input type="hidden" name="root_id" value="{{.Root.Id}}">
+        <textarea name="content" rows="1" maxlength="16000" autocomplete="off" aria-label="Reply" placeholder="Reply…"></textarea>
+        <button class="send" type="submit" aria-label="Send reply">{{icon "send"}}</button>
+      </form>
+    </div>
+    <progress class="upload-progress" max="100" value="0" hidden></progress>
+  </div>
+  {{end}}
+</section>
+{{end}}
+
+{{define "older-replies"}}
+<div class="older" hx-get="/m/{{.Root.ChannelId}}/{{.Root.Id}}/thread?before={{.Oldest}}" hx-trigger="intersect once" hx-swap="outerHTML">
+  <span class="spinner" aria-label="Loading earlier replies"></span>
+</div>
+{{end}}
+
+{{define "older-replies-page"}}{{if .HasMore}}{{template "older-replies" .}}{{end}}{{range .Replies}}{{template "message" .}}{{end}}{{end}}
+
+{{define "thread-closed"}}<aside id="thread" class="thread-pane" aria-label="Thread" hx-swap-oob="outerHTML"></aside>{{end}}

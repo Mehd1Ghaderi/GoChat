@@ -102,4 +102,8 @@ message Message {
   repeated Attachment attachments = 5;
   google.protobuf.Timestamp created_at = 6;
   google.protobuf.Timestamp edited_at = 7;
+  // A reply names its thread's root; a root counts its replies.
+  string root_id = 8;
+  int32 reply_count = 9;
+  google.protobuf.Timestamp last_reply_at = 10;
 }

@@ -791,14 +791,18 @@ func (x *Attachment) GetSize() int64 {
 }
 
 type Message struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	ChannelId     string                 `protobuf:"bytes,2,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
-	Author        *User                  `protobuf:"bytes,3,opt,name=author,proto3" json:"author,omitempty"`
-	Content       string                 `protobuf:"bytes,4,opt,name=content,proto3" json:"content,omitempty"`
-	Attachments   []*Attachment          `protobuf:"bytes,5,rep,name=attachments,proto3" json:"attachments,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	EditedAt      *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=edited_at,json=editedAt,proto3" json:"edited_at,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Id          string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	ChannelId   string                 `protobuf:"bytes,2,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	Author      *User                  `protobuf:"bytes,3,opt,name=author,proto3" json:"author,omitempty"`
+	Content     string                 `protobuf:"bytes,4,opt,name=content,proto3" json:"content,omitempty"`
+	Attachments []*Attachment          `protobuf:"bytes,5,rep,name=attachments,proto3" json:"attachments,omitempty"`
+	CreatedAt   *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	EditedAt    *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=edited_at,json=editedAt,proto3" json:"edited_at,omitempty"`
+	// A reply names its thread's root; a root counts its replies.
+	RootId        string                 `protobuf:"bytes,8,opt,name=root_id,json=rootId,proto3" json:"root_id,omitempty"`
+	ReplyCount    int32                  `protobuf:"varint,9,opt,name=reply_count,json=replyCount,proto3" json:"reply_count,omitempty"`
+	LastReplyAt   *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=last_reply_at,json=lastReplyAt,proto3" json:"last_reply_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -882,6 +886,27 @@ func (x *Message) GetEditedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *Message) GetRootId() string {
+	if x != nil {
+		return x.RootId
+	}
+	return ""
+}
+
+func (x *Message) GetReplyCount() int32 {
+	if x != nil {
+		return x.ReplyCount
+	}
+	return 0
+}
+
+func (x *Message) GetLastReplyAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LastReplyAt
+	}
+	return nil
+}
+
 var File_gochat_v1_types_proto protoreflect.FileDescriptor
 
 const file_gochat_v1_types_proto_rawDesc = "" +
@@ -940,7 +965,7 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12!\n" +
 	"\fcontent_type\x18\x03 \x01(\tR\vcontentType\x12\x12\n" +
-	"\x04size\x18\x04 \x01(\x03R\x04size\"\xa8\x02\n" +
+	"\x04size\x18\x04 \x01(\x03R\x04size\"\xa2\x03\n" +
 	"\aMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -950,7 +975,12 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"\vattachments\x18\x05 \x03(\v2\x15.gochat.v1.AttachmentR\vattachments\x129\n" +
 	"\n" +
 	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x127\n" +
-	"\tedited_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\beditedAt*V\n" +
+	"\tedited_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\beditedAt\x12\x17\n" +
+	"\aroot_id\x18\b \x01(\tR\x06rootId\x12\x1f\n" +
+	"\vreply_count\x18\t \x01(\x05R\n" +
+	"replyCount\x12>\n" +
+	"\rlast_reply_at\x18\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\vlastReplyAt*V\n" +
 	"\n" +
 	"SystemRole\x12\x1b\n" +
 	"\x17SYSTEM_ROLE_UNSPECIFIED\x10\x00\x12\x14\n" +
@@ -1022,11 +1052,12 @@ var file_gochat_v1_types_proto_depIdxs = []int32{
 	10, // 16: gochat.v1.Message.attachments:type_name -> gochat.v1.Attachment
 	12, // 17: gochat.v1.Message.created_at:type_name -> google.protobuf.Timestamp
 	12, // 18: gochat.v1.Message.edited_at:type_name -> google.protobuf.Timestamp
-	19, // [19:19] is the sub-list for method output_type
-	19, // [19:19] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	12, // 19: gochat.v1.Message.last_reply_at:type_name -> google.protobuf.Timestamp
+	20, // [20:20] is the sub-list for method output_type
+	20, // [20:20] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_gochat_v1_types_proto_init() }

@@ -83,6 +83,8 @@ message Event {
 
 message MessagePosted {
   Message message = 1;
+  // For a reply: the people taking part in its thread.
+  repeated string participant_ids = 2;
 }
 
 message MessageEdited {
@@ -92,6 +94,7 @@ message MessageEdited {
 message MessageDeleted {
   string channel_id = 1;
   string message_id = 2;
+  string root_id = 3;
 }
 
 message Typing {

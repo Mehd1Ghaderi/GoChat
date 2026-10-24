@@ -230,6 +230,7 @@ var (
 	secretRe  = regexp.MustCompile(`<code>([A-Z2-7]{16,})</code>`)
 	codeRe    = regexp.MustCompile(`<code>([a-z2-7]{5}-[a-z2-7]{5})</code>`)
 	teamIDRe  = regexp.MustCompile(`data-team="([0-9a-f-]{36})"`)
+	msgIDRe   = regexp.MustCompile(`id="msg-([0-9a-f-]{36})"`)
 	photoRe   = regexp.MustCompile(`/photos/([ut])/([0-9a-f-]{36})/([0-9a-f]{16})`)
 )
 
@@ -328,6 +329,45 @@ func TestEndToEnd(t *testing.T) {
 			t.Fatalf("unescaped content reached the page: %s", f)
 		}
 		bobWS.expect(5*time.Second, "from bob")
+	})
+
+	t.Run("threads keep replies apart", func(t *testing.T) {
+		bobWS.send(map[string]string{"op": "post", "channel_id": town, "content": "root for a thread"})
+		f := adminWS.expect(5*time.Second, "root for a thread", `hx-swap-oob="afterbegin"`)
+		root := msgIDRe.FindStringSubmatch(f)[1]
+		bobWS.send(map[string]string{"op": "thread", "root_id": root})
+		adminWS.send(map[string]string{"op": "post", "channel_id": town, "root_id": root, "content": "first reply"})
+		f = bobWS.expect(5*time.Second, "first reply", `id="replies-`+root+`"`)
+		reply := msgIDRe.FindStringSubmatch(f)[1]
+		adminWS.expect(5*time.Second, `id="msg-`+root+`"`, "1 reply")
+		if _, page := admin.get("/t/" + teamName + "/ch/" + town); strings.Contains(page, "first reply") || !strings.Contains(page, "1 reply") {
+			t.Fatal("the reply is in the channel's stream, or the root does not count it")
+		}
+		if _, panel := admin.do(http.MethodGet, "/m/"+town+"/"+root+"/thread", nil, "", true); !strings.Contains(panel, "root for a thread") ||
+			!strings.Contains(panel, "first reply") || !strings.Contains(panel, `id="reply-composer"`) {
+			t.Fatalf("thread panel: %s", panel)
+		}
+		if res, _ := bob.hx("/m/"+town+"/"+reply+"/delete?root="+root, url.Values{}); res.StatusCode != http.StatusForbidden {
+			t.Fatalf("bob deleted admin's reply: %d", res.StatusCode)
+		}
+		if res, _ := admin.hx("/m/"+town+"/"+reply+"/delete?root="+root, url.Values{}); res.StatusCode != http.StatusOK {
+			t.Fatalf("deleting a reply: %d", res.StatusCode)
+		}
+		bobWS.expect(5*time.Second, `id="msg-`+reply+`"`, `hx-swap-oob="delete"`)
+		if f := adminWS.expect(5*time.Second, `id="msg-`+root+`"`); strings.Contains(f, "thread-link") {
+			t.Fatalf("the root still counts a deleted reply: %s", f)
+		}
+		adminWS.send(map[string]string{"op": "post", "channel_id": town, "root_id": root, "content": "second reply"})
+		bobWS.expect(5*time.Second, "second reply")
+		if res, _ := bob.hx("/m/"+town+"/"+root+"/delete", url.Values{}); res.StatusCode != http.StatusOK {
+			t.Fatalf("deleting a root: %d", res.StatusCode)
+		}
+		bobWS.expect(5*time.Second, `id="thread"`, `hx-swap-oob="outerHTML"`)
+		if res, _ := admin.do(http.MethodGet, "/m/"+town+"/"+root+"/thread", nil, "", true); res.StatusCode != http.StatusNotFound {
+			t.Fatalf("a deleted root's thread: %d", res.StatusCode)
+		}
+		bobWS.send(map[string]string{"op": "post", "channel_id": town, "root_id": root, "content": "late reply"})
+		bobWS.expect(5*time.Second, "message not found")
 	})
 
 	t.Run("typing reaches others only", func(t *testing.T) {
@@ -550,7 +590,7 @@ func TestEndToEnd(t *testing.T) {
 			t.Fatalf("svg accepted: %s", body)
 		}
 
-		if body := upload(bob, "/t/"+teamName+"/photo", "team.png", raw.Bytes()); !strings.Contains(body, "form-error") || photoRe.MatchString(body) {
+		if body := upload(bob, "/t/"+teamName+"/photo", "team.png", raw.Bytes()); !strings.Contains(body, "form-error") || strings.Contains(body, "Saved.") {
 			t.Fatalf("a member set the team photo: %s", body)
 		}
 		var tinted bytes.Buffer

@@ -29,6 +29,14 @@ type Repo interface {
 	GetMessage(ctx context.Context, channelID, id gocql.UUID) (*models.Message, error)
 	UpdateMessageContent(ctx context.Context, channelID, id gocql.UUID, content string, at time.Time) error
 	DeleteMessage(ctx context.Context, channelID, id gocql.UUID) error
+	InsertReply(ctx context.Context, m *models.Message) error
+	GetReply(ctx context.Context, channelID, rootID, id gocql.UUID) (*models.Message, error)
+	UpdateReplyContent(ctx context.Context, channelID, rootID, id gocql.UUID, content string, at time.Time) error
+	DeleteReply(ctx context.Context, channelID, rootID, id gocql.UUID) error
+	ListReplies(ctx context.Context, channelID, rootID, before gocql.UUID, limit int) ([]*models.Message, bool, error)
+	ThreadAttachments(ctx context.Context, channelID, rootID gocql.UUID) ([]gocql.UUID, error)
+	DeleteThread(ctx context.Context, channelID, rootID gocql.UUID) error
+	SetThreadSummary(ctx context.Context, root *models.Message, count int, last time.Time, participant gocql.UUID) error
 	ListMessages(ctx context.Context, channelID, before gocql.UUID, limit int) ([]*models.Message, bool, error)
 	LastMessageBucket(ctx context.Context, channelID gocql.UUID) (int32, bool, error)
 	SetLastMessage(ctx context.Context, channelID, messageID gocql.UUID) error

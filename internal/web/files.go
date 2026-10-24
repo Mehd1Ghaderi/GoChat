@@ -28,8 +28,11 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 	if h.signedIn(w, r) == nil {
 		return
 	}
-	chID := r.URL.Query().Get("channel")
-	if !uuidRe.MatchString(chID) {
+	chID, form := r.URL.Query().Get("channel"), r.URL.Query().Get("form")
+	if form == "" {
+		form = "composer"
+	}
+	if !uuidRe.MatchString(chID) || (form != "composer" && form != "reply-composer") {
 		h.notFound(w, r)
 		return
 	}
@@ -76,7 +79,10 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	var out strings.Builder
 	for _, att := range atts {
-		if err := h.render.Fragment(&out, "chip", att); err != nil {
+		if err := h.render.Fragment(&out, "chip", struct {
+			*pb.Attachment
+			Form string
+		}{att, form}); err != nil {
 			h.fail(w, r, ierrors.Internal(err))
 			return
 		}

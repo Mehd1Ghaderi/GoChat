@@ -84,8 +84,10 @@ type session struct {
 	typingSeq uint64
 	// typer is who the typing line names, and shown the newest message on
 	// the page.
-	typer    string
-	shown    string
+	typer string
+	shown string
+	// threadID is the root of the thread the tab has open.
+	threadID string
 	resynced string
 	posts    chan *pb.PostMessageRequest
 	reads    map[string]string
@@ -385,6 +387,7 @@ type clientFrame struct {
 	LastID     string          `json:"last_id"`
 	Moderator  string          `json:"moderator"`
 	Resync     string          `json:"resync"`
+	RootID     string          `json:"root_id"`
 	Content    string          `json:"content"`
 	Attachment json.RawMessage `json:"attachment"`
 }
@@ -416,10 +419,17 @@ func (s *session) frame(c *actor.Context, data []byte) {
 		if !uuidRe.MatchString(f.ChannelID) {
 			return
 		}
+		if f.RootID != "" && !uuidRe.MatchString(f.RootID) {
+			return
+		}
 		select {
-		case s.posts <- &pb.PostMessageRequest{ChannelId: f.ChannelID, Content: f.Content, AttachmentIds: f.attachments()}:
+		case s.posts <- &pb.PostMessageRequest{ChannelId: f.ChannelID, Content: f.Content, AttachmentIds: f.attachments(), RootId: f.RootID}:
 		default:
 			s.toast("error", "You are sending too fast: a message was not sent.")
+		}
+	case "thread":
+		if f.RootID == "" || uuidRe.MatchString(f.RootID) {
+			s.threadID = f.RootID
 		}
 	case "typing":
 		if f.ChannelID != s.channelID || !uuidRe.MatchString(f.ChannelID) {
@@ -451,7 +461,7 @@ func (s *session) view(c *actor.Context, f *clientFrame) {
 	}
 	teamChanged := f.TeamID != s.teamID
 	if f.ChannelID != s.channelID {
-		s.resynced = ""
+		s.resynced, s.threadID = "", ""
 	}
 	s.teamID, s.teamName, s.channelID = f.TeamID, f.TeamName, f.ChannelID
 	s.moderator = f.Moderator == "1"
@@ -514,6 +524,12 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 	case *pb.Event_MessagePosted:
 		m := p.MessagePosted.Message
 		mine := m.GetAuthor().GetId() == me
+		if m.RootId != "" {
+			if m.RootId == s.threadID {
+				s.message("reply-new", s.Render.Message(m, me, s.moderator))
+			}
+			return
+		}
 		if m.ChannelId == s.channelID {
 			s.message("message-new", s.Render.Message(m, me, s.moderator))
 			if render.Newer(m.Id, s.shown) {
@@ -531,14 +547,19 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 		}
 	case *pb.Event_MessageEdited:
 		m := p.MessageEdited.Message
-		if m.ChannelId == s.channelID {
+		if (m.RootId == "" && m.ChannelId == s.channelID) || (m.RootId != "" && m.RootId == s.threadID) {
 			view := s.Render.Message(m, me, s.moderator)
 			view.OOB = true
 			s.message("message", view)
 		}
 	case *pb.Event_MessageDeleted:
-		if p.MessageDeleted.ChannelId == s.channelID {
-			s.fragment("message-deleted", p.MessageDeleted.MessageId)
+		d := p.MessageDeleted
+		if d.MessageId == s.threadID {
+			s.threadID = ""
+			s.fragment("thread-closed", nil)
+		}
+		if (d.RootId == "" && d.ChannelId == s.channelID) || (d.RootId != "" && d.RootId == s.threadID) {
+			s.fragment("message-deleted", d.MessageId)
 		}
 	case *pb.Event_Typing:
 		t := p.Typing

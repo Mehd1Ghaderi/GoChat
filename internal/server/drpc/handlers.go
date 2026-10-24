@@ -517,7 +517,7 @@ func (s *messageService) PostMessage(ctx context.Context, req *pb.PostMessageReq
 	if err != nil {
 		return nil, err
 	}
-	m, err := actors.Ask[*pb.Message](ctx, s.sys.Engine, s.sys.Channels, channels.Post{Target: t, Content: req.Content, AttachmentIDs: req.AttachmentIds})
+	m, err := actors.Ask[*pb.Message](ctx, s.sys.Engine, s.sys.Channels, channels.Post{Target: t, Content: req.Content, AttachmentIDs: req.AttachmentIds, RootID: req.RootId})
 	if err != nil {
 		return nil, err
 	}
@@ -529,7 +529,7 @@ func (s *messageService) EditMessage(ctx context.Context, req *pb.EditMessageReq
 	if err != nil {
 		return nil, err
 	}
-	m, err := actors.Ask[*pb.Message](ctx, s.sys.Engine, s.sys.Channels, channels.Edit{Target: t, MessageID: req.MessageId, Content: req.Content})
+	m, err := actors.Ask[*pb.Message](ctx, s.sys.Engine, s.sys.Channels, channels.Edit{Target: t, MessageID: req.MessageId, RootID: req.RootId, Content: req.Content})
 	if err != nil {
 		return nil, err
 	}
@@ -541,7 +541,7 @@ func (s *messageService) DeleteMessage(ctx context.Context, req *pb.DeleteMessag
 	if err != nil {
 		return nil, err
 	}
-	if _, err := actors.Ask[channels.Done](ctx, s.sys.Engine, s.sys.Channels, channels.Delete{Target: t, MessageID: req.MessageId}); err != nil {
+	if _, err := actors.Ask[channels.Done](ctx, s.sys.Engine, s.sys.Channels, channels.Delete{Target: t, MessageID: req.MessageId, RootID: req.RootId}); err != nil {
 		return nil, err
 	}
 	return &pb.DeleteMessageResponse{}, nil
@@ -564,11 +564,23 @@ func (s *messageService) GetMessage(ctx context.Context, req *pb.GetMessageReque
 	if err != nil {
 		return nil, err
 	}
-	m, err := actors.Ask[*pb.Message](ctx, s.sys.Engine, s.sys.Channels, channels.GetMessage{Target: t, MessageID: req.MessageId})
+	m, err := actors.Ask[*pb.Message](ctx, s.sys.Engine, s.sys.Channels, channels.GetMessage{Target: t, MessageID: req.MessageId, RootID: req.RootId})
 	if err != nil {
 		return nil, err
 	}
 	return &pb.GetMessageResponse{Message: m}, nil
+}
+
+func (s *messageService) ListThread(ctx context.Context, req *pb.ListThreadRequest) (*pb.ListThreadResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	res, err := actors.Ask[*channels.ThreadResult](ctx, s.sys.Engine, s.sys.Channels, channels.Thread{Target: t, RootID: req.RootId, BeforeID: req.BeforeId, Limit: int(req.Limit)})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ListThreadResponse{Root: res.Root, Replies: res.Replies, HasMore: res.HasMore}, nil
 }
 
 func (s *messageService) SendTyping(ctx context.Context, req *pb.SendTypingRequest) (*pb.SendTypingResponse, error) {

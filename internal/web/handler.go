@@ -134,6 +134,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("POST /t/{team}/members/{user}/role", h.csrf(http.HandlerFunc(h.teamMemberRole)))
 
 	mux.HandleFunc("GET /m/{channel}/{message}", h.messageFragment)
+	mux.HandleFunc("GET /m/{channel}/{message}/thread", h.threadPanel)
 	mux.HandleFunc("GET /m/{channel}/{message}/edit", h.editMessageForm)
 	mux.Handle("POST /m/{channel}/{message}", h.csrf(http.HandlerFunc(h.editMessage)))
 	mux.Handle("POST /m/{channel}/{message}/delete", h.csrf(http.HandlerFunc(h.deleteMessage)))

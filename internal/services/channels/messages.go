@@ -31,21 +31,26 @@ type AccessResult struct {
 // View replies with the caller's *pb.Channel.
 type View struct{ Target }
 
+// Post writes a message, or with RootID a reply in that message's thread.
 type Post struct {
 	Target
 	Content       string
 	AttachmentIDs []string
+	RootID        string
 }
 
+// Edit, Delete and GetMessage name a reply by its RootID as well.
 type Edit struct {
 	Target
 	MessageID string
+	RootID    string
 	Content   string
 }
 
 type Delete struct {
 	Target
 	MessageID string
+	RootID    string
 }
 
 // History replies with *HistoryResult.
@@ -63,6 +68,22 @@ type HistoryResult struct {
 type GetMessage struct {
 	Target
 	MessageID string
+	RootID    string
+}
+
+// Thread replies with *ThreadResult.
+type Thread struct {
+	Target
+	RootID   string
+	BeforeID string
+	Limit    int
+}
+
+type ThreadResult struct {
+	Root *pb.Message
+	// Replies are oldest first.
+	Replies []*pb.Message
+	HasMore bool
 }
 
 type Typing struct{ Target }

@@ -2,6 +2,7 @@ package channels
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/anthdm/hollywood/actor"
@@ -172,6 +173,8 @@ func (a *channel) handle(c *actor.Context, req Request) {
 		err = a.history(c, msg)
 	case GetMessage:
 		err = a.getMessage(c, msg)
+	case Thread:
+		err = a.thread(c, msg)
 	case Typing:
 		out, err = a.typingEvent(msg)
 	case MarkRead:
@@ -323,6 +326,12 @@ func (a *channel) post(msg Post) (*pb.Message, error) {
 	if err != nil {
 		return nil, err
 	}
+	var root *models.Message
+	if msg.RootID != "" {
+		if root, err = a.messageOf(ctx, msg.RootID, ""); err != nil {
+			return nil, err
+		}
+	}
 	atts, err := a.ownAttachments(ctx, msg.P.UserID, attIDs)
 	if err != nil {
 		return nil, err
@@ -346,6 +355,9 @@ func (a *channel) post(msg Post) (*pb.Message, error) {
 			return nil, err
 		}
 	}
+	if root != nil {
+		return a.reply(ctx, root, m, author, atts)
+	}
 	newBucket := !a.hasBucket || m.Bucket != a.bucket
 	if err := a.Repo.InsertMessage(ctx, m, newBucket); err != nil {
 		// A message that may still land keeps its attachments.
@@ -367,6 +379,51 @@ func (a *channel) post(msg Post) (*pb.Message, error) {
 	out := convert.Message(m, convert.PublicUser(author), atts)
 	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessagePosted{MessagePosted: &pb.MessagePosted{Message: out}}})
 	return out, nil
+}
+
+// reply writes m to root's thread. Replies leave the channel's stream and
+// its unread state alone: the root shows their count.
+func (a *channel) reply(ctx context.Context, root, m *models.Message, author *models.User, atts []*models.Attachment) (*pb.Message, error) {
+	m.RootID, m.Bucket = root.ID, 0
+	if err := a.Repo.InsertReply(ctx, m); err != nil {
+		if !scylla.Uncertain(err) {
+			a.unclaim(atts, m.ID)
+		}
+		return nil, err
+	}
+	delete(a.typing, m.UserID)
+	// The people to tell are those in the thread before this reply.
+	notify := make([]string, 0, len(root.Participants)+1)
+	seen := map[gocql.UUID]bool{m.UserID: true}
+	for _, id := range append([]gocql.UUID{root.UserID}, root.Participants...) {
+		if !seen[id] {
+			seen[id] = true
+			notify = append(notify, id.String())
+		}
+	}
+	out := convert.Message(m, convert.PublicUser(author), atts)
+	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessagePosted{MessagePosted: &pb.MessagePosted{Message: out, ParticipantIds: notify}}})
+
+	root.ReplyCount++
+	root.LastReplyAt = m.ID.Time()
+	if !slices.Contains(root.Participants, m.UserID) {
+		root.Participants = append(root.Participants, m.UserID)
+	}
+	if err := a.Repo.SetThreadSummary(ctx, root, root.ReplyCount, root.LastReplyAt, m.UserID); err != nil {
+		a.Logger.Warn("failed to count a reply", zap.String("channel", a.id.String()), zap.Error(err))
+	}
+	a.rootChanged(ctx, root)
+	return out, nil
+}
+
+// rootChanged tells members about a root whose thread changed.
+func (a *channel) rootChanged(ctx context.Context, root *models.Message) {
+	out, err := a.render(ctx, []*models.Message{root})
+	if err != nil {
+		a.Logger.Warn("failed to render a thread's root", zap.String("channel", a.id.String()), zap.Error(err))
+		return
+	}
+	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessageEdited{MessageEdited: &pb.MessageEdited{Message: out[0]}}})
 }
 
 // unclaim returns attachments claimed for a message that was not written to
@@ -406,12 +463,23 @@ func (a *channel) ownAttachments(ctx context.Context, userID gocql.UUID, attIDs 
 	return out, nil
 }
 
-func (a *channel) messageOf(ctx context.Context, raw string) (*models.Message, error) {
+// messageOf finds a message, or with rawRoot a reply in that thread.
+func (a *channel) messageOf(ctx context.Context, raw, rawRoot string) (*models.Message, error) {
 	id, ok := ids.ParseTime(raw)
 	if !ok {
 		return nil, ierrors.InvalidArgument("invalid message id")
 	}
-	m, err := a.Repo.GetMessage(ctx, a.id, id)
+	var (
+		m   *models.Message
+		err error
+	)
+	if rawRoot == "" {
+		m, err = a.Repo.GetMessage(ctx, a.id, id)
+	} else if rootID, ok := ids.ParseTime(rawRoot); !ok {
+		return nil, ierrors.InvalidArgument("invalid message id")
+	} else {
+		m, err = a.Repo.GetReply(ctx, a.id, rootID, id)
+	}
 	if err != nil {
 		if ierrors.Is(err, ierrors.CodeNotFound) {
 			return nil, ierrors.NotFound("message not found")
@@ -435,7 +503,7 @@ func (a *channel) edit(msg Edit) (*pb.Message, error) {
 	}
 	ctx, cancel := a.ctx()
 	defer cancel()
-	m, err := a.messageOf(ctx, msg.MessageID)
+	m, err := a.messageOf(ctx, msg.MessageID, msg.RootID)
 	if err != nil {
 		return nil, err
 	}
@@ -454,7 +522,12 @@ func (a *channel) edit(msg Edit) (*pb.Message, error) {
 		return nil, err
 	}
 	now := time.Now().UTC()
-	if err := a.Repo.UpdateMessageContent(ctx, a.id, m.ID, content, now); err != nil {
+	if ids.IsZero(m.RootID) {
+		err = a.Repo.UpdateMessageContent(ctx, a.id, m.ID, content, now)
+	} else {
+		err = a.Repo.UpdateReplyContent(ctx, a.id, m.RootID, m.ID, content, now)
+	}
+	if err != nil {
 		return nil, err
 	}
 	m.Content, m.EditedAt = content, now
@@ -470,7 +543,7 @@ func (a *channel) delete(msg Delete) (Done, error) {
 	}
 	ctx, cancel := a.ctx()
 	defer cancel()
-	m, err := a.messageOf(ctx, msg.MessageID)
+	m, err := a.messageOf(ctx, msg.MessageID, msg.RootID)
 	if err != nil {
 		return Done{}, err
 	}
@@ -487,6 +560,9 @@ func (a *channel) delete(msg Delete) (Done, error) {
 			return Done{}, ierrors.PermissionDenied()
 		}
 	}
+	if !ids.IsZero(m.RootID) {
+		return Done{}, a.deleteReply(ctx, m)
+	}
 	if err := a.Repo.DeleteMessage(ctx, a.id, m.ID); err != nil {
 		return Done{}, err
 	}
@@ -494,10 +570,56 @@ func (a *channel) delete(msg Delete) (Done, error) {
 		a.rewindLast(ctx)
 	}
 	a.dropAttachments(m.Attachments)
+	if m.ReplyCount > 0 {
+		a.dropThread(ctx, m.ID)
+	}
 	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessageDeleted{MessageDeleted: &pb.MessageDeleted{
 		ChannelId: a.id.String(), MessageId: m.ID.String(),
 	}}})
 	return Done{}, nil
+}
+
+func (a *channel) deleteReply(ctx context.Context, m *models.Message) error {
+	if err := a.Repo.DeleteReply(ctx, a.id, m.RootID, m.ID); err != nil {
+		return err
+	}
+	a.dropAttachments(m.Attachments)
+	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessageDeleted{MessageDeleted: &pb.MessageDeleted{
+		ChannelId: a.id.String(), MessageId: m.ID.String(), RootId: m.RootID.String(),
+	}}})
+	root, err := a.Repo.GetMessage(ctx, a.id, m.RootID)
+	if err != nil {
+		return nil
+	}
+	newest, _, err := a.Repo.ListReplies(ctx, a.id, root.ID, gocql.UUID{}, 1)
+	if err != nil {
+		a.Logger.Warn("failed to recount a thread", zap.String("channel", a.id.String()), zap.Error(err))
+		return nil
+	}
+	root.ReplyCount, root.LastReplyAt = max(root.ReplyCount-1, 0), time.Time{}
+	if len(newest) > 0 {
+		root.LastReplyAt = newest[0].ID.Time()
+	} else {
+		root.ReplyCount = 0
+	}
+	if err := a.Repo.SetThreadSummary(ctx, root, root.ReplyCount, root.LastReplyAt, gocql.UUID{}); err != nil {
+		a.Logger.Warn("failed to recount a thread", zap.String("channel", a.id.String()), zap.Error(err))
+	}
+	a.rootChanged(ctx, root)
+	return nil
+}
+
+// dropThread deletes the replies of a deleted root, and their files.
+func (a *channel) dropThread(ctx context.Context, rootID gocql.UUID) {
+	atts, err := a.Repo.ThreadAttachments(ctx, a.id, rootID)
+	if err != nil {
+		a.Logger.Warn("failed to list a thread's files", zap.String("channel", a.id.String()), zap.Error(err))
+	}
+	if err := a.Repo.DeleteThread(ctx, a.id, rootID); err != nil {
+		a.Logger.Warn("failed to delete a thread", zap.String("channel", a.id.String()), zap.Error(err))
+		return
+	}
+	a.dropAttachments(atts)
 }
 
 // rewindLast makes the newest remaining message the channel's last, so the
@@ -609,7 +731,7 @@ func (a *channel) getMessage(c *actor.Context, msg GetMessage) error {
 		return err
 	}
 	a.async(c, func(ctx context.Context) (any, error) {
-		m, err := a.messageOf(ctx, msg.MessageID)
+		m, err := a.messageOf(ctx, msg.MessageID, msg.RootID)
 		if err != nil {
 			return nil, err
 		}
@@ -618,6 +740,41 @@ func (a *channel) getMessage(c *actor.Context, msg GetMessage) error {
 			return nil, err
 		}
 		return out[0], nil
+	})
+	return nil
+}
+
+func (a *channel) thread(c *actor.Context, msg Thread) error {
+	if err := a.canRead(msg.P); err != nil {
+		return err
+	}
+	var before gocql.UUID
+	if msg.BeforeID != "" {
+		id, ok := ids.ParseTime(msg.BeforeID)
+		if !ok {
+			return ierrors.InvalidArgument("invalid cursor")
+		}
+		before = id
+	}
+	limit := msg.Limit
+	if limit <= 0 || limit > a.Cfg.HistoryLimit {
+		limit = a.Cfg.HistoryLimit
+	}
+	a.async(c, func(ctx context.Context) (any, error) {
+		root, err := a.messageOf(ctx, msg.RootID, "")
+		if err != nil {
+			return nil, err
+		}
+		replies, more, err := a.Repo.ListReplies(ctx, a.id, root.ID, before, limit)
+		if err != nil {
+			return nil, err
+		}
+		slices.Reverse(replies)
+		out, err := a.render(ctx, append([]*models.Message{root}, replies...))
+		if err != nil {
+			return nil, err
+		}
+		return &ThreadResult{Root: out[0], Replies: out[1:], HasMore: more}, nil
 	})
 	return nil
 }

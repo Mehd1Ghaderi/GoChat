@@ -2,36 +2,46 @@
 <article class="msg{{if .Mine}} mine{{end}}" id="msg-{{.Id}}"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>
   {{template "avatar" (dict "User" .Author "Size" "")}}
   <div class="msg-main">
-    <header>
-      <strong class="author">{{name .Author}}</strong>
-      {{with .Author}}<span class="handle">@{{.Username}}</span>{{end}}
-      <time datetime="{{iso .Time}}" title="{{date .Time}}">{{clock .Time}}</time>
-      {{if .Edited}}<span class="edited">(edited)</span>{{end}}
-    </header>
-    {{if .Content}}<div class="body">{{.Body}}</div>{{end}}
-    {{with .Attachments}}<ul class="files">{{range .}}{{template "attachment" .}}{{end}}</ul>{{end}}
+    {{template "msg-content" .}}
+    {{if and (not .RootId) .ReplyCount}}
+    <button class="thread-link" hx-get="/m/{{.ChannelId}}/{{.Id}}/thread" hx-target="#thread">{{icon "reply"}}<span>{{.ReplyCount}} {{if eq .ReplyCount 1}}reply{{else}}replies{{end}}</span>{{with .LastReplyAt}}<time datetime="{{iso .AsTime}}">{{clock .AsTime}}</time>{{end}}</button>
+    {{end}}
   </div>
-  {{if or .Mine .CanDelete}}
+  {{if or (not .RootId) .Mine .CanDelete}}
   <div class="msg-actions">
-    {{if .Mine}}<button class="icon-btn sm" hx-get="/m/{{.ChannelId}}/{{.Id}}/edit" hx-target="#msg-{{.Id}}" hx-swap="outerHTML" aria-label="Edit message" title="Edit">{{icon "edit"}}</button>{{end}}
-    <button class="icon-btn sm" hx-post="/m/{{.ChannelId}}/{{.Id}}/delete" hx-confirm="Delete this message?" hx-target="#msg-{{.Id}}" hx-swap="outerHTML" aria-label="Delete message" title="Delete">{{icon "trash"}}</button>
+    {{if not .RootId}}<button class="icon-btn sm" hx-get="/m/{{.ChannelId}}/{{.Id}}/thread" hx-target="#thread" aria-label="Reply in thread" title="Reply">{{icon "reply"}}</button>{{end}}
+    {{if .Mine}}<button class="icon-btn sm" hx-get="/m/{{.ChannelId}}/{{.Id}}/edit{{with .RootId}}?root={{.}}{{end}}" hx-target="#msg-{{.Id}}" hx-swap="outerHTML" aria-label="Edit message" title="Edit">{{icon "edit"}}</button>{{end}}
+    {{if .CanDelete}}<button class="icon-btn sm" hx-post="/m/{{.ChannelId}}/{{.Id}}/delete{{with .RootId}}?root={{.}}{{end}}" hx-confirm="{{if .ReplyCount}}Delete this message and its thread?{{else}}Delete this message?{{end}}" hx-target="#msg-{{.Id}}" hx-swap="outerHTML" aria-label="Delete message" title="Delete">{{icon "trash"}}</button>{{end}}
   </div>
   {{end}}
 </article>
 {{end}}
 
+{{define "msg-content"}}
+<header>
+  <strong class="author">{{name .Author}}</strong>
+  {{with .Author}}<span class="handle">@{{.Username}}</span>{{end}}
+  <time datetime="{{iso .Time}}" title="{{date .Time}}">{{clock .Time}}</time>
+  {{if .Edited}}<span class="edited">(edited)</span>{{end}}
+</header>
+{{if .Content}}<div class="body">{{.Body}}</div>{{end}}
+{{with .Attachments}}<ul class="files">{{range .}}{{template "attachment" .}}{{end}}</ul>{{end}}
+{{end}}
+
 {{define "message-new"}}<div id="msgs-{{.ChannelId}}" hx-swap-oob="afterbegin">{{template "message" .}}</div>{{end}}
+
+{{define "reply-new"}}<div id="replies-{{.RootId}}" hx-swap-oob="beforeend">{{template "message" .}}</div>{{end}}
 
 {{define "message-deleted"}}<div id="msg-{{.}}" hx-swap-oob="delete"></div>{{end}}
 
 {{define "message-edit"}}
 <article class="msg editing" id="msg-{{.Id}}">
   {{template "avatar" (dict "User" .Author "Size" "")}}
-  <form class="msg-main edit-form" hx-post="/m/{{.ChannelId}}/{{.Id}}" hx-target="#msg-{{.Id}}" hx-swap="outerHTML">
+  <form class="msg-main edit-form" hx-post="/m/{{.ChannelId}}/{{.Id}}{{with .RootId}}?root={{.}}{{end}}" hx-target="#msg-{{.Id}}" hx-swap="outerHTML">
     <textarea name="content" rows="3" maxlength="16000" aria-label="Edit message" autofocus>{{.Content}}</textarea>
     <div class="row">
       <button class="btn primary sm" type="submit">Save</button>
-      <button class="btn sm" type="button" hx-get="/m/{{.ChannelId}}/{{.Id}}" hx-target="#msg-{{.Id}}" hx-swap="outerHTML">Cancel</button>
+      <button class="btn sm" type="button" hx-get="/m/{{.ChannelId}}/{{.Id}}{{with .RootId}}?root={{.}}{{end}}" hx-target="#msg-{{.Id}}" hx-swap="outerHTML">Cancel</button>
     </div>
   </form>
 </article>
