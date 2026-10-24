@@ -73,6 +73,7 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 html, body { height: 100%; }
+[hidden] { display: none !important; }
 body {
   margin: 0;
   font: 15px/1.45 var(--font);
@@ -427,7 +428,6 @@ fieldset.choice legend { font-weight: 600; font-size: .92rem; padding: 0 .3rem; 
   position: absolute; left: 12px; right: 12px; bottom: calc(100% - 6px); z-index: 20; max-height: 280px; overflow-y: auto;
   background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 4px;
 }
-.suggest-box[hidden] { display: none; }
 .suggest { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
 .suggest li {
   display: flex; align-items: center; gap: .55rem; min-height: 40px; padding: 4px 10px; border-radius: 8px; cursor: pointer;
