@@ -73,9 +73,10 @@ services:
   accounts:
     workers: 8
     op_timeout: 10s
+    # Above OWASP's minimum; stored hashes take these on the next sign-in.
     password:
       time: 2
-      memory_kib: 19456
+      memory_kib: 47104
       threads: 1
     min_password_length: 10
     session_ttl: 720h
@@ -83,6 +84,8 @@ services:
     session_cache_size: 100000
     # How often a session in use records when and where it was last seen.
     last_seen_interval: 5m
+    # A session unused this long ends, as if signed out.
+    session_idle_timeout: 168h
     mfa_ttl: 5m
     mfa_max_attempts: 5
     totp_issuer: GoChat
@@ -101,6 +104,7 @@ services:
     op_timeout: 10s
     invite_ttl: 168h
     max_invites: 100
+    max_teams_per_day: 5
   channels:
     idle_timeout: 10m
     op_timeout: 10s

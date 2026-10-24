@@ -44,6 +44,9 @@ func (a *channel) pin(msg Pin) (*pb.Message, error) {
 	if a.archived() {
 		return nil, errArchived
 	}
+	if !a.poster(msg.P.UserID).Allow() {
+		return nil, ierrors.ResourceExhausted("you are pinning too fast")
+	}
 	ctx, cancel := a.ctx()
 	defer cancel()
 	m, err := a.messageOf(ctx, msg.MessageID, msg.RootID)
@@ -131,6 +134,9 @@ func (a *channel) listPins(c *actor.Context, msg Pins) error {
 func (a *channel) save(msg Save) (*pb.Message, error) {
 	if err := a.canRead(msg.P); err != nil {
 		return nil, err
+	}
+	if !a.poster(msg.P.UserID).Allow() {
+		return nil, ierrors.ResourceExhausted("you are saving too fast")
 	}
 	ctx, cancel := a.ctx()
 	defer cancel()

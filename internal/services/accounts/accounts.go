@@ -562,6 +562,13 @@ func (w *worker) authenticate(ctx context.Context, msg Authenticate) (*models.Pr
 	if !now.Before(s.ExpiresAt) {
 		return nil, ierrors.Unauthenticated()
 	}
+	if t := w.Cfg.SessionIdleTimeout; t > 0 && now.Sub(lastActive(s)) > t {
+		if err := w.Repo.DeleteSession(ctx, hash, s.UserID); err != nil {
+			w.Logger.Warn("failed to end an idle session", zap.Error(err))
+		}
+		w.revoked(s.UserID, [][]byte{hash}, false)
+		return nil, ierrors.Unauthenticated()
+	}
 	user, err := w.Repo.GetUser(ctx, s.UserID)
 	if err != nil {
 		if ierrors.Is(err, ierrors.CodeNotFound) {

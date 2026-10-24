@@ -25,6 +25,7 @@ import (
 type Repo interface {
 	InsertAttachment(ctx context.Context, a *models.Attachment) error
 	GetAttachment(ctx context.Context, id gocql.UUID) (*models.Attachment, error)
+	GetAttachments(ctx context.Context, idList []gocql.UUID) ([]*models.Attachment, error)
 	DeleteAttachment(ctx context.Context, a *models.Attachment) error
 	ListPendingUploads(ctx context.Context, day int32) ([]*scylla.PendingUpload, error)
 	DeleteOrphan(ctx context.Context, id gocql.UUID) (bool, error)
@@ -75,6 +76,8 @@ func (w *worker) Receive(c *actor.Context) {
 		out, err = w.usage(ctx, msg)
 	case SetQuota:
 		out, err = w.setQuota(ctx, msg)
+	case Discard:
+		out, err = w.discard(ctx, msg)
 	default:
 		return
 	}
@@ -274,6 +277,50 @@ func (w *worker) open(ctx context.Context, msg OpenDownload) (*models.Attachment
 		return nil, errNoFile
 	}
 	return att, nil
+}
+
+// maxDiscard bounds the uploads one call discards: those of one upload.
+const maxDiscard = 10
+
+// discard deletes the caller's unposted uploads among msg's, the row first
+// as the janitor does, so a post racing it either keeps its file or fails.
+func (w *worker) discard(ctx context.Context, msg Discard) (Done, error) {
+	if len(msg.AttachmentIDs) > maxDiscard {
+		return Done{}, ierrors.InvalidArgument("too many uploads")
+	}
+	idList := make([]gocql.UUID, 0, len(msg.AttachmentIDs))
+	for _, raw := range msg.AttachmentIDs {
+		id, ok := ids.Parse(raw)
+		if !ok {
+			return Done{}, ierrors.InvalidArgument("invalid attachment id")
+		}
+		idList = append(idList, id)
+	}
+	atts, err := w.Repo.GetAttachments(ctx, idList)
+	if err != nil {
+		return Done{}, err
+	}
+	for _, a := range atts {
+		if a.UploaderID != msg.P.UserID || !ids.IsZero(a.MessageID) {
+			continue
+		}
+		orphan, err := w.Repo.DeleteOrphan(ctx, a.ID)
+		if err != nil {
+			return Done{}, err
+		}
+		if !orphan {
+			continue
+		}
+		// An object left behind stays on the pending list, for the janitor.
+		if err := w.Storage.Delete(ctx, a.ObjectKey); err != nil {
+			w.Logger.Warn("failed to delete a discarded upload", zap.String("attachment", a.ID.String()), zap.Error(err))
+			continue
+		}
+		if err := w.Repo.ForgetPending(ctx, &scylla.PendingUpload{ID: a.ID, ObjectKey: a.ObjectKey, CreatedAt: a.CreatedAt}); err != nil {
+			w.Logger.Warn("failed to update the pending list", zap.Error(err))
+		}
+	}
+	return Done{}, nil
 }
 
 type sweep struct{}

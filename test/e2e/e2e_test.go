@@ -311,7 +311,13 @@ func bootstrap(t *testing.T, admin *client) {
 // join signs a new person up with an invite from admin.
 func join(t *testing.T, admin *client, prefix string) (c *client, name, pass string) {
 	t.Helper()
-	_, body := admin.hx("/t/"+teamName+"/invites", url.Values{})
+	return joinTeam(t, admin, teamName, prefix)
+}
+
+// joinTeam signs a new person up with an invite inviter makes to team.
+func joinTeam(t *testing.T, inviter *client, team, prefix string) (c *client, name, pass string) {
+	t.Helper()
+	_, body := inviter.hx("/t/"+team+"/invites", url.Values{})
 	m := inviteRe.FindStringSubmatch(body)
 	if m == nil {
 		t.Fatalf("no invite link in %s", body)
@@ -606,6 +612,38 @@ func TestEndToEnd(t *testing.T) {
 		}
 		if res, _ := admin.get("/files/" + att + "/inline"); res.Header.Get("Content-Type") != "image/png" {
 			t.Fatalf("inline image type: %s", res.Header.Get("Content-Type"))
+		}
+		// Players such as Safari's read media in ranges.
+		ranged := func(rng, ifRange string) (*http.Response, string) {
+			req, _ := http.NewRequest(http.MethodGet, baseURL+"/files/"+att+"/inline", nil)
+			req.Header.Set("Range", rng)
+			if ifRange != "" {
+				req.Header.Set("If-Range", ifRange)
+			}
+			res, err := admin.http.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = res.Body.Close() }()
+			b, _ := io.ReadAll(res.Body)
+			return res, string(b)
+		}
+		size := strconv.Itoa(len(png))
+		for _, c := range []struct {
+			rng, ifRange, span, body string
+			status                   int
+		}{
+			{"bytes=2-5", "", "bytes 2-5/" + size, string(png[2:6]), http.StatusPartialContent},
+			{"bytes=-4", "", "bytes " + strconv.Itoa(len(png)-4) + "-" + strconv.Itoa(len(png)-1) + "/" + size, string(png[len(png)-4:]), http.StatusPartialContent},
+			{"bytes=0-", `"` + att + `"`, "bytes 0-" + strconv.Itoa(len(png)-1) + "/" + size, string(png), http.StatusPartialContent},
+			{"bytes=500-", "", "bytes */" + size, "", http.StatusRequestedRangeNotSatisfiable},
+			{"bytes=2-5", `"stale"`, "", string(png), http.StatusOK},
+			{"bytes=0-1,4-5", "", "", string(png), http.StatusOK},
+		} {
+			res, body := ranged(c.rng, c.ifRange)
+			if res.StatusCode != c.status || res.Header.Get("Content-Range") != c.span || body != c.body || res.Header.Get("Accept-Ranges") != "bytes" {
+				t.Fatalf("Range %q (If-Range %q): %d %q %q", c.rng, c.ifRange, res.StatusCode, res.Header.Get("Content-Range"), body)
+			}
 		}
 		// An attachment is posted once.
 		bobWS.send(map[string]any{"op": "post", "channel_id": town, "content": "again", "attachment": att})
@@ -1075,6 +1113,52 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
+	t.Run("only a team's owner demotes its admins", func(t *testing.T) {
+		owner, ownerName, _ := join(t, admin, "owner")
+		team := "own-" + random(6)
+		if res, body := owner.form("/teams", url.Values{"name": {team}, "display_name": {"Owned"}}); res.StatusCode != http.StatusSeeOther {
+			t.Fatalf("create a team: %d %s", res.StatusCode, body)
+		}
+		x, xName, _ := joinTeam(t, owner, team, "x")
+		_, yName, _ := joinTeam(t, owner, team, "y")
+		ids := map[string]string{}
+		_, list := owner.do(http.MethodGet, "/t/"+team+"/members", nil, "", true)
+		for _, name := range []string{xName, yName} {
+			m := regexp.MustCompile(`@` + regexp.QuoteMeta(name) + `(?s:.*?)/members/([0-9a-f-]{36})/role`).FindStringSubmatch(list)
+			if m == nil {
+				t.Fatalf("%s is not in the member list: %s", name, list)
+			}
+			ids[name] = m[1]
+		}
+		if !strings.Contains(list, "@"+ownerName+" · owner") {
+			t.Fatalf("the owner is not marked: %s", list)
+		}
+		role := func(c *client, name, r string) int {
+			res, _ := c.hx("/t/"+team+"/members/"+ids[name]+"/role", url.Values{"role": {r}})
+			return res.StatusCode
+		}
+		for _, name := range []string{xName, yName} {
+			if s := role(owner, name, "admin"); s != http.StatusOK {
+				t.Fatalf("the owner made %s an admin: %d", name, s)
+			}
+		}
+		if s := role(x, yName, "member"); s != http.StatusForbidden {
+			t.Fatalf("an admin demoted another: %d", s)
+		}
+		if res, _ := x.hx("/t/"+team+"/members/"+ids[yName]+"/remove", url.Values{}); res.StatusCode != http.StatusForbidden {
+			t.Fatalf("an admin removed another: %d", res.StatusCode)
+		}
+		if _, view := x.do(http.MethodGet, "/t/"+team+"/members", nil, "", true); strings.Contains(view, "/members/"+ids[yName]+"/role") {
+			t.Fatal("an admin is offered to demote another")
+		}
+		if s := role(owner, yName, "member"); s != http.StatusOK {
+			t.Fatalf("the owner demoted an admin: %d", s)
+		}
+		if s := role(x, xName, "member"); s != http.StatusOK {
+			t.Fatalf("an admin stepped down: %d", s)
+		}
+	})
+
 	t.Run("a removed member cannot rejoin with their invite", func(t *testing.T) {
 		_, body := admin.hx("/t/"+teamName+"/invites", url.Values{})
 		link := inviteRe.FindStringSubmatch(body)
@@ -1360,13 +1444,15 @@ func TestEndToEnd(t *testing.T) {
 		if res, card := quota(admin, url.Values{"mib": {"1"}}); res.StatusCode != http.StatusOK || !strings.Contains(card, "Quota saved.") || !strings.Contains(card, "0 B used of 1.0 MB") {
 			t.Fatalf("set a quota: %d %s", res.StatusCode, card)
 		}
-		upload := func(size int) (*http.Response, string) {
-			data := make([]byte, size)
-			_, _ = rand.Read(data)
+		upload := func(sizes ...int) (*http.Response, string) {
 			var buf bytes.Buffer
 			mw := multipart.NewWriter(&buf)
-			fw, _ := mw.CreateFormFile("file", "data.bin")
-			_, _ = fw.Write(data)
+			for _, size := range sizes {
+				data := make([]byte, size)
+				_, _ = rand.Read(data)
+				fw, _ := mw.CreateFormFile("file", "data.bin")
+				_, _ = fw.Write(data)
+			}
 			_ = mw.Close()
 			return fay.do(http.MethodPost, "/upload?channel="+town, &buf, mw.FormDataContentType(), true)
 		}
@@ -1398,6 +1484,13 @@ func TestEndToEnd(t *testing.T) {
 		}
 		if res, body := upload(700 << 10); res.StatusCode != http.StatusOK {
 			t.Fatalf("an upload after freeing space: %d %s", res.StatusCode, body)
+		}
+		// An upload whose second file fails keeps neither.
+		if res, _ := upload(200<<10, 400<<10); res.StatusCode == http.StatusOK {
+			t.Fatal("an upload past the quota succeeded")
+		}
+		if _, page := fay.get("/settings"); !strings.Contains(page, "700.0 KB used of 1.0 MB") {
+			t.Fatalf("the first file of a failed upload is still stored: %s", page)
 		}
 		if _, card := quota(admin, url.Values{"default": {"1"}}); strings.Contains(card, "of 1.0 MB") || !strings.Contains(card, "Quota saved.") {
 			t.Fatalf("back to the default quota: %s", card)

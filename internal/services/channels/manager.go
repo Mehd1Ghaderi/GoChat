@@ -71,6 +71,7 @@ type Repo interface {
 	ClaimAttachment(ctx context.Context, a *models.Attachment, messageID gocql.UUID) (bool, error)
 	UnclaimAttachment(ctx context.Context, a *models.Attachment, messageID gocql.UUID) error
 	DeleteAttachment(ctx context.Context, a *models.Attachment) error
+	PendObject(ctx context.Context, id gocql.UUID, key string, at time.Time) error
 }
 
 type Storage interface {

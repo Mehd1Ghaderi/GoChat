@@ -20,9 +20,12 @@ type Config struct {
 	SessionCacheSize  int             `mapstructure:"session_cache_size"`
 	// LastSeenInterval is how often a session in use records it.
 	LastSeenInterval time.Duration `mapstructure:"last_seen_interval"`
-	MFATTL           time.Duration `mapstructure:"mfa_ttl"`
-	MFAMaxAttempts   int           `mapstructure:"mfa_max_attempts"`
-	TOTPIssuer       string        `mapstructure:"totp_issuer"`
+	// SessionIdleTimeout ends a session unused for this long; zero keeps
+	// sessions until session_ttl.
+	SessionIdleTimeout time.Duration `mapstructure:"session_idle_timeout"`
+	MFATTL             time.Duration `mapstructure:"mfa_ttl"`
+	MFAMaxAttempts     int           `mapstructure:"mfa_max_attempts"`
+	TOTPIssuer         string        `mapstructure:"totp_issuer"`
 	// SecretKey seals TOTP secrets at rest: 32 bytes, base64.
 	SecretKey  string `mapstructure:"secret_key"`
 	OpenSignup bool   `mapstructure:"open_signup"`
@@ -58,6 +61,11 @@ func (c *Config) Validate() error {
 	}
 	if c.LastSeenInterval < time.Minute {
 		return errors.New("last_seen_interval must be at least 1m")
+	}
+	// Use is recorded every last_seen_interval at most: a shorter timeout
+	// would end sessions in use.
+	if c.SessionIdleTimeout != 0 && c.SessionIdleTimeout < 2*(c.LastSeenInterval+c.SessionCacheTTL) {
+		return errors.New("session_idle_timeout must be zero or at least twice last_seen_interval and session_cache_ttl together")
 	}
 	if c.MFAMaxAttempts < 1 {
 		return errors.New("mfa_max_attempts must be at least 1")

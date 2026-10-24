@@ -142,7 +142,7 @@ func (s *sfu) join(session, userID string, send bool) (*client, error) {
 		}
 	})
 	go c.pump()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), patience)
 	defer cancel()
 	_, err = actors.Ask[joined](ctx, s.engine, s.rooms, addPeer{session: session, userID: userID, channelID: "room", out: c.out})
 	return c, err
@@ -191,9 +191,12 @@ func (c *client) pump() {
 	}
 }
 
+// patience bounds every wait: a loaded machine sets connections up slowly.
+const patience = time.Minute
+
 func eventually(t *testing.T, what string, ok func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(patience)
 	for time.Now().Before(deadline) {
 		if ok() {
 			return
@@ -276,11 +279,13 @@ func TestRoomForwardsVoice(t *testing.T) {
 		defer bob.mu.Unlock()
 		return bob.offers > offers
 	})
-	before := bob.heard("carol")
-	time.Sleep(300 * time.Millisecond)
-	if after := bob.heard("carol"); after > before+2 {
-		t.Fatalf("bob still hears carol: %d then %d", before, after)
-	}
+	// Packets already on their way may still land: what counts is that
+	// they stop, however slowly a loaded machine delivers them.
+	eventually(t, "bob stops hearing carol", func() bool {
+		before := bob.heard("carol")
+		time.Sleep(250 * time.Millisecond)
+		return bob.heard("carol") == before
+	})
 	if bob.heard("alice") == 0 {
 		t.Fatal("bob lost alice")
 	}

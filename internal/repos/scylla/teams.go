@@ -26,7 +26,20 @@ type TeamMemberEntry struct {
 	DisplayName string `db:"display_name"`
 }
 
-func (r *Repository) CreateTeam(ctx context.Context, t *models.Team) error {
+// NewTeam is a team as it is created: its creator, an admin, in each of its
+// first channels.
+type NewTeam struct {
+	Team                  *models.Team
+	Creator               *models.TeamMember
+	Username, DisplayName string
+	Channels              []*models.Channel
+}
+
+// CreateTeam claims the team's name, then writes the rest in one logged
+// batch, so a team never exists without its creator and channels. The
+// names of a new team's channels cannot be taken yet: they need no claim.
+func (r *Repository) CreateTeam(ctx context.Context, n *NewTeam) error {
+	t, m := n.Team, n.Creator
 	ok, err := r.claim(ctx, "INSERT INTO team_names (name, team_id) VALUES (?, ?) IF NOT EXISTS",
 		"SELECT team_id FROM team_names WHERE name = ?", "team_id", t.ID, t.Name)
 	if err != nil {
@@ -35,11 +48,25 @@ func (r *Repository) CreateTeam(ctx context.Context, t *models.Team) error {
 	if !ok {
 		return ierrors.AlreadyExists("team name is taken")
 	}
-	err = r.query(ctx, "INSERT INTO teams ("+teamWritten+") VALUES (?, ?, ?, ?, ?, ?)",
-		t.ID, t.Name, t.DisplayName, t.Description, t.CreatedBy, t.CreatedAt).ExecRelease()
-	if err != nil {
+	b := r.batch(ctx, true)
+	b.Query("INSERT INTO teams ("+teamWritten+") VALUES (?, ?, ?, ?, ?, ?)",
+		t.ID, t.Name, t.DisplayName, t.Description, t.CreatedBy, t.CreatedAt)
+	b.Query("INSERT INTO team_members (team_id, user_id, role, username, display_name, joined_at) VALUES (?, ?, ?, ?, ?, ?)",
+		m.TeamID, m.UserID, string(m.Role), n.Username, n.DisplayName, m.JoinedAt)
+	b.Query("INSERT INTO user_teams (user_id, team_id, role, joined_at) VALUES (?, ?, ?, ?)",
+		m.UserID, m.TeamID, string(m.Role), m.JoinedAt)
+	for _, ch := range n.Channels {
+		b.Query("INSERT INTO channel_names (team_id, name, channel_id) VALUES (?, ?, ?)", ch.TeamID, ch.Name, ch.ID)
+		b.Query("INSERT INTO channels (id, team_id, name, display_name, purpose, kind, created_by, created_at, voice_disabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			ch.ID, ch.TeamID, ch.Name, ch.DisplayName, ch.Purpose, string(ch.Kind), ch.CreatedBy, ch.CreatedAt, ch.VoiceDisabled)
+		b.Query("INSERT INTO team_channels (team_id, channel_id, kind) VALUES (?, ?, ?)", ch.TeamID, ch.ID, string(ch.Kind))
+		addMemberQueries(b, &models.ChannelMember{ChannelID: ch.ID, UserID: m.UserID, TeamID: t.ID, Role: models.ChannelRoleAdmin, JoinedAt: m.JoinedAt})
+	}
+	// A logged batch that timed out is replayed from the batch log, so its
+	// claim stays.
+	if err := r.execBatch(b); err != nil {
 		r.release(err, "DELETE FROM team_names WHERE name = ? IF team_id = ?", t.Name, t.ID)
-		return wrap(err)
+		return err
 	}
 	return nil
 }

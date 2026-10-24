@@ -649,7 +649,10 @@ type Team struct {
 	Role      TeamRole               `protobuf:"varint,5,opt,name=role,proto3,enum=gochat.v1.TeamRole" json:"role,omitempty"`
 	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	// photo is the version of the team photo, empty when there is none.
-	Photo         string `protobuf:"bytes,7,opt,name=photo,proto3" json:"photo,omitempty"`
+	Photo string `protobuf:"bytes,7,opt,name=photo,proto3" json:"photo,omitempty"`
+	// The team's creator, its owner: only they or a system admin demote or
+	// remove its admins.
+	OwnerId       string `protobuf:"bytes,8,opt,name=owner_id,json=ownerId,proto3" json:"owner_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -729,6 +732,13 @@ func (x *Team) GetCreatedAt() *timestamppb.Timestamp {
 func (x *Team) GetPhoto() string {
 	if x != nil {
 		return x.Photo
+	}
+	return ""
+}
+
+func (x *Team) GetOwnerId() string {
+	if x != nil {
+		return x.OwnerId
 	}
 	return ""
 }
@@ -1486,7 +1496,7 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"lastSeenAt\x129\n" +
 	"\n" +
 	"expires_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\x12\x18\n" +
-	"\acurrent\x18\b \x01(\bR\acurrent\"\xe9\x01\n" +
+	"\acurrent\x18\b \x01(\bR\acurrent\"\x84\x02\n" +
 	"\x04Team\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12!\n" +
@@ -1495,7 +1505,8 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"\x04role\x18\x05 \x01(\x0e2\x13.gochat.v1.TeamRoleR\x04role\x129\n" +
 	"\n" +
 	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\x14\n" +
-	"\x05photo\x18\a \x01(\tR\x05photo\"\x93\x01\n" +
+	"\x05photo\x18\a \x01(\tR\x05photo\x12\x19\n" +
+	"\bowner_id\x18\b \x01(\tR\aownerId\"\x93\x01\n" +
 	"\n" +
 	"TeamMember\x12#\n" +
 	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user\x12'\n" +
