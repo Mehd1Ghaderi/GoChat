@@ -65,6 +65,7 @@ type Repo interface {
 	ListTeamChannels(ctx context.Context, teamID gocql.UUID) ([]*scylla.TeamChannel, error)
 	ListUserChannels(ctx context.Context, userID, teamID gocql.UUID) ([]*models.ChannelMember, error)
 	ListLastReads(ctx context.Context, userID gocql.UUID) ([]*scylla.ChannelRead, error)
+	CountMentions(ctx context.Context, userID gocql.UUID) (map[gocql.UUID]int, error)
 }
 
 type Deps struct {
@@ -710,6 +711,10 @@ func (w *worker) listChannels(ctx context.Context, msg ListChannels) ([]*pb.Chan
 	for _, r := range reads {
 		lastRead[r.ChannelID] = r.LastReadID
 	}
+	mentions, err := w.Repo.CountMentions(ctx, msg.P.UserID)
+	if err != nil {
+		return nil, err
+	}
 	var all []*models.Channel
 	for start := 0; start < len(chIDs); start += 100 {
 		found, err := w.Repo.GetChannels(ctx, chIDs[start:min(start+100, len(chIDs))])
@@ -739,7 +744,9 @@ func (w *worker) listChannels(ctx context.Context, msg ListChannels) ([]*pb.Chan
 				continue
 			}
 		}
-		out = append(out, convert.Channel(ch, roles[ch.ID], lastRead[ch.ID], peer))
+		view := convert.Channel(ch, roles[ch.ID], lastRead[ch.ID], peer)
+		view.MentionCount = int32(min(mentions[ch.ID], 9999)) //nolint:gosec // bounded
+		out = append(out, view)
 	}
 	slices.SortFunc(out, func(a, b *pb.Channel) int { return cmp.Compare(sortKey(a), sortKey(b)) })
 	return out, nil

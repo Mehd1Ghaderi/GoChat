@@ -5,6 +5,7 @@ import (
 	"time"
 
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
+	"github.com/ssenerg/gochat/internal/core/mention"
 )
 
 type Message struct {
@@ -14,12 +15,14 @@ type Message struct {
 	Edited    bool
 	Mine      bool
 	CanDelete bool
+	// Mentioned is set when the message calls out its reader.
+	Mentioned bool
 	OOB       bool
 }
 
 // Message prepares m for the viewer meID; moderators may delete any message.
-func (r *Renderer) Message(m *pb.Message, meID string, moderator bool) *Message {
-	mine := m.GetAuthor().GetId() == meID
+func (r *Renderer) Message(m *pb.Message, me *pb.User, moderator bool) *Message {
+	mine := m.GetAuthor().GetId() == me.GetId()
 	return &Message{
 		Message:   m,
 		Body:      r.Body(m),
@@ -27,15 +30,22 @@ func (r *Renderer) Message(m *pb.Message, meID string, moderator bool) *Message 
 		Edited:    m.EditedAt != nil,
 		Mine:      mine,
 		CanDelete: mine || moderator,
+		Mentioned: !mine && Mentions(m, me),
 	}
 }
 
-func (r *Renderer) Messages(list []*pb.Message, meID string, moderator bool) []*Message {
+func (r *Renderer) Messages(list []*pb.Message, me *pb.User, moderator bool) []*Message {
 	out := make([]*Message, len(list))
 	for i, m := range list {
-		out[i] = r.Message(m, meID, moderator)
+		out[i] = r.Message(m, me, moderator)
 	}
 	return out
+}
+
+// Mentions reports whether m calls out me, by name or as one of everyone.
+func Mentions(m *pb.Message, me *pb.User) bool {
+	found := mention.Parse(m.GetContent())
+	return found.Channel || found.Here || found.Of(me.GetUsername())
 }
 
 type Rail struct {

@@ -1,10 +1,12 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"io"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -215,7 +217,7 @@ func (h *Handler) channelView(ctx context.Context, u *pb.User, team *pb.Team, ch
 		Moderator: moderator(u, team, ch),
 	}
 	if msgs != nil {
-		view.Messages = h.render.Messages(msgs.Messages, u.Id, view.Moderator)
+		view.Messages = h.render.Messages(msgs.Messages, u, view.Moderator)
 		view.HasMore = msgs.HasMore
 		if n := len(msgs.Messages); n > 0 {
 			view.Newest, view.Oldest = msgs.Messages[0].Id, msgs.Messages[n-1].Id
@@ -355,7 +357,7 @@ func (h *Handler) olderMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	mod := moderator(u, team, ch)
 	view := &render.ChannelView{Team: team, Channel: ch, Title: render.Title(ch), Member: true, Moderator: mod, HasMore: msgs.HasMore,
-		Messages: h.render.Messages(msgs.Messages, u.Id, mod)}
+		Messages: h.render.Messages(msgs.Messages, u, mod)}
 	if n := len(msgs.Messages); n > 0 {
 		view.Oldest = msgs.Messages[n-1].Id
 	}
@@ -860,7 +862,7 @@ func (h *Handler) messageFragment(w http.ResponseWriter, r *http.Request) {
 	if m == nil {
 		return
 	}
-	h.fragment(w, http.StatusOK, "message", h.render.Message(m, u.Id, false))
+	h.fragment(w, http.StatusOK, "message", h.render.Message(m, u, false))
 }
 
 func (h *Handler) editMessageForm(w http.ResponseWriter, r *http.Request) {
@@ -891,7 +893,7 @@ func (h *Handler) editMessage(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "message", h.render.Message(res.Message, u.Id, false))
+	h.fragment(w, http.StatusOK, "message", h.render.Message(res.Message, u, false))
 }
 
 func (h *Handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
@@ -964,8 +966,8 @@ func (h *Handler) threadPanel(w http.ResponseWriter, r *http.Request) {
 	}
 	mod := moderator(u, team, ch)
 	view := threadView{
-		Root:    h.render.Message(thread.Root, u.Id, mod),
-		Replies: h.render.Messages(thread.Replies, u.Id, mod),
+		Root:    h.render.Message(thread.Root, u, mod),
+		Replies: h.render.Messages(thread.Replies, u, mod),
 		HasMore: thread.HasMore,
 		Title:   render.Title(ch),
 		Member:  ch.Role != pb.ChannelRole_CHANNEL_ROLE_UNSPECIFIED,
@@ -978,4 +980,80 @@ func (h *Handler) threadPanel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.fragment(w, http.StatusOK, "thread", view)
+}
+
+type suggestion struct {
+	Name string
+	User *pb.User
+	Note string
+}
+
+var (
+	mentionPrefixRe = regexp.MustCompile(`^[a-z0-9._-]{0,32}$`)
+	everyone        = []suggestion{
+		{Name: "channel", Note: "Everyone in this channel"},
+		{Name: "all", Note: "Everyone in this channel"},
+		{Name: "here", Note: "Everyone online in this channel"},
+	}
+)
+
+const maxSuggestions = 8
+
+// mentionSuggestions lists the channel's members whose name starts with q,
+// for the composer's @ completion.
+func (h *Handler) mentionSuggestions(w http.ResponseWriter, r *http.Request) {
+	if h.signedIn(w, r) == nil {
+		return
+	}
+	chID, q := r.PathValue("channel"), strings.ToLower(r.URL.Query().Get("q"))
+	if !uuidRe.MatchString(chID) || !mentionPrefixRe.MatchString(q) {
+		h.notFound(w, r)
+		return
+	}
+	ctx, cancel := h.ctx(r)
+	defer cancel()
+	g, gctx := errgroup.WithContext(ctx)
+	var (
+		ch      *pb.Channel
+		members []*pb.ChannelMember
+	)
+	g.Go(func() error {
+		res, err := h.client.Channels.GetChannel(gctx, &pb.GetChannelRequest{ChannelId: chID})
+		if err == nil {
+			ch = res.Channel
+		}
+		return err
+	})
+	g.Go(func() error {
+		res, err := h.client.Channels.ListChannelMembers(gctx, &pb.ListChannelMembersRequest{ChannelId: chID})
+		if err == nil {
+			members = res.Members
+		}
+		return err
+	})
+	if err := g.Wait(); err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	slices.SortFunc(members, func(a, b *pb.ChannelMember) int {
+		return cmp.Compare(a.GetUser().GetUsername(), b.GetUser().GetUsername())
+	})
+	var items []suggestion
+	for _, m := range members {
+		u := m.GetUser()
+		if u == nil || len(items) == maxSuggestions {
+			continue
+		}
+		if strings.HasPrefix(u.Username, q) || strings.HasPrefix(strings.ToLower(u.DisplayName), q) {
+			items = append(items, suggestion{Name: u.Username, User: u})
+		}
+	}
+	if ch.Type != pb.ChannelType_CHANNEL_TYPE_DIRECT {
+		for _, e := range everyone {
+			if strings.HasPrefix(e.Name, q) && len(items) < maxSuggestions {
+				items = append(items, e)
+			}
+		}
+	}
+	h.fragment(w, http.StatusOK, "suggest", items)
 }

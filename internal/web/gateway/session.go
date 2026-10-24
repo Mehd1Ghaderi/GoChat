@@ -80,7 +80,10 @@ type session struct {
 	channelID string
 	moderator bool
 	sidebar   map[string]bool
+	// mentions counts unread mentions per channel in the sidebar.
+	mentions  map[string]int
 	peers     map[string]bool
+	directs   map[string]bool
 	typingSeq uint64
 	// typer is who the typing line names, and shown the newest message on
 	// the page.
@@ -102,16 +105,17 @@ type session struct {
 func NewSession(d *Deps, connID uint64, call drpc.Call, ws *websocket.Conn) actor.Producer {
 	return func() actor.Receiver {
 		return &session{
-			Deps:    d,
-			connID:  connID,
-			call:    call,
-			ws:      ws,
-			out:     make(chan outMsg, d.Cfg.SendQueue),
-			limiter: rate.NewLimiter(rate.Limit(d.Cfg.FrameRate), d.Cfg.FrameBurst),
-			sidebar: make(map[string]bool),
-			peers:   make(map[string]bool),
-			reads:   make(map[string]string),
-			posts:   make(chan *pb.PostMessageRequest, queuedPosts),
+			Deps:     d,
+			connID:   connID,
+			call:     call,
+			ws:       ws,
+			out:      make(chan outMsg, d.Cfg.SendQueue),
+			limiter:  rate.NewLimiter(rate.Limit(d.Cfg.FrameRate), d.Cfg.FrameBurst),
+			sidebar:  make(map[string]bool),
+			mentions: make(map[string]int),
+			peers:    make(map[string]bool),
+			reads:    make(map[string]string),
+			posts:    make(chan *pb.PostMessageRequest, queuedPosts),
 		}
 	}
 }
@@ -203,12 +207,17 @@ func (s *session) Receive(c *actor.Context) {
 			return
 		}
 		s.sidebar = make(map[string]bool, len(msg.lists.Channels)+len(msg.lists.DMs))
+		s.mentions = make(map[string]int)
 		s.peers = make(map[string]bool, len(msg.lists.DMs))
+		s.directs = make(map[string]bool, len(msg.lists.DMs))
 		for _, ch := range msg.lists.Channels {
 			s.sidebar[ch.Id] = true
+			s.mentions[ch.Id] = int(ch.MentionCount)
 		}
 		for _, ch := range msg.lists.DMs {
 			s.sidebar[ch.Id] = true
+			s.directs[ch.Id] = true
+			s.mentions[ch.Id] = int(ch.MentionCount)
 			if ch.Peer != nil {
 				s.peers[ch.Peer.Id] = true
 			}
@@ -467,6 +476,7 @@ func (s *session) view(c *actor.Context, f *clientFrame) {
 	s.moderator = f.Moderator == "1"
 	s.typingSeq++
 	s.typer, s.shown = "", ""
+	s.mentions[f.ChannelID] = 0
 	if teamChanged {
 		s.loadSidebar(c, false)
 	}
@@ -486,6 +496,20 @@ func (s *session) view(c *actor.Context, f *clientFrame) {
 		}
 		return viewChecked{channelID: chID, last: res.Channel.GetLastMessageId()}
 	})
+}
+
+// mentioned counts one more unread mention in a sidebar channel.
+func (s *session) mentioned(channelID string) {
+	if !s.sidebar[channelID] {
+		return
+	}
+	s.mentions[channelID]++
+	s.fragment("badge", map[string]any{"ID": channelID, "Count": s.mentions[channelID], "OOB": true})
+}
+
+// direct reports whether a sidebar channel is a direct conversation.
+func (s *session) direct(channelID string) bool {
+	return s.directs[channelID]
 }
 
 func (s *session) clearTyping() {
@@ -526,12 +550,14 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 		mine := m.GetAuthor().GetId() == me
 		if m.RootId != "" {
 			if m.RootId == s.threadID {
-				s.message("reply-new", s.Render.Message(m, me, s.moderator))
+				s.message("reply-new", s.Render.Message(m, s.user, s.moderator))
+			} else if !mine && m.ChannelId != s.channelID && render.Mentions(m, s.user) {
+				s.mentioned(m.ChannelId)
 			}
 			return
 		}
 		if m.ChannelId == s.channelID {
-			s.message("message-new", s.Render.Message(m, me, s.moderator))
+			s.message("message-new", s.Render.Message(m, s.user, s.moderator))
 			if render.Newer(m.Id, s.shown) {
 				s.shown = m.Id
 			}
@@ -543,12 +569,16 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 				s.clearTyping()
 			}
 		} else if !mine && s.sidebar[m.ChannelId] {
-			s.fragment("unread", m.ChannelId)
+			if s.direct(m.ChannelId) || render.Mentions(m, s.user) {
+				s.mentioned(m.ChannelId)
+			} else if s.mentions[m.ChannelId] == 0 {
+				s.fragment("unread", m.ChannelId)
+			}
 		}
 	case *pb.Event_MessageEdited:
 		m := p.MessageEdited.Message
 		if (m.RootId == "" && m.ChannelId == s.channelID) || (m.RootId != "" && m.RootId == s.threadID) {
-			view := s.Render.Message(m, me, s.moderator)
+			view := s.Render.Message(m, s.user, s.moderator)
 			view.OOB = true
 			s.message("message", view)
 		}

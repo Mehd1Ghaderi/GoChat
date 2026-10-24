@@ -10,6 +10,7 @@ import (
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
+	"github.com/yuin/goldmark/renderer"
 	"github.com/yuin/goldmark/renderer/html"
 	"github.com/yuin/goldmark/text"
 	"github.com/yuin/goldmark/util"
@@ -20,8 +21,11 @@ import (
 func newMarkdown() goldmark.Markdown {
 	return goldmark.New(
 		goldmark.WithExtensions(extension.Linkify, extension.Strikethrough, extension.Table, extension.TaskList),
-		goldmark.WithParserOptions(parser.WithASTTransformers(util.Prioritized(linkTransformer{}, 100))),
-		goldmark.WithRendererOptions(html.WithHardWraps()),
+		goldmark.WithParserOptions(
+			parser.WithASTTransformers(util.Prioritized(linkTransformer{}, 100)),
+			parser.WithInlineParsers(util.Prioritized(mentionParser{}, 500)),
+		),
+		goldmark.WithRendererOptions(html.WithHardWraps(), renderer.WithNodeRenderers(util.Prioritized(mentionRenderer{}, 500))),
 	)
 }
 

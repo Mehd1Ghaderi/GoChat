@@ -121,7 +121,7 @@ func (r *Renderer) Fragment(w io.Writer, name string, data any) error {
 // MessageBytes renders a message fragment once per message, edit and
 // variant, for every socket that shows it. The bytes are shared: read only.
 func (r *Renderer) MessageBytes(name string, m *Message) ([]byte, error) {
-	key := fmt.Sprintf("%s/%s/%s/%t/%t/%t/%d/%d", name, m.Id, m.GetEditedAt().AsTime().Format(time.RFC3339Nano), m.Mine, m.CanDelete, m.OOB,
+	key := fmt.Sprintf("%s/%s/%s/%t/%t/%t/%t/%d/%d", name, m.Id, m.GetEditedAt().AsTime().Format(time.RFC3339Nano), m.Mine, m.CanDelete, m.Mentioned, m.OOB,
 		m.ReplyCount, m.GetLastReplyAt().AsTime().UnixNano())
 	if b, ok := r.events.Get(key); ok {
 		return b, nil

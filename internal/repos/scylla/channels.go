@@ -2,6 +2,8 @@ package scylla
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"time"
 
 	"github.com/gocql/gocql"
@@ -185,4 +187,43 @@ func (r *Repository) GetChannelIDByName(ctx context.Context, teamID gocql.UUID, 
 		return gocql.UUID{}, wrap(err)
 	}
 	return id, nil
+}
+
+// AddMentions records that messageID calls out each of userIDs.
+func (r *Repository) AddMentions(ctx context.Context, channelID, messageID gocql.UUID, userIDs []gocql.UUID) error {
+	for chunk := range slices.Chunk(userIDs, 50) {
+		b := r.batch(ctx, false)
+		for _, id := range chunk {
+			b.Query("INSERT INTO unread_mentions (user_id, channel_id, message_id) VALUES (?, ?, ?)", id, channelID, messageID)
+		}
+		if err := r.execBatch(b); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ClearMentions forgets a user's mentions in a channel they read, writing
+// nothing when there are none.
+func (r *Repository) ClearMentions(ctx context.Context, userID, channelID gocql.UUID) error {
+	var id gocql.UUID
+	err := r.query(ctx, "SELECT message_id FROM unread_mentions WHERE user_id = ? AND channel_id = ? LIMIT 1", userID, channelID).Scan(&id)
+	if errors.Is(err, gocql.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return wrap(err)
+	}
+	return wrap(r.query(ctx, "DELETE FROM unread_mentions WHERE user_id = ? AND channel_id = ?", userID, channelID).ExecRelease())
+}
+
+// CountMentions counts a user's unread mentions per channel.
+func (r *Repository) CountMentions(ctx context.Context, userID gocql.UUID) (map[gocql.UUID]int, error) {
+	out := map[gocql.UUID]int{}
+	iter := r.query(ctx, "SELECT channel_id FROM unread_mentions WHERE user_id = ? LIMIT 10000", userID).Iter()
+	var id gocql.UUID
+	for iter.Scan(&id) {
+		out[id]++
+	}
+	return out, wrap(iter.Close())
 }

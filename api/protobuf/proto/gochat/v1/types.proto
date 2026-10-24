@@ -79,6 +79,9 @@ message Channel {
   // The other side of a direct channel.
   User peer = 10;
   google.protobuf.Timestamp created_at = 11;
+  // Unread messages that call out the caller, or every unread one in a
+  // direct conversation.
+  int32 mention_count = 12;
 }
 
 message ChannelMember {

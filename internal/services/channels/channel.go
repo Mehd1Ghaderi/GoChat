@@ -14,6 +14,7 @@ import (
 	"github.com/ssenerg/gochat/internal/actors"
 	"github.com/ssenerg/gochat/internal/authz"
 	"github.com/ssenerg/gochat/internal/core/ids"
+	"github.com/ssenerg/gochat/internal/core/mention"
 	"github.com/ssenerg/gochat/internal/core/models"
 	"github.com/ssenerg/gochat/internal/core/validate"
 	ierrors "github.com/ssenerg/gochat/internal/errors"
@@ -378,7 +379,58 @@ func (a *channel) post(msg Post) (*pb.Message, error) {
 
 	out := convert.Message(m, convert.PublicUser(author), atts)
 	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessagePosted{MessagePosted: &pb.MessagePosted{Message: out}}})
+	a.recordMentions(m)
 	return out, nil
+}
+
+// recordMentions notes, off the actor, whom m calls out: named members,
+// everyone for @channel, those online for @here, and the other person of a
+// direct conversation.
+func (a *channel) recordMentions(m *models.Message) {
+	found := mention.Parse(m.Content)
+	direct := a.ch.Kind == models.ChannelDirect
+	if !direct && len(found.Usernames) == 0 && !found.Channel && !found.Here {
+		return
+	}
+	members, author := a.memberIDs, m.UserID.String()
+	go func() {
+		ctx, cancel := a.ctx()
+		defer cancel()
+		targets := map[string]bool{}
+		switch {
+		case direct || found.Channel:
+			for _, id := range members {
+				targets[id] = true
+			}
+		case found.Here:
+			if online, err := actors.Ask[[]string](ctx, a.Engine, a.Hub, hub.Online{UserIDs: members}); err == nil {
+				for _, id := range online {
+					targets[id] = true
+				}
+			}
+		}
+		if !direct && len(found.Usernames) > 0 {
+			member := make(map[string]bool, len(members))
+			for _, id := range members {
+				member[id] = true
+			}
+			for _, name := range found.Usernames {
+				if id, err := a.Repo.GetUserIDByUsername(ctx, name); err == nil && member[id.String()] {
+					targets[id.String()] = true
+				}
+			}
+		}
+		delete(targets, author)
+		userIDs := make([]gocql.UUID, 0, len(targets))
+		for raw := range targets {
+			if id, ok := ids.Parse(raw); ok {
+				userIDs = append(userIDs, id)
+			}
+		}
+		if err := a.Repo.AddMentions(ctx, a.id, m.ID, userIDs); err != nil {
+			a.Logger.Warn("failed to record mentions", zap.String("channel", a.id.String()), zap.Error(err))
+		}
+	}()
 }
 
 // reply writes m to root's thread. Replies leave the channel's stream and
@@ -403,6 +455,7 @@ func (a *channel) reply(ctx context.Context, root, m *models.Message, author *mo
 	}
 	out := convert.Message(m, convert.PublicUser(author), atts)
 	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessagePosted{MessagePosted: &pb.MessagePosted{Message: out, ParticipantIds: notify}}})
+	a.recordMentions(m)
 
 	root.ReplyCount++
 	root.LastReplyAt = m.ID.Time()
@@ -851,7 +904,10 @@ func (a *channel) markRead(c *actor.Context, msg MarkRead) error {
 	}
 	userID := msg.P.UserID
 	a.async(c, func(ctx context.Context) (any, error) {
-		return Done{}, a.Repo.SetLastRead(ctx, userID, a.id, id)
+		if err := a.Repo.SetLastRead(ctx, userID, a.id, id); err != nil {
+			return nil, err
+		}
+		return Done{}, a.Repo.ClearMentions(ctx, userID, a.id)
 	})
 	return nil
 }

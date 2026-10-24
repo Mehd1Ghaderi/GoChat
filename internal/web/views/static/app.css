@@ -18,6 +18,7 @@
   --ok: #2f7d5b;
   --online: #6cc79e;
   --unread: #e5839e;
+  --unread-ink: #3d0f1f;
   --side-bg: #eeedf8;
   --side-fg: #3b3e60;
   --side-strong: #24273f;
@@ -240,7 +241,11 @@ fieldset.choice legend { font-weight: 600; font-size: .92rem; padding: 0 .3rem; 
 .sb-link .label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .dot.on { background: var(--unread); }
-.sb-link:has(.dot.on) .label { font-weight: 800; color: var(--side-strong); }
+.sb-link:has(.dot.on) .label, .sb-link:has(.mentions) .label { font-weight: 800; color: var(--side-strong); }
+.mentions {
+  display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; flex: none; border-radius: 10px;
+  background: var(--unread); color: var(--unread-ink); font-size: .72rem; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums;
+}
 .presence {
   display: inline-block; width: 10px; height: 10px; margin: 0 4px; border-radius: 50%; flex: none;
   border: 2px solid var(--side-muted);
@@ -413,6 +418,28 @@ fieldset.choice legend { font-weight: 600; font-size: .92rem; padding: 0 .3rem; 
 .toasts { position: fixed; right: 16px; bottom: 90px; z-index: 60; display: grid; gap: 8px; max-width: calc(100vw - 32px); }
 .toast { padding: .65rem .95rem; border-radius: 12px; background: var(--fg); color: var(--bg); box-shadow: var(--shadow); font-size: .9rem; }
 .toast.error { background: var(--danger-fill); color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent); }
+
+/* Mentions: the name stands out, and so does a message that calls you. */
+.mention { color: var(--accent-soft-ink); background: var(--accent-soft); border-radius: 5px; padding: 0 .2rem; font-weight: 650; }
+.msg.mentioned { background: color-mix(in srgb, var(--accent-soft) 75%, transparent); box-shadow: inset 3px 0 0 var(--accent); }
+.composer-wrap { position: relative; }
+.suggest-box {
+  position: absolute; left: 12px; right: 12px; bottom: calc(100% - 6px); z-index: 20; max-height: 280px; overflow-y: auto;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 4px;
+}
+.suggest-box[hidden] { display: none; }
+.suggest { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.suggest li {
+  display: flex; align-items: center; gap: .55rem; min-height: 40px; padding: 4px 10px; border-radius: 8px; cursor: pointer;
+  white-space: nowrap; overflow: hidden;
+}
+.suggest li strong { font-weight: 650; overflow: hidden; text-overflow: ellipsis; }
+.suggest li .muted { font-size: .85rem; overflow: hidden; text-overflow: ellipsis; }
+.suggest li[aria-selected="true"] { background: var(--accent-soft); }
+@media (hover: hover) { .suggest li:hover { background: var(--bg-hover); } .suggest li[aria-selected="true"]:hover { background: var(--accent-soft); } }
+.avatar.xs { width: 24px; height: 24px; font-size: .62rem; border-radius: 7px; }
+.avatar.xs.everyone { background: var(--accent-fill); color: var(--accent-ink); }
+.avatar.xs .i { width: 15px; height: 15px; }
 
 /* Threads: replies open beside the channel, over it on narrower screens. */
 .thread-link {

@@ -224,14 +224,16 @@ func (s *socket) refuse(within time.Duration, part string) {
 }
 
 var (
-	inviteRe  = regexp.MustCompile(`/join/([A-Za-z0-9_-]{43})`)
-	channelRe = regexp.MustCompile(`/t/[a-z0-9-]+/ch/([0-9a-f-]{36})`)
-	attRe     = regexp.MustCompile(`name="attachment" value="([0-9a-f-]{36})"`)
-	secretRe  = regexp.MustCompile(`<code>([A-Z2-7]{16,})</code>`)
-	codeRe    = regexp.MustCompile(`<code>([a-z2-7]{5}-[a-z2-7]{5})</code>`)
-	teamIDRe  = regexp.MustCompile(`data-team="([0-9a-f-]{36})"`)
-	msgIDRe   = regexp.MustCompile(`id="msg-([0-9a-f-]{36})"`)
-	photoRe   = regexp.MustCompile(`/photos/([ut])/([0-9a-f-]{36})/([0-9a-f]{16})`)
+	inviteRe   = regexp.MustCompile(`/join/([A-Za-z0-9_-]{43})`)
+	channelRe  = regexp.MustCompile(`/t/[a-z0-9-]+/ch/([0-9a-f-]{36})`)
+	attRe      = regexp.MustCompile(`name="attachment" value="([0-9a-f-]{36})"`)
+	secretRe   = regexp.MustCompile(`<code>([A-Z2-7]{16,})</code>`)
+	codeRe     = regexp.MustCompile(`<code>([a-z2-7]{5}-[a-z2-7]{5})</code>`)
+	teamIDRe   = regexp.MustCompile(`data-team="([0-9a-f-]{36})"`)
+	msgIDRe    = regexp.MustCompile(`id="msg-([0-9a-f-]{36})"`)
+	newestRe   = regexp.MustCompile(`data-newest="([0-9a-f-]{36})"`)
+	offTopicRe = regexp.MustCompile(`data-channel="([0-9a-f-]{36})"(?s:[^<]*>.{0,600}?)<span class="label">Off-Topic</span>`)
+	photoRe    = regexp.MustCompile(`/photos/([ut])/([0-9a-f-]{36})/([0-9a-f]{16})`)
 )
 
 // bootstrap sets a fresh server up with the admin and the team the tests use.
@@ -368,6 +370,54 @@ func TestEndToEnd(t *testing.T) {
 		}
 		bobWS.send(map[string]string{"op": "post", "channel_id": town, "root_id": root, "content": "late reply"})
 		bobWS.expect(5*time.Second, "message not found")
+	})
+
+	t.Run("mentions highlight, count and complete", func(t *testing.T) {
+		_, page := bob.get("/t/" + teamName + "/ch/" + town)
+		m := offTopicRe.FindStringSubmatch(page)
+		if m == nil {
+			t.Fatalf("no Off-Topic in bob's sidebar: %s", page)
+		}
+		offTopic := m[1]
+		adminWS.send(map[string]string{"op": "post", "channel_id": offTopic, "content": "please look, @" + bobName})
+		bobWS.expect(5*time.Second, `id="unread-`+offTopic+`" class="mentions"`, ">1<")
+		if _, page := bob.get("/t/" + teamName + "/ch/" + town); !strings.Contains(page, `id="unread-`+offTopic+`" class="mentions"`) {
+			t.Fatal("the mention is not counted on reload")
+		}
+		adminWS.send(map[string]string{"op": "post", "channel_id": town, "content": "hey @" + bobName + " and `@nobody`"})
+		f := bobWS.expect(5*time.Second, `class="msg mentioned"`)
+		if !strings.Contains(f, `<span class="mention">@`+bobName+`</span>`) || strings.Contains(f, `">@nobody`) {
+			t.Fatalf("mention markup: %s", f)
+		}
+		if _, list := bob.do(http.MethodGet, "/m/"+town+"/people?q=adm", nil, "", true); !strings.Contains(list, `data-insert="@admin "`) {
+			t.Fatalf("suggestions for adm: %s", list)
+		}
+		if _, list := bob.do(http.MethodGet, "/m/"+town+"/people?q=cha", nil, "", true); !strings.Contains(list, `data-insert="@channel "`) {
+			t.Fatalf("suggestions for cha: %s", list)
+		}
+		if res, _ := bob.do(http.MethodGet, "/m/"+town+"/people?q=%3Cx", nil, "", true); res.StatusCode != http.StatusNotFound {
+			t.Fatalf("a bad prefix was accepted: %d", res.StatusCode)
+		}
+		// Reading the channel clears its count: the page tells the socket
+		// the newest message it shows.
+		defer view(bobWS, town)
+		_, page = bob.get("/t/" + teamName + "/ch/" + offTopic)
+		newest := newestRe.FindStringSubmatch(page)
+		if newest == nil {
+			t.Fatalf("no newest message on the page: %s", page)
+		}
+		bobWS.send(map[string]string{"op": "view", "team_id": teamID, "team_name": teamName, "channel_id": offTopic, "last_id": newest[1]})
+		deadline := time.Now().Add(6 * time.Second)
+		for {
+			_, page := bob.get("/t/" + teamName + "/ch/" + town)
+			if !strings.Contains(page, `id="unread-`+offTopic+`" class="mentions"`) {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("reading the channel did not clear its mentions")
+			}
+			time.Sleep(300 * time.Millisecond)
+		}
 	})
 
 	t.Run("typing reaches others only", func(t *testing.T) {

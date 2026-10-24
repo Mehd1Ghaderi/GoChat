@@ -1,5 +1,5 @@
 {{define "message"}}
-<article class="msg{{if .Mine}} mine{{end}}" id="msg-{{.Id}}"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>
+<article class="msg{{if .Mine}} mine{{end}}{{if .Mentioned}} mentioned{{end}}" id="msg-{{.Id}}"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>
   {{template "avatar" (dict "User" .Author "Size" "")}}
   <div class="msg-main">
     {{template "msg-content" .}}
@@ -61,3 +61,5 @@
 {{end}}
 
 {{define "avatar"}}{{$u := .User}}{{if and $u $u.Photo}}<span class="avatar {{.Size}} {{avatar $u}}" aria-hidden="true"><img src="/photos/u/{{$u.Id}}/{{$u.Photo}}" alt="" loading="lazy" decoding="async"></span>{{else}}<span class="avatar {{.Size}} {{avatar $u}}" aria-hidden="true">{{initials $u}}</span>{{end}}{{end}}
+
+{{define "suggest"}}{{if .}}<ul class="suggest" role="listbox" aria-label="People to mention">{{range $i, $s := .}}<li role="option" data-insert="@{{$s.Name}} " aria-selected="{{if eq $i 0}}true{{else}}false{{end}}">{{if $s.User}}{{template "avatar" (dict "User" $s.User "Size" "xs")}}<strong>{{name $s.User}}</strong><span class="muted">@{{$s.Name}}</span>{{else}}<span class="avatar xs everyone" aria-hidden="true">{{icon "members"}}</span><strong>@{{$s.Name}}</strong><span class="muted">{{$s.Note}}</span>{{end}}</li>{{end}}</ul>{{end}}{{end}}

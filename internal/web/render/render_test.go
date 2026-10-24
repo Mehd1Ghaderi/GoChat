@@ -83,7 +83,7 @@ func TestMessageFragment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := r.Message(&pb.Message{Id: "id1", ChannelId: "c1", Content: "<b>hi</b>", Author: &pb.User{Id: "u", Username: "u", DisplayName: "<U>"}}, "u", false)
+	m := r.Message(&pb.Message{Id: "id1", ChannelId: "c1", Content: "<b>hi</b>", Author: &pb.User{Id: "u", Username: "u", DisplayName: "<U>"}}, &pb.User{Id: "u", Username: "u"}, false)
 	var buf bytes.Buffer
 	if err := r.Fragment(&buf, "message-new", m); err != nil {
 		t.Fatal(err)
@@ -126,5 +126,26 @@ func TestPhotos(t *testing.T) {
 	out.Reset()
 	if err := r.Fragment(&out, "avatar", map[string]any{"User": (*pb.User)(nil), "Size": "sm"}); err != nil {
 		t.Fatalf("nil user: %v", err)
+	}
+}
+
+func TestMentions(t *testing.T) {
+	r, err := New(16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(r.markdown("hey @Bob and bob@example.com, `@code`"))
+	if !strings.Contains(body, `<span class="mention">@bob</span>`) || strings.Contains(body, `">@example`) || strings.Contains(body, `">@code`) {
+		t.Fatalf("mention spans: %s", body)
+	}
+	bob := &pb.User{Id: "b", Username: "bob"}
+	if !r.Message(&pb.Message{Id: "1", Content: "hi @bob", Author: &pb.User{Id: "a"}}, bob, false).Mentioned {
+		t.Error("a mention of bob is not marked for bob")
+	}
+	if r.Message(&pb.Message{Id: "2", Content: "hi @bob", Author: bob}, bob, false).Mentioned {
+		t.Error("bob's own message mentions him")
+	}
+	if !r.Message(&pb.Message{Id: "3", Content: "@here standup", Author: &pb.User{Id: "a"}}, bob, false).Mentioned {
+		t.Error("@here does not mention bob")
 	}
 }

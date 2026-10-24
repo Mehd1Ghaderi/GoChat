@@ -549,8 +549,11 @@ type Channel struct {
 	LastMessageId string      `protobuf:"bytes,8,opt,name=last_message_id,json=lastMessageId,proto3" json:"last_message_id,omitempty"`
 	LastReadId    string      `protobuf:"bytes,9,opt,name=last_read_id,json=lastReadId,proto3" json:"last_read_id,omitempty"`
 	// The other side of a direct channel.
-	Peer          *User                  `protobuf:"bytes,10,opt,name=peer,proto3" json:"peer,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	Peer      *User                  `protobuf:"bytes,10,opt,name=peer,proto3" json:"peer,omitempty"`
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// Unread messages that call out the caller, or every unread one in a
+	// direct conversation.
+	MentionCount  int32 `protobuf:"varint,12,opt,name=mention_count,json=mentionCount,proto3" json:"mention_count,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -660,6 +663,13 @@ func (x *Channel) GetCreatedAt() *timestamppb.Timestamp {
 		return x.CreatedAt
 	}
 	return nil
+}
+
+func (x *Channel) GetMentionCount() int32 {
+	if x != nil {
+		return x.MentionCount
+	}
+	return 0
 }
 
 type ChannelMember struct {
@@ -940,7 +950,7 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"TeamMember\x12#\n" +
 	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user\x12'\n" +
 	"\x04role\x18\x02 \x01(\x0e2\x13.gochat.v1.TeamRoleR\x04role\x127\n" +
-	"\tjoined_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bjoinedAt\"\x85\x03\n" +
+	"\tjoined_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bjoinedAt\"\xaa\x03\n" +
 	"\aChannel\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
 	"\ateam_id\x18\x02 \x01(\tR\x06teamId\x12\x12\n" +
@@ -955,7 +965,8 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"\x04peer\x18\n" +
 	" \x01(\v2\x0f.gochat.v1.UserR\x04peer\x129\n" +
 	"\n" +
-	"created_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"\x99\x01\n" +
+	"created_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12#\n" +
+	"\rmention_count\x18\f \x01(\x05R\fmentionCount\"\x99\x01\n" +
 	"\rChannelMember\x12#\n" +
 	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user\x12*\n" +
 	"\x04role\x18\x02 \x01(\x0e2\x16.gochat.v1.ChannelRoleR\x04role\x127\n" +

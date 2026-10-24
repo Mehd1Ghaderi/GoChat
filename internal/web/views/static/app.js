@@ -66,8 +66,13 @@
       a.classList.toggle("active", on);
       if (on) {
         a.setAttribute("aria-current", "page");
-        var dot = a.querySelector(".dot");
-        if (dot) dot.classList.remove("on");
+        var dot = a.querySelector(".dot, .mentions");
+        if (dot) {
+          dot.className = "dot";
+          dot.textContent = "";
+          dot.removeAttribute("title");
+          dot.setAttribute("aria-hidden", "true");
+        }
       } else {
         a.removeAttribute("aria-current");
       }
@@ -105,12 +110,84 @@
     var wrap = form.closest(".composer-wrap");
     var pending = wrap && wrap.querySelector(".pending");
     if (pending) pending.innerHTML = "";
+    closeSuggest(wrap && wrap.querySelector(".suggest-box"));
     var ta = form.querySelector("textarea");
     if (ta) ta.style.height = "";
   }
 
   function isComposer(form) {
     return !!form && form.classList.contains("composer");
+  }
+
+  // @ completion: the channel's people whose name starts with what follows
+  // the @ being typed.
+  var suggestSeq = 0;
+  var suggestTimer = 0;
+
+  function mentionQuery(ta) {
+    var m = /(^|[^A-Za-z0-9._@-])@([A-Za-z0-9._-]{0,32})$/.exec(ta.value.slice(0, ta.selectionStart));
+    return m ? m[2].toLowerCase() : null;
+  }
+
+  function suggestBox(ta) {
+    var wrap = ta.closest(".composer-wrap");
+    if (!wrap) return null;
+    var box = wrap.querySelector(".suggest-box");
+    if (!box) {
+      box = document.createElement("div");
+      box.className = "suggest-box";
+      box.hidden = true;
+      wrap.insertBefore(box, wrap.firstChild);
+    }
+    return box;
+  }
+
+  function closeSuggest(box) {
+    if (!box || box.hidden) return false;
+    box.hidden = true;
+    box.innerHTML = "";
+    return true;
+  }
+
+  function updateSuggest(ta) {
+    var box = suggestBox(ta);
+    var q = mentionQuery(ta);
+    var channel = ta.form.elements.channel_id;
+    clearTimeout(suggestTimer);
+    if (!box || q === null || !channel) {
+      suggestSeq++;
+      closeSuggest(box);
+      return;
+    }
+    var seq = ++suggestSeq;
+    suggestTimer = setTimeout(function () {
+      fetch("/m/" + channel.value + "/people?q=" + encodeURIComponent(q), { headers: { "HX-Request": "true" }, credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.text() : ""; })
+        .then(function (html) {
+          if (seq !== suggestSeq) return;
+          box.innerHTML = html;
+          box.hidden = html.trim() === "";
+        })
+        .catch(function () { closeSuggest(box); });
+    }, 120);
+  }
+
+  function moveSuggest(box, step) {
+    var items = Array.prototype.slice.call(box.querySelectorAll("[role=option]"));
+    var at = items.findIndex(function (li) { return li.getAttribute("aria-selected") === "true"; });
+    var next = (at + step + items.length) % items.length;
+    items.forEach(function (li, i) { li.setAttribute("aria-selected", i === next ? "true" : "false"); });
+    items[next].scrollIntoView({ block: "nearest" });
+  }
+
+  function acceptSuggest(ta, li) {
+    var end = ta.selectionStart;
+    var before = ta.value.slice(0, end).replace(/@[A-Za-z0-9._-]{0,32}$/, li.dataset.insert);
+    ta.value = before + ta.value.slice(end);
+    ta.selectionStart = ta.selectionEnd = before.length;
+    suggestSeq++;
+    closeSuggest(suggestBox(ta));
+    ta.focus();
   }
 
   htmx.onLoad(function (elt) {
@@ -218,6 +295,12 @@
   document.addEventListener("click", function (e) {
     var target = e.target;
     if (!(target instanceof Element)) return;
+    var option = target.closest(".suggest-box [role=option]");
+    if (option) {
+      var ta = option.closest(".composer-wrap").querySelector("form.composer textarea");
+      if (ta) acceptSuggest(ta, option);
+      return;
+    }
     if (target.closest("[data-close-thread]")) {
       closeThread();
       return;
@@ -255,17 +338,51 @@
     if (open && msg.querySelector(".msg-actions")) msg.classList.add("show-actions");
   }
 
+  // Choosing with the mouse keeps the composer focused; leaving it closes
+  // the list.
+  document.addEventListener("mousedown", function (e) {
+    if (e.target instanceof Element && e.target.closest(".suggest-box")) e.preventDefault();
+  });
+  document.addEventListener("focusout", function (e) {
+    var t = e.target;
+    if (t instanceof HTMLTextAreaElement && isComposer(t.form)) {
+      suggestSeq++;
+      closeSuggest(suggestBox(t));
+    }
+  });
+
   document.addEventListener("focusin", function (e) {
     if (e.target instanceof HTMLInputElement && e.target.hasAttribute("data-select-on-focus")) e.target.select();
   });
 
   document.addEventListener("keydown", function (e) {
+    var t = e.target;
+    var box = t instanceof HTMLTextAreaElement && isComposer(t.form) ? suggestBox(t) : null;
+    if (box && !box.hidden) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        moveSuggest(box, e.key === "ArrowDown" ? 1 : -1);
+        return;
+      }
+      if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey && !e.isComposing) {
+        var chosen = box.querySelector("[aria-selected=true]");
+        if (chosen) {
+          e.preventDefault();
+          acceptSuggest(t, chosen);
+          return;
+        }
+      }
+      if (e.key === "Escape") {
+        suggestSeq++;
+        closeSuggest(box);
+        return;
+      }
+    }
     if (e.key === "Escape") {
       var m = document.getElementById("modal");
       if (m && m.innerHTML !== "") closeModal();
       else closeThread();
     }
-    var t = e.target;
     if (!(t instanceof HTMLTextAreaElement) || !isComposer(t.form)) return;
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !touch.matches) {
       e.preventDefault();
@@ -279,6 +396,7 @@
   document.addEventListener("input", function (e) {
     var t = e.target;
     if (!(t instanceof HTMLTextAreaElement) || !isComposer(t.form)) return;
+    updateSuggest(t);
     t.style.height = "auto";
     t.style.height = Math.min(t.scrollHeight, window.innerHeight * 0.4) + "px";
     var now = Date.now();
