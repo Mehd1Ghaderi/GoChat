@@ -20,6 +20,8 @@ server:
     address: "0.0.0.0:7070"
     # Shared with every web gateway; at least 32 characters.
     gateway_key: ""
+    # Voice servers' own key; empty refuses them.
+    voice_server_key: ""
     tls:
       enabled: false
       cert_file: ""
