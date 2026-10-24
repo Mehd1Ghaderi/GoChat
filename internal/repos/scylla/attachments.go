@@ -17,6 +17,10 @@ const attachmentColumns = "id, channel_id, uploader_id, name, content_type, size
 // PendingShards spreads a day's unposted uploads over several partitions.
 const PendingShards = 16
 
+// PendingTTL is how long an upload stays pending: the pending_uploads
+// table's default_time_to_live.
+const PendingTTL = 14 * 24 * time.Hour
+
 // PendingUpload is an upload not posted yet, kept until it is or the janitor
 // deletes it.
 type PendingUpload struct {

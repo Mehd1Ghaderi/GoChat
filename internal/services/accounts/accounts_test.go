@@ -1,6 +1,7 @@
 package accounts
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -11,15 +12,19 @@ import (
 
 	"github.com/anthdm/hollywood/actor"
 	"github.com/gocql/gocql"
+	potp "github.com/pquerna/otp/totp"
 	"go.uber.org/zap"
 
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
 	"github.com/ssenerg/gochat/internal/actors"
 	"github.com/ssenerg/gochat/internal/authz/authztest"
 	"github.com/ssenerg/gochat/internal/core/ids"
+	"github.com/ssenerg/gochat/internal/core/keylock"
 	"github.com/ssenerg/gochat/internal/core/models"
 	"github.com/ssenerg/gochat/internal/core/password"
 	"github.com/ssenerg/gochat/internal/core/secure"
+	"github.com/ssenerg/gochat/internal/core/totp"
+	"github.com/ssenerg/gochat/internal/core/window"
 	ierrors "github.com/ssenerg/gochat/internal/errors"
 	"github.com/ssenerg/gochat/internal/services/hub"
 	"github.com/ssenerg/gochat/internal/services/users"
@@ -522,5 +527,94 @@ func TestIdleSessionsEnd(t *testing.T) {
 	cfg.SessionIdleTimeout = 5 * time.Minute
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("an idle timeout shorter than the use is recorded was accepted")
+	}
+}
+
+// totpRepo stores one user. Each replacement of the recovery codes takes
+// longer than the one before, so a racing confirmation writes last.
+type totpRepo struct {
+	Repo
+	mu       sync.Mutex
+	user     models.User
+	codes    [][]byte
+	replaced int
+}
+
+func (r *totpRepo) GetUser(context.Context, gocql.UUID) (*models.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u := r.user
+	return &u, nil
+}
+
+func (r *totpRepo) GetUsers(ctx context.Context, _ []gocql.UUID) ([]*models.User, error) {
+	u, err := r.GetUser(ctx, gocql.UUID{})
+	return []*models.User{u}, err
+}
+
+func (r *totpRepo) ReplaceRecoveryCodes(_ context.Context, _ gocql.UUID, hashes [][]byte) error {
+	r.mu.Lock()
+	r.replaced++
+	wait := time.Duration(r.replaced*r.replaced) * 10 * time.Millisecond
+	r.mu.Unlock()
+	time.Sleep(wait)
+	r.mu.Lock()
+	r.codes = hashes
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *totpRepo) EnableTOTP(_ context.Context, _ gocql.UUID, sealed []byte, step int64, _ time.Time) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !bytes.Equal(r.user.TOTPPending, sealed) {
+		return false, nil
+	}
+	r.user.TOTPEnabled, r.user.TOTPSecret, r.user.TOTPPending, r.user.TOTPLastStep = true, sealed, nil, step
+	return true, nil
+}
+
+func TestConfirmShowsTheStoredCodes(t *testing.T) {
+	key := make([]byte, 32)
+	sealer, err := secure.NewSealer(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, _, err := totp.Generate("GoChat", "ada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := ids.New()
+	repo := &totpRepo{user: models.User{ID: id, TOTPPending: sealer.Seal([]byte(secret), id[:])}}
+	w := &worker{Deps: &Deps{
+		Logger: zap.NewNop(), Cfg: &Config{}, Repo: repo, Users: users.NewCache(repo, 10, time.Minute),
+		sealer: sealer, recoveryKey: secure.DeriveKey(key, "recovery-codes"),
+		failures: window.New(10, time.Minute), totp: keylock.New(),
+	}}
+	code, err := potp.GenerateCode(secret, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A double submission of the form.
+	p := &models.Principal{UserID: id, Role: models.SystemRoleUser}
+	shown := make([]RecoveryCodes, 2)
+	var wg sync.WaitGroup
+	for i := range shown {
+		wg.Go(func() {
+			shown[i], _ = lockTOTP(context.Background(), w, p, ConfirmTOTP{P: p, Code: code}, w.confirmTOTP)
+		})
+	}
+	wg.Wait()
+	shown = slices.DeleteFunc(shown, func(c RecoveryCodes) bool { return c == nil })
+	if len(shown) != 1 {
+		t.Fatalf("%d confirmations showed codes", len(shown))
+	}
+	for i, c := range shown[0] {
+		if !bytes.Equal(w.recoveryHash(id, c), repo.codes[i]) {
+			t.Fatal("the codes shown are not the ones stored")
+		}
+	}
+	if _, err := lockTOTP(context.Background(), w, p, ConfirmTOTP{P: p, Code: code}, w.confirmTOTP); !ierrors.Is(err, ierrors.CodeFailedPrecondition) {
+		t.Fatalf("confirming again: %v", err)
 	}
 }

@@ -23,7 +23,7 @@
 <p class="muted">Scan it with an authenticator app, or type the key, then enter the code it shows.</p>
 <img class="qr" src="{{.QR}}" alt="QR code for your authenticator app" width="200" height="200">
 <p class="secret"><code>{{.Secret}}</code></p>
-<form hx-post="/settings/totp/confirm" hx-target="#totp" class="stack">
+<form hx-post="/settings/totp/confirm" hx-target="#totp" hx-sync="this:drop" hx-disabled-elt="find button" class="stack">
   <input type="hidden" name="secret" value="{{.Secret}}">
   <input type="hidden" name="url" value="{{.URL}}">
   {{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}

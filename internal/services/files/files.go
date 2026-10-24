@@ -365,10 +365,12 @@ type swept struct{}
 func (j *janitor) sweep() {
 	ctx, cancel := context.WithTimeout(context.Background(), j.Cfg.JanitorInterval)
 	defer cancel()
-	cutoff := time.Now().Add(-j.Cfg.OrphanAfter)
-	last := scylla.PendingDay(cutoff)
+	now := time.Now()
+	cutoff := now.Add(-j.Cfg.OrphanAfter)
+	// Every day a pending row may still be in, so none outlives a janitor
+	// that stopped for a while.
 	removed := 0
-	for day := last - 7; day <= last; day++ {
+	for day := scylla.PendingDay(now.Add(-scylla.PendingTTL)); day <= scylla.PendingDay(cutoff); day++ {
 		pending, err := j.Repo.ListPendingUploads(ctx, day)
 		if err != nil {
 			j.Logger.Warn("janitor failed to list uploads", zap.Error(err))
