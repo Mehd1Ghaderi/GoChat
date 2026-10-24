@@ -65,10 +65,28 @@ func newClient(t *testing.T, name string) *client {
 	}}
 }
 
+// cookieName is a cookie's name as the server sets it: over HTTPS with the
+// __Host- prefix.
+func cookieName(name string) string {
+	if strings.HasPrefix(baseURL, "https://") {
+		return "__Host-" + name
+	}
+	return name
+}
+
+// wsURL is the gateway's socket address.
+func wsURL() string {
+	u, _ := url.Parse(baseURL)
+	if u.Scheme == "https" {
+		return "wss://" + u.Host + "/ws"
+	}
+	return "ws://" + u.Host + "/ws"
+}
+
 func (c *client) cookie(name string) string {
 	u, _ := url.Parse(baseURL)
 	for _, ck := range c.http.Jar.Cookies(u) {
-		if ck.Name == name {
+		if ck.Name == cookieName(name) {
 			return ck.Value
 		}
 	}
@@ -158,11 +176,10 @@ type socket struct {
 func (c *client) socket(origin string) (*socket, *http.Response, error) {
 	h := http.Header{}
 	h.Set("Origin", origin)
-	u, _ := url.Parse(baseURL)
-	h.Set("Cookie", "gochat_session="+c.cookie("gochat_session"))
+	h.Set("Cookie", cookieName("gochat_session")+"="+c.cookie("gochat_session"))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	conn, res, err := websocket.Dial(ctx, "ws://"+u.Host+"/ws", &websocket.DialOptions{HTTPHeader: h})
+	conn, res, err := websocket.Dial(ctx, wsURL(), &websocket.DialOptions{HTTPHeader: h})
 	if err != nil {
 		return nil, res, err
 	}
@@ -1164,11 +1181,10 @@ func TestEndToEnd(t *testing.T) {
 		}
 		h := http.Header{}
 		h.Set("Origin", baseURL)
-		h.Set("Cookie", "gochat_session="+admin.cookie("gochat_session"))
-		u, _ := url.Parse(baseURL)
+		h.Set("Cookie", cookieName("gochat_session")+"="+admin.cookie("gochat_session"))
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		conn, res, err := websocket.Dial(ctx, "ws://"+u.Host+"/ws", &websocket.DialOptions{HTTPHeader: h, CompressionMode: websocket.CompressionNoContextTakeover})
+		conn, res, err := websocket.Dial(ctx, wsURL(), &websocket.DialOptions{HTTPHeader: h, CompressionMode: websocket.CompressionNoContextTakeover})
 		if err != nil {
 			t.Fatal(err)
 		}
