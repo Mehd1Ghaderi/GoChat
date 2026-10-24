@@ -875,7 +875,28 @@ func (w *worker) createChannel(ctx context.Context, msg CreateChannel) (*pb.Chan
 	}
 	out := convert.Channel(ch, models.ChannelRoleAdmin, gocql.UUID{}, nil)
 	w.deliver(msg.P.UserID, &pb.Event{Payload: &pb.Event_ChannelJoined{ChannelJoined: &pb.ChannelJoined{Channel: out}}})
+	if ch.Kind == models.ChannelVoice {
+		w.announce(ctx, ch, msg.P.UserID)
+	}
 	return out, nil
+}
+
+// announce shows the rest of the team a new voice channel, which is
+// theirs to talk in.
+func (w *worker) announce(ctx context.Context, ch *models.Channel, creator gocql.UUID) {
+	members, err := w.Repo.ListTeamMembers(ctx, ch.TeamID)
+	if err != nil {
+		w.Logger.Warn("failed to announce a voice channel", zap.String("channel", ch.ID.String()), zap.Error(err))
+		return
+	}
+	ids := make([]string, 0, len(members))
+	for _, m := range members {
+		if m.UserID != creator {
+			ids = append(ids, m.UserID.String())
+		}
+	}
+	view := convert.Channel(ch, "", gocql.UUID{}, nil)
+	w.Engine.Send(w.Hub, hub.Deliver{UserIDs: ids, Event: &pb.Event{Payload: &pb.Event_ChannelJoined{ChannelJoined: &pb.ChannelJoined{Channel: view}}}})
 }
 
 func (w *worker) shareTeam(ctx context.Context, a, b gocql.UUID) (bool, error) {

@@ -384,7 +384,7 @@ func (s *session) loadSidebar(c *actor.Context, oob bool) {
 		if err != nil {
 			return nil
 		}
-		channels, direct := render.Split(res.Channels)
+		channels, voice, direct := render.Split(res.Channels)
 		online := map[string]bool{}
 		if peers := render.Peers(direct); len(peers) > 0 {
 			if p, err := s.Client.Users.GetPresence(ctx, &pb.GetPresenceRequest{UserIds: peers}); err == nil {
@@ -393,7 +393,13 @@ func (s *session) loadSidebar(c *actor.Context, oob bool) {
 				}
 			}
 		}
-		return sidebarReady{teamID: teamID, lists: &render.Lists{Team: team, Channels: channels, DMs: direct, Online: online, OOB: oob}}
+		lists := &render.Lists{Team: team, Channels: channels, Voice: voice, DMs: direct, Online: online, OOB: oob}
+		if len(voice) > 0 {
+			if vs, err := s.Client.Voice.ListVoiceStates(ctx, &pb.ListVoiceStatesRequest{TeamId: teamID}); err == nil {
+				lists.VoiceStates = render.VoiceStates(vs.Channels)
+			}
+		}
+		return sidebarReady{teamID: teamID, lists: lists}
 	})
 }
 
@@ -642,6 +648,18 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 		s.muted[p.ChannelMuted.ChannelId] = p.ChannelMuted.Muted
 		if s.sidebar[p.ChannelMuted.ChannelId] {
 			s.loadSidebar(c, true)
+		}
+	case *pb.Event_VoiceChannelUpdate:
+		// The page keeps the newest version it was shown of each.
+		d := p.VoiceChannelUpdate
+		if d.TeamId != s.teamID || d.Channel == nil {
+			return
+		}
+		room := render.VoiceRoom{TeamName: s.teamName, ChannelID: d.Channel.ChannelId, State: d.Channel, MeID: me, OOB: true}
+		s.fragment("voice-members", room)
+		if d.Channel.ChannelId == s.channelID {
+			room.Moderator = s.moderator
+			s.fragment("voice-tiles", room)
 		}
 	case *pb.Event_ChannelUpdated:
 		// The composers of the channel on show offer voice only while it

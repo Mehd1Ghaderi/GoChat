@@ -19,6 +19,9 @@ web:
   # The origin browsers use. https makes every cookie Secure and enables HSTS.
   public_url: https://chat.example.com
   trusted_proxies: []
+  # The voice servers' signaling origins, as wss://voice.example.com. A
+  # voice server under public_url's own host needs none.
+  voice_origins: []
   upload_limit: 52428800
   render_cache_size: 20000
   http:

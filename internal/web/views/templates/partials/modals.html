@@ -22,11 +22,12 @@
   <label>URL name<input name="name" required minlength="2" maxlength="50" pattern="[a-z0-9][a-z0-9\-]{1,49}"><small>Lowercase letters, digits and '-'.</small></label>
   <label>Purpose<input name="purpose" maxlength="250"></label>
   <fieldset class="choice">
-    <legend>Who can join</legend>
-    <label class="inline"><input type="radio" name="type" value="public" checked> Public: anyone in the team</label>
+    <legend>Kind</legend>
+    <label class="inline"><input type="radio" name="type" value="public"{{if not .Voice}} checked{{end}}> Public: anyone in the team</label>
     <label class="inline"><input type="radio" name="type" value="private"> Private: by invitation only</label>
+    <label class="inline"><input type="radio" name="type" value="voice"{{if .Voice}} checked{{end}}> Voice: a room the team talks in</label>
   </fieldset>
-  <label class="inline"><input type="checkbox" name="voice" value="1" checked> Allow voice messages</label>
+  <label class="inline voice-messages-option"><input type="checkbox" name="voice" value="1" checked> Allow voice messages</label>
   <button class="btn primary" type="submit">Create</button>
 </form>
 {{template "modal-end"}}

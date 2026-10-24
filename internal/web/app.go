@@ -196,7 +196,8 @@ func (h *Handler) channelView(ctx context.Context, u *pb.User, team *pb.Team, ch
 	g.Go(func() error {
 		res, err := h.client.Messages.ListMessages(gctx, &pb.ListMessagesRequest{ChannelId: chID, Limit: pageSize})
 		if err != nil {
-			if drpc.Err(err).Code == ierrors.CodePermissionDenied {
+			// A voice channel has no messages to list.
+			if code := drpc.Err(err).Code; code == ierrors.CodePermissionDenied || code == ierrors.CodeFailedPrecondition {
 				return nil
 			}
 			return err
@@ -216,6 +217,14 @@ func (h *Handler) channelView(ctx context.Context, u *pb.User, team *pb.Team, ch
 		Title:     render.Title(ch),
 		Member:    ch.Role != pb.ChannelRole_CHANNEL_ROLE_UNSPECIFIED,
 		Moderator: moderator(u, team, ch),
+		MeID:      u.GetId(),
+	}
+	if ch.Type == pb.ChannelType_CHANNEL_TYPE_VOICE {
+		view.Member = true
+		if vs, err := h.client.Voice.ListVoiceStates(ctx, &pb.ListVoiceStatesRequest{TeamId: team.Id}); err == nil {
+			view.Voice = render.VoiceStates(vs.Channels)[ch.Id]
+		}
+		return view, nil
 	}
 	if msgs != nil {
 		view.Messages = h.render.Messages(msgs.Messages, u, view.Moderator)
@@ -312,7 +321,7 @@ func (h *Handler) lists(ctx context.Context, team *pb.Team, active string) (*ren
 	if err != nil {
 		return nil, err
 	}
-	channels, direct := render.Split(res.Channels)
+	channels, voice, direct := render.Split(res.Channels)
 	online := map[string]bool{}
 	if peers := render.Peers(direct); len(peers) > 0 {
 		if p, err := h.client.Users.GetPresence(ctx, &pb.GetPresenceRequest{UserIds: peers}); err == nil {
@@ -321,7 +330,14 @@ func (h *Handler) lists(ctx context.Context, team *pb.Team, active string) (*ren
 			}
 		}
 	}
-	return &render.Lists{Team: team, Channels: channels, DMs: direct, Active: active, Online: online}, nil
+	lists := &render.Lists{Team: team, Channels: channels, Voice: voice, DMs: direct, Active: active, Online: online}
+	// Who talks where is a nicety: the page shows without it.
+	if len(voice) > 0 {
+		if vs, err := h.client.Voice.ListVoiceStates(ctx, &pb.ListVoiceStatesRequest{TeamId: team.Id}); err == nil {
+			lists.VoiceStates = render.VoiceStates(vs.Channels)
+		}
+	}
+	return lists, nil
 }
 
 func (h *Handler) olderMessages(w http.ResponseWriter, r *http.Request) {
@@ -388,7 +404,10 @@ func (h *Handler) newChannelModal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer cancel()
-	h.fragment(w, http.StatusOK, "new-channel", struct{ Team *pb.Team }{team})
+	h.fragment(w, http.StatusOK, "new-channel", struct {
+		Team  *pb.Team
+		Voice bool
+	}{team, r.URL.Query().Get("type") == "voice"})
 }
 
 func (h *Handler) createChannel(w http.ResponseWriter, r *http.Request) {
@@ -398,8 +417,11 @@ func (h *Handler) createChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	defer cancel()
 	kind := pb.ChannelType_CHANNEL_TYPE_PUBLIC
-	if r.PostFormValue("type") == "private" {
+	switch r.PostFormValue("type") {
+	case "private":
 		kind = pb.ChannelType_CHANNEL_TYPE_PRIVATE
+	case "voice":
+		kind = pb.ChannelType_CHANNEL_TYPE_VOICE
 	}
 	res, err := h.client.Channels.CreateChannel(ctx, &pb.CreateChannelRequest{
 		TeamId: team.Id, Name: r.PostFormValue("name"), DisplayName: r.PostFormValue("display_name"),

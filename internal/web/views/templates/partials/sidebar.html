@@ -21,6 +21,14 @@
     </ul>
   </section>
   <section>
+    <h2><span>Voice channels</span>
+      <button class="icon-btn sm" hx-get="/t/{{.Team.Name}}/channels/new?type=voice" hx-target="#modal" aria-label="Create a voice channel" title="Create a voice channel">{{icon "plus"}}</button>
+    </h2>
+    <ul>
+      {{range .Voice}}{{template "voice-item" (dict "Ch" . "Team" $.Team "Active" (eq .Id $.Active) "State" (index $.VoiceStates .Id))}}{{end}}
+    </ul>
+  </section>
+  <section>
     <h2><span>Direct messages</span>
       <button class="icon-btn sm" hx-get="/t/{{.Team.Name}}/people" hx-target="#modal" aria-label="Message someone" title="Message someone">{{icon "plus"}}</button>
     </h2>
@@ -45,6 +53,19 @@
   </a>
 </li>
 {{end}}
+
+{{define "voice-item"}}
+<li class="voice-item">
+  <a href="/t/{{.Team.Name}}/ch/{{.Ch.Id}}" hx-get="/t/{{.Team.Name}}/ch/{{.Ch.Id}}" hx-target="#main" hx-push-url="true"
+     class="sb-link voice-link{{if .Active}} active{{end}}" data-channel="{{.Ch.Id}}" data-voice-join="{{.Ch.Id}}"{{if .Active}} aria-current="page"{{end}}>
+    <span class="glyph" aria-hidden="true">{{icon "speaker"}}</span>
+    <span class="label">{{.Ch.DisplayName}}</span>
+  </a>
+  {{template "voice-members" (dict "ChannelID" .Ch.Id "State" .State "OOB" false)}}
+</li>
+{{end}}
+
+{{define "voice-members"}}<ul class="voice-members" id="voice-members-{{.ChannelID}}" data-version="{{.State.GetVersion}}" aria-label="In the voice channel"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>{{range .State.GetStates}}<li class="voice-member" data-user="{{.User.Id}}">{{template "avatar" (dict "User" .User "Size" "xs")}}<span class="vm-name">{{name .User}}</span>{{if .SelfDeaf}}<span class="vm-flag" title="Deafened">{{icon "headphones-off"}}</span>{{else if .SelfMute}}<span class="vm-flag" title="Muted">{{icon "mic-off"}}</span>{{end}}</li>{{end}}</ul>{{end}}
 
 {{define "badge"}}<span id="unread-{{.ID}}" class="mentions" title="{{.Count}} unread {{if eq .Count 1}}mention{{else}}mentions{{end}}"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>{{if gt .Count 99}}99+{{else}}{{.Count}}{{end}}</span>{{end}}
 

@@ -188,6 +188,7 @@ func (r *Renderer) funcs() template.FuncMap {
 		},
 		"isPrivate": func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_PRIVATE },
 		"isDirect":  func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_DIRECT },
+		"isVoice":   func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_VOICE },
 		"isAdmin":   func(t *pb.Team) bool { return t != nil && t.Role == pb.TeamRole_TEAM_ROLE_ADMIN },
 		"isSystemAdmin": func(u *pb.User) bool {
 			return u != nil && u.Role == pb.SystemRole_SYSTEM_ROLE_ADMIN

@@ -63,22 +63,50 @@ type Rail struct {
 type Lists struct {
 	Team     *pb.Team
 	Channels []*pb.Channel
+	Voice    []*pb.Channel
 	DMs      []*pb.Channel
-	Active   string
-	Online   map[string]bool
-	OOB      bool
+	// VoiceStates holds who talks in each voice channel, by channel id.
+	VoiceStates map[string]*pb.VoiceChannelState
+	Active      string
+	Online      map[string]bool
+	OOB         bool
 }
 
-// Split separates a team's channels from the direct ones.
-func Split(all []*pb.Channel) (channels, direct []*pb.Channel) {
+// Split separates a team's text channels, its voice channels and the
+// direct ones.
+func Split(all []*pb.Channel) (channels, voice, direct []*pb.Channel) {
 	for _, ch := range all {
-		if ch.Type == pb.ChannelType_CHANNEL_TYPE_DIRECT {
+		switch ch.Type {
+		case pb.ChannelType_CHANNEL_TYPE_DIRECT:
 			direct = append(direct, ch)
-		} else {
+		case pb.ChannelType_CHANNEL_TYPE_VOICE:
+			voice = append(voice, ch)
+		default:
 			channels = append(channels, ch)
 		}
 	}
-	return channels, direct
+	return channels, voice, direct
+}
+
+// VoiceStates indexes a team's voice states by channel.
+func VoiceStates(list []*pb.VoiceChannelState) map[string]*pb.VoiceChannelState {
+	out := make(map[string]*pb.VoiceChannelState, len(list))
+	for _, s := range list {
+		out[s.ChannelId] = s
+	}
+	return out
+}
+
+// VoiceRoom is who talks in one voice channel, for the sidebar or the
+// channel's own page. State is nil when nobody does.
+type VoiceRoom struct {
+	TeamName  string
+	ChannelID string
+	State     *pb.VoiceChannelState
+	// Moderator may disconnect the others; MeID is the viewer.
+	Moderator bool
+	MeID      string
+	OOB       bool
 }
 
 // Peers returns the other sides of direct channels.
@@ -105,6 +133,9 @@ type ChannelView struct {
 	PeerOnline bool
 	// OpenThread is the root of a thread to open with the channel.
 	OpenThread string
+	// Voice is who talks in a voice channel, MeID the viewer.
+	Voice *pb.VoiceChannelState
+	MeID  string
 }
 
 func Title(ch *pb.Channel) string {

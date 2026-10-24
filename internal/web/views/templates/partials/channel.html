@@ -1,4 +1,4 @@
-{{define "channel"}}
+{{define "channel"}}{{if isVoice .Channel}}{{template "voice-room" .}}{{else}}
 <section class="channel" id="channel-view" data-team="{{.Team.Id}}" data-team-name="{{.Team.Name}}" data-channel="{{.Channel.Id}}" data-title="{{.Title}}" data-newest="{{.Newest}}"{{if .Moderator}} data-moderator="1"{{end}}{{with .OpenThread}} data-open-thread="{{.}}"{{end}}>
   <header class="channel-header">
     <label for="nav-toggle" class="icon-btn menu-btn" aria-label="Open navigation">{{icon "menu"}}</label>
@@ -31,7 +31,7 @@
   </div>
   {{end}}
 </section>
-{{end}}
+{{end}}{{end}}
 
 {{define "channel-start"}}
 <div class="channel-start">
@@ -153,3 +153,31 @@
 {{define "mute-button"}}<button id="mute-toggle" class="icon-btn{{if .Muted}} on{{end}}" type="button" hx-post="/t/{{.Team}}/ch/{{.Channel}}/mute" hx-vals='{"muted": "{{if .Muted}}0{{else}}1{{end}}"}' hx-swap="outerHTML" aria-pressed="{{if .Muted}}true{{else}}false{{end}}" aria-label="{{if .Muted}}Unmute channel{{else}}Mute channel{{end}}" title="{{if .Muted}}Muted: no notifications. Click to unmute{{else}}Mute channel{{end}}">{{if .Muted}}{{icon "bell-off"}}{{else}}{{icon "bell"}}{{end}}</button>{{end}}
 
 {{define "notify"}}<div id="notify" hidden hx-swap-oob="outerHTML" data-title="{{.Notice.Title}}" data-body="{{.Notice.Body}}" data-url="{{.Notice.URL}}" data-tag="{{.Notice.Tag}}" data-channel="{{.Channel}}" data-root="{{.Root}}"></div>{{end}}
+
+{{define "voice-room"}}
+<section class="channel voice-room" id="channel-view" data-team="{{.Team.Id}}" data-team-name="{{.Team.Name}}" data-channel="{{.Channel.Id}}" data-title="{{.Title}}" data-voice-room="{{.Channel.Id}}"{{if .Moderator}} data-moderator="1"{{end}}>
+  <header class="channel-header">
+    <label for="nav-toggle" class="icon-btn menu-btn" aria-label="Open navigation">{{icon "menu"}}</label>
+    <div class="channel-title">
+      <h1><span class="glyph" aria-hidden="true">{{icon "speaker"}}</span><span class="title-text">{{.Title}}</span></h1>
+      {{with .Channel.Purpose}}<p class="purpose">{{.}}</p>{{end}}
+    </div>
+  </header>
+  <div class="voice-stage">
+    {{template "voice-tiles" (dict "TeamName" .Team.Name "ChannelID" .Channel.Id "State" .Voice "Moderator" .Moderator "MeID" .MeID "OOB" false)}}
+  </div>
+  <div class="voice-room-bar">
+    <button class="btn primary" type="button" data-voice-join="{{.Channel.Id}}">{{icon "speaker"}} Join voice</button>
+    <button class="btn danger" type="button" data-voice-leave hidden>{{icon "phone-off"}} Disconnect</button>
+  </div>
+</section>
+{{end}}
+
+{{define "voice-tiles"}}<div class="voice-tiles" id="voice-tiles-{{.ChannelID}}" data-version="{{.State.GetVersion}}"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>{{range .State.GetStates}}
+  <div class="voice-tile" data-user="{{.User.Id}}">
+    {{template "avatar" (dict "User" .User "Size" "lg")}}
+    <span class="vt-name">{{name .User}}{{if .SelfDeaf}}<span class="vt-flag" title="Deafened">{{icon "headphones-off"}}</span>{{else if .SelfMute}}<span class="vt-flag" title="Muted">{{icon "mic-off"}}</span>{{end}}</span>
+    {{if and $.Moderator (ne .User.Id $.MeID)}}<button class="icon-btn sm vt-kick" type="button" hx-post="/t/{{$.TeamName}}/ch/{{$.ChannelID}}/voice/{{.User.Id}}/disconnect" hx-swap="none" hx-confirm="Disconnect {{name .User}} from the voice channel?" aria-label="Disconnect {{name .User}}" title="Disconnect">{{icon "phone-off"}}</button>{{end}}
+  </div>{{else}}
+  <p class="voice-empty">Nobody is talking here yet.</p>{{end}}
+</div>{{end}}
