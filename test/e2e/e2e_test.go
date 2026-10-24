@@ -451,11 +451,17 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// view waits a moment after the frame, since what follows may come
-	// from another socket and overtake it.
+	// settle returns once s's session has handled every frame sent on it,
+	// which it does in order: a post to no channel comes back refused.
+	settle := func(s *socket) {
+		s.send(map[string]string{"op": "post", "channel_id": "00000000-0000-4000-8000-000000000000", "content": "settle"})
+		s.expect(10*time.Second, "channel not found")
+	}
+	// view settles, since what follows may come from another socket and
+	// overtake it.
 	view := func(s *socket, ch string) {
 		s.send(map[string]string{"op": "view", "team_id": teamID, "team_name": teamName, "channel_id": ch})
-		time.Sleep(300 * time.Millisecond)
+		settle(s)
 	}
 	view(adminWS, town)
 	view(bobWS, town)
@@ -482,7 +488,7 @@ func TestEndToEnd(t *testing.T) {
 		f := adminWS.expect(5*time.Second, "root for a thread", `hx-swap-oob="afterbegin"`)
 		root := msgIDRe.FindStringSubmatch(f)[1]
 		bobWS.send(map[string]string{"op": "thread", "root_id": root})
-		time.Sleep(300 * time.Millisecond)
+		settle(bobWS)
 		adminWS.send(map[string]string{"op": "post", "channel_id": town, "root_id": root, "content": "first reply"})
 		f = bobWS.expect(5*time.Second, "first reply", `id="replies-`+root+`"`)
 		reply := msgIDRe.FindStringSubmatch(f)[1]
@@ -1216,8 +1222,15 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
+	// memberRows lists the team's members from just before name, whom past
+	// runs' members could push off the first page.
+	memberRows := func(name string) string {
+		_, rows := admin.do(http.MethodGet, "/t/"+teamName+"/members?after="+url.QueryEscape(name[:len(name)-1]), nil, "", true)
+		return rows
+	}
+
 	run("invites die with their creator's rights", func(t *testing.T) {
-		_, list := admin.do(http.MethodGet, "/t/"+teamName+"/members", nil, "", true)
+		list := memberRows(bobName)
 		m := regexp.MustCompile(`@` + regexp.QuoteMeta(bobName) + `(?s:.*?)/members/([0-9a-f-]{36})/role`).FindStringSubmatch(list)
 		if m == nil {
 			t.Fatalf("bob is not in the member list: %s", list)
@@ -1305,7 +1318,7 @@ func TestEndToEnd(t *testing.T) {
 		if res.StatusCode != http.StatusSeeOther {
 			t.Fatalf("signup: %d %s", res.StatusCode, body)
 		}
-		_, list := admin.do(http.MethodGet, "/t/"+teamName+"/members", nil, "", true)
+		list := memberRows(name)
 		m := regexp.MustCompile(`@` + regexp.QuoteMeta(name) + `(?s:.*?)/members/([0-9a-f-]{36})/remove`).FindStringSubmatch(list)
 		if m == nil {
 			t.Fatalf("frank is not in the member list: %s", list)
@@ -1380,10 +1393,10 @@ func TestEndToEnd(t *testing.T) {
 			t.Fatalf("members listed out of order, twice or not at all: %v", names)
 		}
 		// A listing continues after the name given.
-		_, rows := admin.do(http.MethodGet, "/t/"+teamName+"/members?after="+url.QueryEscape(adminName), nil, "", true)
+		_, rows := admin.do(http.MethodGet, "/t/"+teamName+"/members?after="+url.QueryEscape(names[0]), nil, "", true)
 		after := memberRe.FindAllStringSubmatch(rows, -1)
-		if len(after) == 0 || after[0][1] <= adminName {
-			t.Fatalf("the rows after %s: %s", adminName, rows)
+		if len(after) == 0 || after[0][1] != names[1] {
+			t.Fatalf("the rows after %s: %s", names[0], rows)
 		}
 		if res, _ := admin.do(http.MethodGet, "/t/"+teamName+"/invites?after=nonsense", nil, "", true); res.StatusCode != http.StatusBadRequest {
 			t.Fatalf("a bad invite cursor: %d", res.StatusCode)
@@ -1452,7 +1465,7 @@ func TestEndToEnd(t *testing.T) {
 		if m == nil || m[1] != "u" {
 			t.Fatalf("no photo after upload: %s", body)
 		}
-		userPhoto := m[0]
+		userPhoto, bobPhotos := m[0], "/photos/u/"+m[2]+"/"
 		res, got := admin.get(userPhoto)
 		if res.StatusCode != http.StatusOK || res.Header.Get("Content-Type") != "image/jpeg" || !strings.Contains(res.Header.Get("Cache-Control"), "immutable") {
 			t.Fatalf("photo: %d %v", res.StatusCode, res.Header)
@@ -1484,11 +1497,12 @@ func TestEndToEnd(t *testing.T) {
 		if res, _ := bob.get(m[0]); res.StatusCode != http.StatusOK || res.Header.Get("Content-Type") != "image/png" {
 			t.Fatalf("member fetching the team photo: %d %v", res.StatusCode, res.Header)
 		}
-		if _, body := admin.hx("/t/"+teamName+"/photo/remove", url.Values{}); photoRe.MatchString(body) {
+		// The rail answering it shows the admin's other teams, maybe with photos.
+		if _, body := admin.hx("/t/"+teamName+"/photo/remove", url.Values{}); strings.Contains(body, "/photos/t/"+teamID+"/") {
 			t.Fatalf("team photo not removed: %s", body)
 		}
 
-		if _, body := bob.hx("/settings/photo/remove", url.Values{}); photoRe.MatchString(body) {
+		if _, body := bob.hx("/settings/photo/remove", url.Values{}); strings.Contains(body, bobPhotos) {
 			t.Fatalf("photo not removed: %s", body)
 		}
 		if res, _ := admin.get(userPhoto); res.StatusCode != http.StatusNotFound {
