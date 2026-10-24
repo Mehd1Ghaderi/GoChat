@@ -35,7 +35,7 @@ func (h *Handler) websocket(w http.ResponseWriter, r *http.Request) {
 	rc := http.NewResponseController(w)
 	_ = rc.SetReadDeadline(time.Time{})
 	_ = rc.SetWriteDeadline(time.Time{})
-	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: []string{u.Host}})
+	ws, err := websocket.Accept(w, r, h.gw.Cfg.AcceptOptions(u.Host))
 	if err != nil {
 		h.logger.Debug("websocket upgrade failed", zap.Error(err))
 		return

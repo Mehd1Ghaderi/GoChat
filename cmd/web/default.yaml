@@ -69,6 +69,8 @@ gateway:
   max_per_user: 20
   frame_rate: 10
   frame_burst: 40
+  compress: true
+  compress_threshold: 4096
   attach_rate: 200
   attach_burst: 100
   resync_rate: 50
