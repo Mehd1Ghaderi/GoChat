@@ -66,9 +66,12 @@ type Lists struct {
 	Team     *pb.Team
 	Channels []*pb.Channel
 	DMs      []*pb.Channel
-	Active   string
-	Online   map[string]bool
-	OOB      bool
+	// Active is the open channel's id, or "threads".
+	Active string
+	Online map[string]bool
+	// ThreadsUnread counts the followed threads with unread replies.
+	ThreadsUnread int
+	OOB           bool
 }
 
 // Conversation reports whether ch is a direct or group conversation.
@@ -236,4 +239,28 @@ func Excerpt(m *pb.Message) string {
 		}
 	}
 	return text
+}
+
+// ThreadCard is a followed thread as the threads view lists it.
+type ThreadCard struct {
+	Root         *pb.Message
+	Channel      *pb.Channel
+	Where        string
+	Excerpt      template.HTML
+	Unread       bool
+	Participants []*pb.User
+}
+
+func ThreadCards(list []*pb.ThreadSummary) []ThreadCard {
+	out := make([]ThreadCard, 0, len(list))
+	for _, t := range list {
+		if t.GetRoot() == nil || t.GetChannel() == nil {
+			continue
+		}
+		out = append(out, ThreadCard{
+			Root: t.Root, Channel: t.Channel, Where: Title(t.Channel), Excerpt: Highlight(t.Root.Content, nil),
+			Unread: t.Unread, Participants: t.Participants,
+		})
+	}
+	return out
 }

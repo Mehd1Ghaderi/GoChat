@@ -67,6 +67,8 @@ type Repo interface {
 	ListLastReads(ctx context.Context, userID gocql.UUID) ([]*scylla.ChannelRead, error)
 	CountMentions(ctx context.Context, userID gocql.UUID) (map[gocql.UUID]int, error)
 	ListMuted(ctx context.Context, userID gocql.UUID) (map[gocql.UUID]bool, error)
+	ListThreadFollows(ctx context.Context, userID gocql.UUID, limit int) ([]*scylla.ThreadFollow, error)
+	GetMessage(ctx context.Context, channelID, id gocql.UUID) (*models.Message, error)
 }
 
 type Deps struct {
@@ -141,6 +143,8 @@ func (w *worker) Receive(c *actor.Context) {
 		out, err = w.openDirect(ctx, msg)
 	case OpenGroup:
 		out, err = w.openGroup(ctx, msg)
+	case ListThreads:
+		out, err = w.listThreads(ctx, msg)
 	case GetUser:
 		out, err = w.getUser(ctx, msg)
 	case UpdateProfile:

@@ -143,6 +143,8 @@ func (h *Handler) Routes() http.Handler {
 
 	mux.HandleFunc("GET /m/{channel}/{message}", h.messageFragment)
 	mux.HandleFunc("GET /m/{channel}/{message}/thread", h.threadPanel)
+	mux.Handle("POST /m/{channel}/{message}/follow", h.csrf(http.HandlerFunc(h.followThread)))
+	mux.HandleFunc("GET /t/{team}/threads", h.threadsPage)
 	mux.HandleFunc("GET /m/{channel}/people", h.mentionSuggestions)
 	mux.HandleFunc("GET /c/{channel}", h.channelLink)
 	mux.Handle("POST /t/{team}/ch/{channel}/mute", h.csrf(http.HandlerFunc(h.muteChannel)))

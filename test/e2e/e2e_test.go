@@ -742,6 +742,48 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
+	t.Run("threads gather what people follow", func(t *testing.T) {
+		adminWS.send(map[string]string{"op": "post", "channel_id": town, "content": "inbox root " + random(3)})
+		root := msgIDRe.FindStringSubmatch(bobWS.expect(5*time.Second, "inbox root", `hx-swap-oob="afterbegin"`))[1]
+		card := `hx-get="/m/` + town + `/` + root + `/thread"`
+		bobWS.send(map[string]string{"op": "post", "channel_id": town, "root_id": root, "content": "inbox reply"})
+		adminWS.expect(5*time.Second, `id="threads-unread" class="dot on"`)
+		threads := func(c *client) string {
+			_, body := c.do(http.MethodGet, "/t/"+teamName+"/threads", nil, "", true)
+			return body
+		}
+		if list := threads(admin); !strings.Contains(list, `thread-card unread" `+card) {
+			t.Fatalf("admin's threads: %s", list)
+		}
+		if list := threads(bob); !strings.Contains(list, card) || strings.Contains(list, `thread-card unread" `+card) {
+			t.Fatalf("the replier's threads: %s", list)
+		}
+		if _, panel := admin.do(http.MethodGet, "/m/"+town+"/"+root+"/thread", nil, "", true); !strings.Contains(panel, `aria-pressed="true"`) || !strings.Contains(panel, "Following") {
+			t.Fatalf("thread panel: %s", panel)
+		}
+		if list := threads(admin); strings.Contains(list, `thread-card unread" `+card) {
+			t.Fatal("opening the thread did not read it")
+		}
+		adminWS.send(map[string]string{"op": "view", "team_id": teamID, "team_name": teamName, "channel_id": ""})
+		time.Sleep(200 * time.Millisecond)
+		bobWS.send(map[string]string{"op": "post", "channel_id": town, "root_id": root, "content": "another reply"})
+		adminWS.expect(5*time.Second, `id="threads-refresh"`, "threads?list=1")
+		view(adminWS, town)
+		if res, body := bob.hx("/m/"+town+"/"+root+"/follow", url.Values{"follow": {"0"}}); res.StatusCode != http.StatusOK || !strings.Contains(body, ">Follow<") {
+			t.Fatalf("unfollow: %d %s", res.StatusCode, body)
+		}
+		if list := threads(bob); strings.Contains(list, card) {
+			t.Fatal("an unfollowed thread is still listed")
+		}
+		bob.hx("/m/"+town+"/"+root+"/follow", url.Values{"follow": {"1"}})
+		if list := threads(bob); !strings.Contains(list, card) {
+			t.Fatal("a followed thread is not listed")
+		}
+		if res, page := admin.get("/t/" + teamName + "/threads"); res.StatusCode != http.StatusOK || !strings.Contains(page, `id="threads-view"`) || !strings.Contains(page, `data-place="threads"`) {
+			t.Fatalf("threads page: %d", res.StatusCode)
+		}
+	})
+
 	t.Run("csrf and origin are enforced", func(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodPost, baseURL+"/t/"+teamName+"/invites", nil)
 		req.Header.Set("HX-Request", "true")

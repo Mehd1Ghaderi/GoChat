@@ -25,6 +25,10 @@ type Repo interface {
 	RenameChannel(ctx context.Context, ch *models.Channel, name string) error
 	SetChannelKind(ctx context.Context, ch *models.Channel, kind models.ChannelKind) error
 	SetArchived(ctx context.Context, id gocql.UUID, at time.Time) error
+	TouchThread(ctx context.Context, followers []gocql.UUID, channelID, rootID, teamID gocql.UUID, at time.Time, reader gocql.UUID) error
+	MarkThreadRead(ctx context.Context, userID, channelID, rootID gocql.UUID, at time.Time) error
+	GetThreadFollow(ctx context.Context, userID, channelID, rootID gocql.UUID) (bool, error)
+	UnfollowThreads(ctx context.Context, userIDs []gocql.UUID, channelID, rootID gocql.UUID) error
 	ListChannelMembers(ctx context.Context, channelID gocql.UUID) ([]*models.ChannelMember, error)
 	AddChannelMember(ctx context.Context, m *models.ChannelMember) error
 	RemoveChannelMember(ctx context.Context, m *models.ChannelMember) error

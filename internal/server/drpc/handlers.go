@@ -655,7 +655,7 @@ func (s *messageService) ListThread(ctx context.Context, req *pb.ListThreadReque
 	if err != nil {
 		return nil, err
 	}
-	return &pb.ListThreadResponse{Root: res.Root, Replies: res.Replies, HasMore: res.HasMore}, nil
+	return &pb.ListThreadResponse{Root: res.Root, Replies: res.Replies, HasMore: res.HasMore, Following: res.Following}, nil
 }
 
 func (s *messageService) React(ctx context.Context, req *pb.ReactRequest) (*pb.ReactResponse, error) {
@@ -684,6 +684,42 @@ func (s *messageService) SearchMessages(ctx context.Context, req *pb.SearchMessa
 		return nil, err
 	}
 	return &pb.SearchMessagesResponse{Hits: res.Hits, Terms: res.Terms, NextCursor: res.Next}, nil
+}
+
+func (s *messageService) ListThreads(ctx context.Context, req *pb.ListThreadsRequest) (*pb.ListThreadsResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	res, err := actors.Ask[*directory.ThreadsResult](ctx, s.sys.Engine, s.sys.Directory, directory.ListThreads{
+		P: p, TeamID: req.TeamId, Offset: int(req.Offset), Limit: int(req.Limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ListThreadsResponse{Threads: res.Threads, UnreadCount: uint32(res.Unread), NextOffset: uint32(res.Next)}, nil //nolint:gosec // bounded counts
+}
+
+func (s *messageService) MarkThreadRead(ctx context.Context, req *pb.MarkThreadReadRequest) (*pb.MarkThreadReadResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := actors.Ask[channels.Done](ctx, s.sys.Engine, s.sys.Channels, channels.ThreadRead{Target: t, RootID: req.RootId}); err != nil {
+		return nil, err
+	}
+	return &pb.MarkThreadReadResponse{}, nil
+}
+
+func (s *messageService) FollowThread(ctx context.Context, req *pb.FollowThreadRequest) (*pb.FollowThreadResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := actors.Ask[channels.Done](ctx, s.sys.Engine, s.sys.Channels, channels.Follow{Target: t, RootID: req.RootId, Follow: req.Follow}); err != nil {
+		return nil, err
+	}
+	return &pb.FollowThreadResponse{}, nil
 }
 
 func (s *messageService) SendTyping(ctx context.Context, req *pb.SendTypingRequest) (*pb.SendTypingResponse, error) {

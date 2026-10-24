@@ -190,6 +190,10 @@ func (a *channel) handle(c *actor.Context, req Request) {
 		out, err = a.privacy(msg)
 	case Archive:
 		out, err = a.archive(msg)
+	case ThreadRead:
+		err = a.threadRead(c, msg)
+	case Follow:
+		out, err = a.follow(msg)
 	case MarkRead:
 		err = a.markRead(c, msg)
 	case Join:
@@ -446,7 +450,7 @@ func (a *channel) recordMentions(m *models.Message) {
 	if !direct && len(found.Usernames) == 0 && !found.Channel && !found.Here {
 		return
 	}
-	members, author := a.memberIDs, m.UserID.String()
+	members, author, teamID := a.memberIDs, m.UserID.String(), a.ch.TeamID
 	go func() {
 		ctx, cancel := a.ctx()
 		defer cancel()
@@ -484,6 +488,12 @@ func (a *channel) recordMentions(m *models.Message) {
 		if err := a.Repo.AddMentions(ctx, a.id, m.ID, userIDs); err != nil {
 			a.Logger.Warn("failed to record mentions", zap.String("channel", a.id.String()), zap.Error(err))
 		}
+		// Who a reply calls out follows its thread.
+		if !ids.IsZero(m.RootID) {
+			if err := a.Repo.TouchThread(ctx, userIDs, a.id, m.RootID, teamID, m.ID.Time(), gocql.UUID{}); err != nil {
+				a.Logger.Warn("failed to follow a thread", zap.String("channel", a.id.String()), zap.Error(err))
+			}
+		}
 	}()
 }
 
@@ -517,6 +527,7 @@ func (a *channel) reply(ctx context.Context, root, m *models.Message, author *mo
 	if !slices.Contains(root.Participants, m.UserID) {
 		root.Participants = append(root.Participants, m.UserID)
 	}
+	a.touch(append([]gocql.UUID{root.UserID}, root.Participants...), root.ID, m.ID.Time(), m.UserID)
 	if err := a.Repo.SetThreadSummary(ctx, root, root.ReplyCount, root.LastReplyAt, m.UserID); err != nil {
 		a.Logger.Warn("failed to count a reply", zap.String("channel", a.id.String()), zap.Error(err))
 	}
@@ -687,6 +698,9 @@ func (a *channel) delete(msg Delete) (Done, error) {
 	a.dropAttachments(m.Attachments)
 	if m.ReplyCount > 0 {
 		a.dropThread(ctx, m.ID)
+		if err := a.Repo.UnfollowThreads(ctx, append([]gocql.UUID{m.UserID}, m.Participants...), a.id, m.ID); err != nil {
+			a.Logger.Warn("failed to drop a thread's follows", zap.String("channel", a.id.String()), zap.Error(err))
+		}
 	}
 	a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_MessageDeleted{MessageDeleted: &pb.MessageDeleted{
 		ChannelId: a.id.String(), MessageId: m.ID.String(),
@@ -996,7 +1010,11 @@ func (a *channel) thread(c *actor.Context, msg Thread) error {
 		if err != nil {
 			return nil, err
 		}
-		return &ThreadResult{Root: out[0], Replies: out[1:], HasMore: more}, nil
+		following, err := a.Repo.GetThreadFollow(ctx, msg.P.UserID, a.id, root.ID)
+		if err != nil {
+			return nil, err
+		}
+		return &ThreadResult{Root: out[0], Replies: out[1:], HasMore: more, Following: following}, nil
 	})
 	return nil
 }

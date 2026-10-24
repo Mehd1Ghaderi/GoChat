@@ -114,6 +114,21 @@ type OpenGroup struct {
 	UserIDs []string
 }
 
+// ListThreads replies with *ThreadsResult. A zero Limit counts the unread
+// threads only.
+type ListThreads struct {
+	P             *models.Principal
+	TeamID        string
+	Offset, Limit int
+}
+
+type ThreadsResult struct {
+	Threads []*pb.ThreadSummary
+	Unread  int
+	// Next is the offset of the next page, zero at the end.
+	Next int
+}
+
 type GetUser struct {
 	P      *models.Principal
 	UserID string

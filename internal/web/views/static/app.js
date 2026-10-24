@@ -12,6 +12,11 @@
     return document.getElementById("channel-view");
   }
 
+  // The main pane: a channel, or the threads the user follows.
+  function place() {
+    return view() || document.getElementById("threads-view");
+  }
+
   function send(msg) {
     if (socket) socket.send(JSON.stringify(msg));
   }
@@ -19,13 +24,13 @@
   // Tell the server what this tab shows, so it knows where new messages go
   // and what to mark read.
   function announce(resync) {
-    var v = view();
+    var v = place();
     if (!v) return;
     send({
       op: "view",
       team_id: v.dataset.team,
       team_name: v.dataset.teamName,
-      channel_id: v.dataset.channel,
+      channel_id: v.dataset.channel || "",
       last_id: v.dataset.newest || "",
       moderator: v.dataset.moderator ? "1" : "",
       anchored: v.dataset.anchored ? "1" : "",
@@ -40,7 +45,8 @@
   }
 
   function announceThread() {
-    send({ op: "thread", root_id: threadRoot() });
+    var t = document.getElementById("thread-view");
+    send({ op: "thread", root_id: threadRoot(), channel_id: t ? t.dataset.channel : "" });
   }
 
   function closeThread() {
@@ -58,7 +64,7 @@
   // Search shares the side pane with threads; it stays open beside the
   // channel a result opened, where there is room.
   function openSearch() {
-    var v = view();
+    var v = place();
     var input = document.querySelector("[data-search-input]");
     if (input) {
       input.focus();
@@ -83,7 +89,7 @@
 
   // The tab's title counts unread mentions, so they show from any tab.
   function updateTitle() {
-    var v = view();
+    var v = place();
     if (!v || !v.dataset.title) return;
     var count = 0;
     document.querySelectorAll(".channel-lists .mentions").forEach(function (b) {
@@ -147,24 +153,22 @@
   }
 
   function markActive() {
-    var v = view();
+    var v = place();
     if (!v) return;
     updateTitle();
-    var id = v.dataset.channel;
+    var id = v.dataset.channel || "threads";
     document.querySelectorAll(".sb-link").forEach(function (a) {
-      var on = a.dataset.channel === id;
+      var on = (a.dataset.channel || a.dataset.place) === id;
       a.classList.toggle("active", on);
-      if (on) {
-        a.setAttribute("aria-current", "page");
-        var dot = a.querySelector(".dot, .mentions");
-        if (dot) {
-          dot.className = "dot";
-          dot.textContent = "";
-          dot.removeAttribute("title");
-          dot.setAttribute("aria-hidden", "true");
-        }
-      } else {
-        a.removeAttribute("aria-current");
+      if (on) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
+      // Opening a channel reads it; opening Threads does not read them.
+      var dot = on && a.dataset.channel ? a.querySelector(".dot, .mentions") : null;
+      if (dot) {
+        dot.className = "dot";
+        dot.textContent = "";
+        dot.removeAttribute("title");
+        dot.setAttribute("aria-hidden", "true");
       }
     });
     var toggle = document.getElementById("nav-toggle");
@@ -333,7 +337,7 @@
       input.select();
       return;
     }
-    var v = view();
+    var v = place();
     if (v) htmx.ajax("GET", "/t/" + v.dataset.teamName + "/switch", { target: "#modal", swap: "innerHTML" });
   }
 
@@ -506,6 +510,14 @@
     if (pick) {
       togglePick(pick);
       return;
+    }
+    var card = target.closest("[data-thread-card]");
+    if (card && card.classList.contains("unread")) {
+      card.classList.remove("unread");
+      var mark = card.querySelector(".dot");
+      if (mark) mark.remove();
+      var dot = document.getElementById("threads-unread");
+      if (dot && !document.querySelector("[data-thread-card].unread")) dot.className = "dot";
     }
     var copy = target.closest("[data-copy]");
     if (copy && navigator.clipboard) {

@@ -12,6 +12,13 @@
 {{define "channel-lists"}}
 <nav class="channel-lists" id="channel-lists" aria-label="Channels"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>
   <button class="jump-to" type="button" hx-get="/t/{{.Team.Name}}/switch" hx-target="#modal">{{icon "search"}}<span>Go to…</span><kbd data-shortcut>Ctrl K</kbd></button>
+  <ul class="top-links">
+    <li><a href="/t/{{.Team.Name}}/threads" hx-get="/t/{{.Team.Name}}/threads" hx-target="#main" hx-push-url="true" data-place="threads"
+           class="sb-link{{if eq .Active "threads"}} active{{end}}"{{if eq .Active "threads"}} aria-current="page"{{end}}>
+      <span class="glyph" aria-hidden="true">{{icon "reply"}}</span><span class="label">Threads</span>
+      <span id="threads-unread" class="dot{{if .ThreadsUnread}} on{{end}}" aria-hidden="true"></span>
+    </a></li>
+  </ul>
   <section>
     <h2><span>Channels</span>
       <button class="icon-btn sm" hx-get="/t/{{.Team.Name}}/channels/browse" hx-target="#modal" aria-label="Browse channels" title="Browse channels">{{icon "search"}}</button>

@@ -56,6 +56,7 @@ type (
 		seq       uint64
 	}
 	flushReads   struct{}
+	flushThread  struct{}
 	sidebarReady struct {
 		teamID string
 		lists  *render.Lists
@@ -98,15 +99,19 @@ type session struct {
 	// the page.
 	typer string
 	shown string
-	// threadID is the root of the thread the tab has open.
-	threadID string
-	resynced string
-	posts    chan *pb.PostMessageRequest
-	reads    map[string]string
-	flushing bool
-	closing  bool
-	stopPing context.CancelFunc
-	expiry   *time.Timer
+	// threadID is the root of the thread the tab has open, in threadChannel.
+	threadID      string
+	threadChannel string
+	threadRead    bool
+	// inThreads is set while the tab shows the threads it follows.
+	inThreads bool
+	resynced  string
+	posts     chan *pb.PostMessageRequest
+	reads     map[string]string
+	flushing  bool
+	closing   bool
+	stopPing  context.CancelFunc
+	expiry    *time.Timer
 	// early holds what the browser sent before the server attached it.
 	early [][]byte
 }
@@ -220,6 +225,15 @@ func (s *session) Receive(c *actor.Context) {
 	case flushReads:
 		s.flushing = false
 		s.flush(c)
+	case flushThread:
+		s.threadRead = false
+		if s.threadID != "" {
+			req := &pb.MarkThreadReadRequest{ChannelId: s.threadChannel, RootId: s.threadID}
+			s.rpc(c, func(ctx context.Context) any {
+				_, _ = s.Client.Messages.MarkThreadRead(ctx, req)
+				return nil
+			})
+		}
 	case sidebarReady:
 		if msg.teamID != s.teamID {
 			return
@@ -248,6 +262,9 @@ func (s *session) Receive(c *actor.Context) {
 		}
 		if msg.lists.OOB {
 			msg.lists.Active = s.channelID
+			if s.inThreads {
+				msg.lists.Active = "threads"
+			}
 			s.fragment("channel-lists", msg.lists)
 		}
 	case railReady:
@@ -391,6 +408,10 @@ func (s *session) loadSidebar(c *actor.Context, oob bool) {
 		if err != nil {
 			return nil
 		}
+		var unread int
+		if t, err := s.Client.Messages.ListThreads(ctx, &pb.ListThreadsRequest{TeamId: teamID}); err == nil {
+			unread = int(t.UnreadCount)
+		}
 		channels, direct := render.Split(res.Channels)
 		online := map[string]bool{}
 		if peers := render.Peers(direct); len(peers) > 0 {
@@ -400,7 +421,7 @@ func (s *session) loadSidebar(c *actor.Context, oob bool) {
 				}
 			}
 		}
-		return sidebarReady{teamID: teamID, lists: &render.Lists{Team: team, Channels: channels, DMs: direct, Online: online, OOB: oob}}
+		return sidebarReady{teamID: teamID, lists: &render.Lists{Team: team, Channels: channels, DMs: direct, Online: online, ThreadsUnread: unread, OOB: oob}}
 	})
 }
 
@@ -466,8 +487,8 @@ func (s *session) frame(c *actor.Context, data []byte) {
 			s.toast("error", "You are sending too fast: a message was not sent.")
 		}
 	case "thread":
-		if f.RootID == "" || uuidRe.MatchString(f.RootID) {
-			s.threadID = f.RootID
+		if (f.RootID == "" || uuidRe.MatchString(f.RootID)) && (f.ChannelID == "" || uuidRe.MatchString(f.ChannelID)) {
+			s.threadID, s.threadChannel = f.RootID, f.ChannelID
 		}
 	case "typing":
 		if f.ChannelID != s.channelID || !uuidRe.MatchString(f.ChannelID) {
@@ -493,8 +514,10 @@ func (s *session) post(self *actor.PID, engine *actor.Engine) {
 	}
 }
 
+// view follows what the tab shows: a channel, or with no channel the
+// threads it follows.
 func (s *session) view(c *actor.Context, f *clientFrame) {
-	if !uuidRe.MatchString(f.TeamID) || !slugRe.MatchString(f.TeamName) || !uuidRe.MatchString(f.ChannelID) {
+	if !uuidRe.MatchString(f.TeamID) || !slugRe.MatchString(f.TeamName) || (f.ChannelID != "" && !uuidRe.MatchString(f.ChannelID)) {
 		return
 	}
 	teamChanged := f.TeamID != s.teamID
@@ -502,14 +525,18 @@ func (s *session) view(c *actor.Context, f *clientFrame) {
 		s.resynced, s.threadID = "", ""
 	}
 	s.teamID, s.teamName, s.channelID = f.TeamID, f.TeamName, f.ChannelID
+	s.inThreads = f.ChannelID == ""
 	s.moderator = f.Moderator == "1"
 	s.anchored = f.Anchored == "1"
 	s.typingSeq++
 	s.typer, s.shown = "", ""
-	s.mentions[f.ChannelID] = 0
 	if teamChanged {
 		s.loadSidebar(c, false)
 	}
+	if s.inThreads {
+		return
+	}
+	s.mentions[f.ChannelID] = 0
 	if uuidRe.MatchString(f.LastID) {
 		s.shown = f.LastID
 		s.markRead(c, f.ChannelID, f.LastID)
@@ -565,6 +592,15 @@ func (s *session) direct(channelID string) bool {
 	return s.directs[channelID]
 }
 
+// readThread marks the open thread read a moment after a reply showed in it.
+func (s *session) readThread(c *actor.Context) {
+	if !s.threadRead {
+		s.threadRead = true
+		self, engine := c.PID(), c.Engine()
+		time.AfterFunc(readDelay, func() { engine.Send(self, flushThread{}) })
+	}
+}
+
 func (s *session) clearTyping() {
 	if s.typer != "" {
 		s.typer = ""
@@ -607,8 +643,17 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 		if m.RootId != "" {
 			if m.RootId == s.threadID {
 				s.message("reply-new", s.Render.Message(m, s.user, s.moderator))
+				if !mine {
+					s.readThread(c)
+				}
 			} else if !mine && m.ChannelId != s.channelID && render.Mentions(m, s.user) {
 				s.mentioned(m.ChannelId)
+			}
+			if !mine && m.RootId != s.threadID && slices.Contains(p.MessagePosted.ParticipantIds, me) {
+				s.fragment("threads-unread", true)
+				if s.inThreads {
+					s.fragment("threads-refresh", s.teamName)
+				}
 			}
 			return
 		}

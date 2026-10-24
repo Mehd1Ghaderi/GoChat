@@ -17,7 +17,50 @@ service MessageService {
   // SearchMessages finds the messages of a team, and of the caller's direct
   // conversations, that match a query, newest first.
   rpc SearchMessages(SearchMessagesRequest) returns (SearchMessagesResponse);
+  // ListThreads lists the threads the caller follows in a team and its
+  // conversations, latest reply first.
+  rpc ListThreads(ListThreadsRequest) returns (ListThreadsResponse);
+  rpc MarkThreadRead(MarkThreadReadRequest) returns (MarkThreadReadResponse);
+  rpc FollowThread(FollowThreadRequest) returns (FollowThreadResponse);
 }
+
+message ListThreadsRequest {
+  string team_id = 1;
+  uint32 offset = 2;
+  // Zero counts the unread threads only.
+  uint32 limit = 3;
+}
+
+message ThreadSummary {
+  Message root = 1;
+  Channel channel = 2;
+  bool unread = 3;
+  // Some of the people in the thread, its starter first.
+  repeated User participants = 4;
+}
+
+message ListThreadsResponse {
+  repeated ThreadSummary threads = 1;
+  uint32 unread_count = 2;
+  // Where the next page starts; zero at the end.
+  uint32 next_offset = 3;
+}
+
+message MarkThreadReadRequest {
+  string channel_id = 1;
+  string root_id = 2;
+}
+
+message MarkThreadReadResponse {}
+
+message FollowThreadRequest {
+  string channel_id = 1;
+  string root_id = 2;
+  // False stops following.
+  bool follow = 3;
+}
+
+message FollowThreadResponse {}
 
 message SearchMessagesRequest {
   string team_id = 1;
@@ -121,6 +164,8 @@ message ListThreadResponse {
   repeated Message replies = 2;
   // Whether replies older than the first exist.
   bool has_more = 3;
+  // Whether the caller follows the thread.
+  bool following = 4;
 }
 
 message GetMessageResponse {

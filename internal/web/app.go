@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
@@ -36,6 +37,8 @@ type appPage struct {
 	OOB     bool
 	Lists   *render.Lists
 	Channel *render.ChannelView
+	// Threads, when set, shows the threads view in place of a channel.
+	Threads *threadsView
 }
 
 // signedIn returns the user, or answers with a sign-in redirect.
@@ -359,6 +362,10 @@ func (h *Handler) lists(ctx context.Context, team *pb.Team, active string) (*ren
 	if err != nil {
 		return nil, err
 	}
+	var unread int
+	if t, err := h.client.Messages.ListThreads(ctx, &pb.ListThreadsRequest{TeamId: team.Id}); err == nil {
+		unread = int(t.UnreadCount)
+	}
 	channels, direct := render.Split(res.Channels)
 	online := map[string]bool{}
 	if peers := render.Peers(direct); len(peers) > 0 {
@@ -368,7 +375,7 @@ func (h *Handler) lists(ctx context.Context, team *pb.Team, active string) (*ren
 			}
 		}
 	}
-	return &render.Lists{Team: team, Channels: channels, DMs: direct, Active: active, Online: online}, nil
+	return &render.Lists{Team: team, Channels: channels, DMs: direct, Active: active, Online: online, ThreadsUnread: unread}, nil
 }
 
 func (h *Handler) olderMessages(w http.ResponseWriter, r *http.Request) {
@@ -972,12 +979,13 @@ func (h *Handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 type threadView struct {
-	Root    *render.Message
-	Replies []*render.Message
-	HasMore bool
-	Oldest  string
-	Title   string
-	Member  bool
+	Root      *render.Message
+	Replies   []*render.Message
+	HasMore   bool
+	Oldest    string
+	Title     string
+	Member    bool
+	Following bool
 }
 
 // threadPanel shows a thread, or with ?before its older replies.
@@ -1024,11 +1032,12 @@ func (h *Handler) threadPanel(w http.ResponseWriter, r *http.Request) {
 	}
 	mod := moderator(u, team, ch)
 	view := threadView{
-		Root:    h.render.Message(thread.Root, u, mod),
-		Replies: h.render.Messages(thread.Replies, u, mod),
-		HasMore: thread.HasMore,
-		Title:   render.Title(ch),
-		Member:  ch.Role != pb.ChannelRole_CHANNEL_ROLE_UNSPECIFIED,
+		Root:      h.render.Message(thread.Root, u, mod),
+		Replies:   h.render.Messages(thread.Replies, u, mod),
+		HasMore:   thread.HasMore,
+		Title:     render.Title(ch),
+		Member:    ch.Role != pb.ChannelRole_CHANNEL_ROLE_UNSPECIFIED,
+		Following: thread.Following,
 	}
 	if len(thread.Replies) > 0 {
 		view.Oldest = thread.Replies[0].Id
@@ -1036,6 +1045,11 @@ func (h *Handler) threadPanel(w http.ResponseWriter, r *http.Request) {
 	if before != "" {
 		h.fragment(w, http.StatusOK, "older-replies-page", view)
 		return
+	}
+	if thread.Following {
+		if _, err := h.client.Messages.MarkThreadRead(ctx, &pb.MarkThreadReadRequest{ChannelId: chID, RootId: rootID}); err != nil {
+			h.logger.Debug("failed to mark a thread read", zap.Error(err))
+		}
 	}
 	h.fragment(w, http.StatusOK, "thread", view)
 }

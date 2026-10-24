@@ -102,10 +102,11 @@
 {{define "typing"}}<div class="typing" id="typing-{{.ChannelID}}" aria-live="polite" hx-swap-oob="outerHTML">{{with .Name}}<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span> {{.}} is typing…{{end}}</div>{{end}}
 
 {{define "thread"}}
-<section class="thread-view" id="thread-view" data-root="{{.Root.Id}}" aria-labelledby="thread-title">
+<section class="thread-view" id="thread-view" data-root="{{.Root.Id}}" data-channel="{{.Root.ChannelId}}" aria-labelledby="thread-title">
   <header class="thread-header">
     <h2 id="thread-title">Thread</h2>
     <span class="thread-where">{{.Title}}</span>
+    {{if .Member}}{{template "follow-button" (dict "Channel" .Root.ChannelId "Root" .Root.Id "Following" .Following)}}{{end}}
     <button class="icon-btn" type="button" data-close-thread aria-label="Close thread" title="Close">{{icon "close"}}</button>
   </header>
   <div class="thread-scroll" id="thread-scroll">
