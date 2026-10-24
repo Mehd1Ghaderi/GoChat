@@ -1,8 +1,9 @@
 # GoChat
 
 A self-hosted team chat in the spirit of Mattermost: teams, public and private
-channels, direct messages, one-time invite links, attachments, voice messages,
-presence and typing indicators, all delivered in real time. The whole application runs on
+channels, voice channels to talk in as in Discord, direct messages, one-time
+invite links, attachments, voice messages, presence and typing indicators,
+all delivered in real time. The whole application runs on
 the [hollywood](https://github.com/anthdm/hollywood) actor engine, on both the
 server and the web gateway, and the browser UI is server-rendered HTML driven
 by [htmx](https://htmx.org) over a WebSocket.
@@ -12,6 +13,10 @@ by [htmx](https://htmx.org) over a WebSocket.
 ```
  browser ──HTTPS/WS──▶ gochat web ──DRPC (protobuf)──▶ gochat server ──▶ ScyllaDB
   (htmx)               gateway actors                    service actors    MinIO
+    │                                                         ▲
+    │ signaling WS + WebRTC (Opus over UDP/TCP)               │ DRPC stream
+    └──────────────────────────────────────────▶ gochat voice ┘
+                                                  SFU actors
 ```
 
 **`gochat server`** owns all state and rules.
@@ -23,6 +28,7 @@ by [htmx](https://htmx.org) over a WebSocket.
 | `channels` → one actor per channel | membership, authorization, posting, edits, history, read state, typing |
 | `files` (pool) | upload grants, downloads, orphan cleanup |
 | `hub` | live connections of every web gateway, event fan-out, presence |
+| `voice` | who talks in which voice channel, join tokens, the voice servers |
 
 A channel actor is the single writer for its channel, so ordering and
 membership checks never race. It loads lazily on first use and passivates when
@@ -35,8 +41,37 @@ bidirectional DRPC stream to the server and reattaches them after a reconnect.
 Events arrive as protobuf and leave as htmx out-of-band HTML fragments. You
 can run as many gateways as you like behind a load balancer.
 
+**`gochat voice`** is a voice server, an SFU in the manner of Discord's. It
+keeps one actor per voice channel with talk, which receives each person's
+Opus track over WebRTC ([Pion](https://github.com/pion/webrtc)) and forwards
+it to the others, neither mixed nor decoded.
+
 The server is designed as a single node: channel actors and the hub live in
-one process. Scylla and MinIO scale independently.
+one process. Scylla and MinIO scale independently, and so do voice servers:
+each channel's talk runs on one of them, the least loaded when it starts.
+
+### Voice channels
+
+As in Discord, the chat server keeps the voice states and voice servers
+carry the voice:
+
+1. A page asks to join (`JoinVoice`). The chat server checks the person may,
+   picks the channel's voice server and hands back its signaling endpoint and
+   a single-use token valid for 30 seconds.
+2. The page opens the voice server's websocket and identifies with the token,
+   which the voice server claims from the chat server over its DRPC stream.
+   Only then does the person count as talking, and the team's pages see them
+   under the channel.
+3. The voice server offers, the page answers, and the page's microphone and
+   everyone else's voices flow over WebRTC. The voice server only ever offers,
+   renegotiating as people come and go. The page tells it when the microphone
+   hears speech, and it tells the others.
+
+Each person talks in one channel at a time: joining elsewhere, or from another
+tab, disconnects the earlier connection. Mute and deafen are the person's own
+and show to the others. A channel's admins and the team's can disconnect
+anyone. Leaving the team, signing out or the sign-in expiring ends the talk.
+A channel takes at most 25 people.
 
 ### Storage
 
@@ -82,6 +117,14 @@ one process. Scylla and MinIO scale independently.
   with `rel="nofollow noopener noreferrer"`. Attachments are served with
   `Content-Disposition: attachment` unless they are safe images or voice
   messages, which play in place with the audio type the server detected.
+- Voice: join tokens are single-use, short-lived, stored hashed and bound to
+  one voice server; its websocket takes only the web gateway's origins. Only
+  Opus is negotiated, and each voice is capped at 512 kbit/s so the room
+  cannot be made to repeat a flood. Connections that have not identified and
+  signaling messages are bounded. The voice server is ICE lite: it answers
+  browsers and never sends to an address a browser names. Voice is
+  encrypted in transit between each browser and the voice server
+  (DTLS-SRTP); the voice server itself can hear it, as Discord's can.
 - Server API: every DRPC call carries the shared gateway key (checked in
   constant time) and the user's session; errors returned to gateways never
   carry internal causes. TLS and client certificates are supported on the DRPC
@@ -124,6 +167,7 @@ just stores    # scylla on 127.0.0.1:9042, minio on 127.0.0.1:19000
 just migrate
 just server    # in one terminal
 just web       # in another, then open http://localhost:8080
+just voice     # in a third, for voice channels
 ```
 
 These use the development configs in [config/](config).
@@ -159,7 +203,7 @@ repository, in the setup the server has: the script,
 `docker-compose.yml` and `.env` belong to root, and the key cannot change
 them. When `deployments/docker/deploy.sh` or
 `deployments/docker/docker-compose.yml` change here, install them on the
-server again, as below.
+server again, as below; voice channels changed both.
 
 Once, on the server, as root, in a clone of this repository: a user to
 deploy as (in the `docker` group, which is as good as root on that server)
@@ -227,11 +271,51 @@ cd /opt/apps/gochat && sudo -u deploy sh -c 'docker image tag gochat:previous go
 Migrations only add to the schema, so going back works as long as they keep
 doing so.
 
+### Voice in production
+
+Voice needs the server to have a public IP address. Two things must reach the
+voice server:
+
+1. **The signaling websocket** (`VOICE_BIND:VOICE_PORT`, 127.0.0.1:8090),
+   through the same TLS proxy or tunnel as the web gateway. The simplest
+   route is a path on the same host: send `/rtc` to it, and set
+   `VOICE_PUBLIC_URL=wss://chat.example.com/rtc`. With nginx:
+
+   ```nginx
+   location /rtc {
+       proxy_pass http://127.0.0.1:8090;
+       proxy_http_version 1.1;
+       proxy_set_header Upgrade $http_upgrade;
+       proxy_set_header Connection "upgrade";
+       proxy_read_timeout 1h;
+   }
+   ```
+
+   On a host of its own, such as `wss://voice.example.com/rtc`, also set
+   `WEB_VOICE_ORIGINS=wss://voice.example.com`.
+
+2. **The media port** directly, without any proxy: `VOICE_MEDIA_PORT`
+   (50000), on UDP and on TCP. Set `VOICE_PUBLIC_IP` to the server's public
+   address and open the port in the firewall, e.g.
+   `ufw allow 50000/udp && ufw allow 50000/tcp`, or in the cloud provider's
+   security group. A Cloudflare Tunnel or HTTP proxy cannot carry it.
+
+Browsers use UDP, and fall back to TCP on networks that block UDP. For
+networks that block both, run a TURN server such as coturn with
+`use-auth-secret` and `static-auth-secret=<secret>`, and set
+`VOICE_TURN_URLS` and `VOICE_TURN_SECRET` to match: the voice server hands
+browsers credentials for it that expire.
+
+Without `VOICE_PUBLIC_IP`, the voice server announces its container's own
+addresses, which only browsers on the same Linux machine reach, as in
+development.
+
 ## Command line
 
 ```
 gochat server   [-p config-path] [-n config-name] [-e env-prefix]
 gochat web      [-p config-path] [-n config-name] [-e env-prefix]
+gochat voice    [-p config-path] [-n config-name] [-e env-prefix]
 gochat migrate scylla up     <dir>
 gochat migrate scylla status <dir>
 gochat version
@@ -240,7 +324,8 @@ gochat version
 ## Configuration
 
 Each command embeds its defaults ([server](cmd/serve/default.yaml),
-[web](cmd/web/default.yaml), [migrate](cmd/migrate/default.yaml)) and overlays
+[web](cmd/web/default.yaml), [voice](cmd/voice/default.yaml),
+[migrate](cmd/migrate/default.yaml)) and overlays
 `<config-path>/<config-name>.yaml` and then environment variables. A key's
 variable is its path in upper case with dots as underscores, optionally behind
 a prefix: `database.scylla.password` → `DATABASE_SCYLLA_PASSWORD`. Unknown
@@ -254,7 +339,8 @@ Secrets that should come from the environment:
 | `DATABASE_SCYLLA_ADMIN_USERNAME`, `DATABASE_SCYLLA_ADMIN_PASSWORD` | migrate, scylla-init |
 | `STORAGE_MINIO_ACCESS_KEY`, `STORAGE_MINIO_SECRET_KEY` | server (the app's account) |
 | `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` | minio, minio-init |
-| `SERVER_DRPC_GATEWAY_KEY` / `CLIENT_DRPC_GATEWAY_KEY` | server / web (same value) |
+| `SERVER_DRPC_GATEWAY_KEY` / `CLIENT_DRPC_GATEWAY_KEY` | server / web and voice (same value) |
+| `VOICE_ICE_TURN_SECRET` (optional) | voice |
 | `SERVICES_ACCOUNTS_SECRET_KEY` | server |
 | `SERVICES_ACCOUNTS_SETUP_TOKEN` (optional) | server |
 
@@ -274,7 +360,8 @@ just test
 
 The end-to-end suite in [test/e2e](test/e2e) drives a running stack through the
 web gateway: invites, real-time delivery, typing, attachments, voice messages
-and their channel setting, private channel isolation, CSRF, TOTP with recovery codes and session revocation. It needs an
+and their channel setting, voice channels (with Pion peers that talk through
+the voice server), private channel isolation, CSRF, TOTP with recovery codes and session revocation. It needs an
 existing admin account and team:
 
 ```bash
@@ -294,7 +381,8 @@ internal/authz     casbin model and enforcer
 internal/core      ids, passwords, TOTP, sealing, validation, models, caches
 internal/repos     Scylla and MinIO repositories
 internal/server    DRPC handlers and the admin listener
-internal/services  hub, accounts, directory, channels, files
+internal/services  hub, accounts, directory, channels, files, voice
+internal/voiceserver  the voice server: signaling, rooms, media
 internal/web       HTTP handlers, gateway actors, templates and static assets
 migrations/scylla  CQL migrations
 test/e2e           end-to-end tests
