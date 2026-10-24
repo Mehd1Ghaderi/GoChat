@@ -592,6 +592,10 @@ func TestEndToEnd(t *testing.T) {
 		bobWS.expect(5*time.Second, `data-voice-for="`+town+`"`, "voice-record")
 	})
 
+	t.Run("voice channels: talk, mute, moderators and refusals", func(t *testing.T) {
+		testVoiceChannels(t, admin, bob, adminWS, bobWS)
+	})
+
 	t.Run("private channels stay private", func(t *testing.T) {
 		name := "secret-" + random(3)
 		res, body := admin.hx("/t/"+teamName+"/channels", url.Values{"name": {name}, "display_name": {"Secret"}, "type": {"private"}})

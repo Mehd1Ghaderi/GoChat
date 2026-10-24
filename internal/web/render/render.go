@@ -185,6 +185,7 @@ func (r *Renderer) funcs() template.FuncMap {
 		},
 		"isPrivate":      func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_PRIVATE },
 		"isDirect":       func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_DIRECT },
+		"isVoice":        func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_VOICE },
 		"isGroup":        func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_GROUP },
 		"isConversation": Conversation,
 		"inc":            func(n int) int { return n + 1 },

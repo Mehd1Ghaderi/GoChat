@@ -27,6 +27,8 @@ const (
 	ObjDirect        Object = "direct"
 	ObjMessage       Object = "message"
 	ObjFile          Object = "file"
+	// ObjVoice is the talk in voice channels.
+	ObjVoice Object = "voice"
 )
 
 type Action string
@@ -49,6 +51,11 @@ const (
 	ActArchive       Action = "archive"
 	ActMakePrivate   Action = "make_private"
 	ActMakePublic    Action = "make_public"
+	ActCreateVoice   Action = "create_voice"
+	// ActConnect joins the talk of a voice channel; ActMove disconnects
+	// others from it.
+	ActConnect Action = "connect"
+	ActMove    Action = "move"
 )
 
 type Authorizer struct {

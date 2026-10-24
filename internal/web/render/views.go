@@ -68,7 +68,10 @@ type Rail struct {
 type Lists struct {
 	Team     *pb.Team
 	Channels []*pb.Channel
+	Voice    []*pb.Channel
 	DMs      []*pb.Channel
+	// VoiceStates holds who talks in each voice channel, by channel id.
+	VoiceStates map[string]*pb.VoiceChannelState
 	// Active is the open channel's id, or "threads".
 	Active string
 	// Status holds the peers who are not offline.
@@ -83,16 +86,41 @@ func Conversation(ch *pb.Channel) bool {
 	return ch != nil && (ch.Type == pb.ChannelType_CHANNEL_TYPE_DIRECT || ch.Type == pb.ChannelType_CHANNEL_TYPE_GROUP)
 }
 
-// Split separates a team's channels from the conversations.
-func Split(all []*pb.Channel) (channels, direct []*pb.Channel) {
+// Split separates a team's text channels, its voice channels and the
+// conversations.
+func Split(all []*pb.Channel) (channels, voice, direct []*pb.Channel) {
 	for _, ch := range all {
-		if Conversation(ch) {
+		switch {
+		case Conversation(ch):
 			direct = append(direct, ch)
-		} else {
+		case ch.Type == pb.ChannelType_CHANNEL_TYPE_VOICE:
+			voice = append(voice, ch)
+		default:
 			channels = append(channels, ch)
 		}
 	}
-	return channels, direct
+	return channels, voice, direct
+}
+
+// VoiceStates indexes a team's voice states by channel.
+func VoiceStates(list []*pb.VoiceChannelState) map[string]*pb.VoiceChannelState {
+	out := make(map[string]*pb.VoiceChannelState, len(list))
+	for _, s := range list {
+		out[s.ChannelId] = s
+	}
+	return out
+}
+
+// VoiceRoom is who talks in one voice channel, for the sidebar or the
+// channel's own page. State is nil when nobody does.
+type VoiceRoom struct {
+	TeamName  string
+	ChannelID string
+	State     *pb.VoiceChannelState
+	// Moderator may disconnect the others; MeID is the viewer.
+	Moderator bool
+	MeID      string
+	OOB       bool
 }
 
 // Peers returns the other sides of direct channels.
@@ -123,7 +151,10 @@ type ChannelView struct {
 	// shows an older part of the channel and takes no new messages.
 	Anchored bool
 	Archived bool
-	OOB      bool
+	// Voice is who talks in a voice channel, MeID the viewer.
+	Voice *pb.VoiceChannelState
+	MeID  string
+	OOB   bool
 }
 
 // Manage reports whether the viewer may change the channel's settings.

@@ -77,6 +77,8 @@ func ChannelType(k models.ChannelKind) pb.ChannelType {
 		return pb.ChannelType_CHANNEL_TYPE_DIRECT
 	case models.ChannelGroup:
 		return pb.ChannelType_CHANNEL_TYPE_GROUP
+	case models.ChannelVoice:
+		return pb.ChannelType_CHANNEL_TYPE_VOICE
 	default:
 		return pb.ChannelType_CHANNEL_TYPE_UNSPECIFIED
 	}

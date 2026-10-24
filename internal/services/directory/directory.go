@@ -31,6 +31,7 @@ import (
 	"github.com/ssenerg/gochat/internal/services/hub"
 	"github.com/ssenerg/gochat/internal/services/invites"
 	"github.com/ssenerg/gochat/internal/services/users"
+	"github.com/ssenerg/gochat/internal/services/voice"
 )
 
 type Repo interface {
@@ -85,6 +86,7 @@ type Deps struct {
 	Engine   *actor.Engine
 	Hub      *actor.PID
 	Channels *actor.PID
+	Voice    *actor.PID
 	invited  *window.Counter
 }
 
@@ -412,6 +414,7 @@ func (w *worker) removeTeamMember(ctx context.Context, msg RemoveTeamMember) (Do
 	if err := w.Repo.RemoveTeamMember(ctx, teamID, target); err != nil {
 		return Done{}, err
 	}
+	w.Engine.Send(w.Voice, voice.DropUser{UserID: target, TeamID: teamID})
 	w.deliver(target, &pb.Event{Payload: &pb.Event_TeamLeft{TeamLeft: &pb.TeamLeft{TeamId: teamID.String()}}})
 	return Done{}, nil
 }
@@ -672,6 +675,7 @@ func (w *worker) joinTeam(ctx context.Context, userID, teamID gocql.UUID) (*pb.T
 		}
 	}
 	out := convert.Team(team, role)
+	w.Engine.Send(w.Voice, voice.TeamChanged{TeamID: teamID})
 	w.deliver(userID, &pb.Event{Payload: &pb.Event_TeamJoined{TeamJoined: &pb.TeamJoined{Team: out}}})
 	return out, nil
 }
@@ -685,10 +689,13 @@ func directPair(a, b gocql.UUID) string {
 }
 
 func (w *worker) listChannels(ctx context.Context, msg ListChannels) ([]*pb.Channel, error) {
-	var memberships []*models.ChannelMember
+	var (
+		memberships []*models.ChannelMember
+		teamID      gocql.UUID
+	)
 	if msg.TeamID != "" {
-		teamID, err := parseID(msg.TeamID, "team")
-		if err != nil {
+		var err error
+		if teamID, err = parseID(msg.TeamID, "team"); err != nil {
 			return nil, err
 		}
 		if _, err := w.membership(ctx, teamID, msg.P.UserID); err != nil {
@@ -708,6 +715,18 @@ func (w *worker) listChannels(ctx context.Context, msg ListChannels) ([]*pb.Chan
 	for _, m := range memberships {
 		roles[m.ChannelID] = m.Role
 		chIDs = append(chIDs, m.ChannelID)
+	}
+	// Every member of a team sees its voice channels, as rooms to talk in.
+	if msg.TeamID != "" {
+		listed, err := w.Repo.ListTeamChannels(ctx, teamID)
+		if err != nil {
+			return nil, err
+		}
+		for _, tc := range listed {
+			if _, mine := roles[tc.ChannelID]; tc.Kind == models.ChannelVoice && !mine {
+				chIDs = append(chIDs, tc.ChannelID)
+			}
+		}
 	}
 	reads, err := w.Repo.ListLastReads(ctx, msg.P.UserID)
 	if err != nil {
@@ -841,8 +860,10 @@ func (w *worker) createChannel(ctx context.Context, msg CreateChannel) (*pb.Chan
 	case models.ChannelPublic:
 	case models.ChannelPrivate:
 		act = authz.ActCreatePrivate
+	case models.ChannelVoice:
+		act = authz.ActCreateVoice
 	default:
-		return nil, ierrors.InvalidArgument("channel type must be public or private")
+		return nil, ierrors.InvalidArgument("channel type must be public, private or voice")
 	}
 	if !w.Authz.Can(authz.ObjChannel, act, string(m.Role), string(msg.P.Role)) {
 		return nil, ierrors.PermissionDenied()
@@ -870,7 +891,28 @@ func (w *worker) createChannel(ctx context.Context, msg CreateChannel) (*pb.Chan
 	}
 	out := convert.Channel(ch, models.ChannelRoleAdmin, gocql.UUID{}, nil)
 	w.deliver(msg.P.UserID, &pb.Event{Payload: &pb.Event_ChannelJoined{ChannelJoined: &pb.ChannelJoined{Channel: out}}})
+	if ch.Kind == models.ChannelVoice {
+		w.announce(ctx, ch, msg.P.UserID)
+	}
 	return out, nil
+}
+
+// announce shows the rest of the team a new voice channel, which is
+// theirs to talk in.
+func (w *worker) announce(ctx context.Context, ch *models.Channel, creator gocql.UUID) {
+	members, err := w.Repo.ListTeamMembers(ctx, ch.TeamID)
+	if err != nil {
+		w.Logger.Warn("failed to announce a voice channel", zap.String("channel", ch.ID.String()), zap.Error(err))
+		return
+	}
+	ids := make([]string, 0, len(members))
+	for _, m := range members {
+		if m.UserID != creator {
+			ids = append(ids, m.UserID.String())
+		}
+	}
+	view := convert.Channel(ch, "", gocql.UUID{}, nil)
+	w.Engine.Send(w.Hub, hub.Deliver{UserIDs: ids, Event: &pb.Event{Payload: &pb.Event_ChannelJoined{ChannelJoined: &pb.ChannelJoined{Channel: view}}}})
 }
 
 // teamsOf returns the teams a user belongs to.

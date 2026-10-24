@@ -35,6 +35,9 @@ const (
 	ChannelPrivate ChannelKind = "private"
 	ChannelDirect  ChannelKind = "direct"
 	ChannelGroup   ChannelKind = "group"
+	// ChannelVoice is a room to talk in. Everyone in its team may join the
+	// talk; it carries no messages.
+	ChannelVoice ChannelKind = "voice"
 )
 
 // Conversation reports whether channels of k belong to no team and have a

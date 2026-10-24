@@ -129,6 +129,9 @@ func (w *worker) begin(ctx context.Context, msg BeginUpload) (*Upload, error) {
 	if acc.Role == "" {
 		return nil, ierrors.NotFound("channel not found")
 	}
+	if acc.Channel.Kind == models.ChannelVoice {
+		return nil, ierrors.FailedPrecondition("voice channels carry no messages")
+	}
 	if !w.Authz.Can(authz.ObjFile, authz.ActUpload, string(acc.Role), string(msg.P.Role)) {
 		return nil, ierrors.PermissionDenied()
 	}

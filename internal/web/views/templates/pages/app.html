@@ -19,11 +19,18 @@
         </details>
       </header>
       {{template "channel-lists" .Lists}}
+      <div class="voice-panel" id="voice-panel" hidden>
+        <span class="vp-signal" aria-hidden="true">{{icon "signal"}}</span>
+        <span class="vp-text"><strong class="vp-status" role="status">Connecting…</strong><small class="vp-where"></small></span>
+        <button class="icon-btn" type="button" data-voice-leave aria-label="Disconnect from voice" title="Disconnect">{{icon "phone-off"}}</button>
+      </div>
       <footer class="me">
         <button type="button" class="me-status" hx-get="/status" hx-target="#modal" aria-label="Set your status" title="Set your status">
           <span class="me-face">{{template "avatar" (dict "User" .User "Size" "sm")}}{{template "me-presence" (dict "Status" (chosen .User))}}</span>
           {{template "me-name" (dict "User" .User)}}
         </button>
+        <button class="icon-btn voice-toggle" type="button" data-voice-mute aria-pressed="false" aria-label="Mute" title="Mute"><span class="when-on">{{icon "mic"}}</span><span class="when-off">{{icon "mic-off"}}</span></button>
+        <button class="icon-btn voice-toggle" type="button" data-voice-deaf aria-pressed="false" aria-label="Deafen" title="Deafen"><span class="when-on">{{icon "headphones"}}</span><span class="when-off">{{icon "headphones-off"}}</span></button>
         <a class="icon-btn" href="/settings" aria-label="Settings" title="Settings">{{icon "settings"}}</a>
         <form method="post" action="/logout">
           <input type="hidden" name="_csrf" value="{{.CSRF}}">
@@ -44,5 +51,6 @@
   <div id="notify" hidden></div>
   <div id="threads-refresh" hidden></div>
   <div id="saved-changed" hidden></div>
+  <div id="voice-audio" hidden></div>
 </div>
 {{end}}

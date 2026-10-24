@@ -234,6 +234,8 @@ const (
 	ChannelType_CHANNEL_TYPE_PRIVATE     ChannelType = 2
 	ChannelType_CHANNEL_TYPE_DIRECT      ChannelType = 3
 	ChannelType_CHANNEL_TYPE_GROUP       ChannelType = 4
+	// A voice channel carries no messages: its members talk live.
+	ChannelType_CHANNEL_TYPE_VOICE ChannelType = 5
 )
 
 // Enum value maps for ChannelType.
@@ -244,6 +246,7 @@ var (
 		2: "CHANNEL_TYPE_PRIVATE",
 		3: "CHANNEL_TYPE_DIRECT",
 		4: "CHANNEL_TYPE_GROUP",
+		5: "CHANNEL_TYPE_VOICE",
 	}
 	ChannelType_value = map[string]int32{
 		"CHANNEL_TYPE_UNSPECIFIED": 0,
@@ -251,6 +254,7 @@ var (
 		"CHANNEL_TYPE_PRIVATE":     2,
 		"CHANNEL_TYPE_DIRECT":      3,
 		"CHANNEL_TYPE_GROUP":       4,
+		"CHANNEL_TYPE_VOICE":       5,
 	}
 )
 
@@ -1153,6 +1157,137 @@ func (x *Message) GetSaved() bool {
 	return false
 }
 
+// VoiceState is one person talking in a voice channel.
+type VoiceState struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	User          *User                  `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	ChannelId     string                 `protobuf:"bytes,2,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	SelfMute      bool                   `protobuf:"varint,3,opt,name=self_mute,json=selfMute,proto3" json:"self_mute,omitempty"`
+	SelfDeaf      bool                   `protobuf:"varint,4,opt,name=self_deaf,json=selfDeaf,proto3" json:"self_deaf,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VoiceState) Reset() {
+	*x = VoiceState{}
+	mi := &file_gochat_v1_types_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VoiceState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VoiceState) ProtoMessage() {}
+
+func (x *VoiceState) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_types_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VoiceState.ProtoReflect.Descriptor instead.
+func (*VoiceState) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_types_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *VoiceState) GetUser() *User {
+	if x != nil {
+		return x.User
+	}
+	return nil
+}
+
+func (x *VoiceState) GetChannelId() string {
+	if x != nil {
+		return x.ChannelId
+	}
+	return ""
+}
+
+func (x *VoiceState) GetSelfMute() bool {
+	if x != nil {
+		return x.SelfMute
+	}
+	return false
+}
+
+func (x *VoiceState) GetSelfDeaf() bool {
+	if x != nil {
+		return x.SelfDeaf
+	}
+	return false
+}
+
+// VoiceChannelState is everyone talking in a voice channel. Version grows
+// with each change, so an older state never replaces a newer one.
+type VoiceChannelState struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ChannelId     string                 `protobuf:"bytes,1,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	States        []*VoiceState          `protobuf:"bytes,2,rep,name=states,proto3" json:"states,omitempty"`
+	Version       uint64                 `protobuf:"varint,3,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VoiceChannelState) Reset() {
+	*x = VoiceChannelState{}
+	mi := &file_gochat_v1_types_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VoiceChannelState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VoiceChannelState) ProtoMessage() {}
+
+func (x *VoiceChannelState) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_types_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VoiceChannelState.ProtoReflect.Descriptor instead.
+func (*VoiceChannelState) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_types_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *VoiceChannelState) GetChannelId() string {
+	if x != nil {
+		return x.ChannelId
+	}
+	return ""
+}
+
+func (x *VoiceChannelState) GetStates() []*VoiceState {
+	if x != nil {
+		return x.States
+	}
+	return nil
+}
+
+func (x *VoiceChannelState) GetVersion() uint64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
 // Reaction is one emoji on a message and who reacted with it.
 type Reaction struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1164,7 +1299,7 @@ type Reaction struct {
 
 func (x *Reaction) Reset() {
 	*x = Reaction{}
-	mi := &file_gochat_v1_types_proto_msgTypes[9]
+	mi := &file_gochat_v1_types_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1176,7 +1311,7 @@ func (x *Reaction) String() string {
 func (*Reaction) ProtoMessage() {}
 
 func (x *Reaction) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_types_proto_msgTypes[9]
+	mi := &file_gochat_v1_types_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1189,7 +1324,7 @@ func (x *Reaction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Reaction.ProtoReflect.Descriptor instead.
 func (*Reaction) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_types_proto_rawDescGZIP(), []int{9}
+	return file_gochat_v1_types_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Reaction) GetEmoji() string {
@@ -1301,7 +1436,19 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\vlastReplyAt\x121\n" +
 	"\treactions\x18\v \x03(\v2\x13.gochat.v1.ReactionR\treactions\x12\x16\n" +
 	"\x06pinned\x18\f \x01(\bR\x06pinned\x12\x14\n" +
-	"\x05saved\x18\r \x01(\bR\x05saved\";\n" +
+	"\x05saved\x18\r \x01(\bR\x05saved\"\x8a\x01\n" +
+	"\n" +
+	"VoiceState\x12#\n" +
+	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user\x12\x1d\n" +
+	"\n" +
+	"channel_id\x18\x02 \x01(\tR\tchannelId\x12\x1b\n" +
+	"\tself_mute\x18\x03 \x01(\bR\bselfMute\x12\x1b\n" +
+	"\tself_deaf\x18\x04 \x01(\bR\bselfDeaf\"{\n" +
+	"\x11VoiceChannelState\x12\x1d\n" +
+	"\n" +
+	"channel_id\x18\x01 \x01(\tR\tchannelId\x12-\n" +
+	"\x06states\x18\x02 \x03(\v2\x15.gochat.v1.VoiceStateR\x06states\x12\x18\n" +
+	"\aversion\x18\x03 \x01(\x04R\aversion\";\n" +
 	"\bReaction\x12\x14\n" +
 	"\x05emoji\x18\x01 \x01(\tR\x05emoji\x12\x19\n" +
 	"\buser_ids\x18\x02 \x03(\tR\auserIds*V\n" +
@@ -1324,13 +1471,14 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"\vSTATUS_AWAY\x10\x02\x12\x0e\n" +
 	"\n" +
 	"STATUS_DND\x10\x03\x12\x12\n" +
-	"\x0eSTATUS_OFFLINE\x10\x04*\x8f\x01\n" +
+	"\x0eSTATUS_OFFLINE\x10\x04*\xa7\x01\n" +
 	"\vChannelType\x12\x1c\n" +
 	"\x18CHANNEL_TYPE_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13CHANNEL_TYPE_PUBLIC\x10\x01\x12\x18\n" +
 	"\x14CHANNEL_TYPE_PRIVATE\x10\x02\x12\x17\n" +
 	"\x13CHANNEL_TYPE_DIRECT\x10\x03\x12\x16\n" +
-	"\x12CHANNEL_TYPE_GROUP\x10\x04B\x9f\x01\n" +
+	"\x12CHANNEL_TYPE_GROUP\x10\x04\x12\x16\n" +
+	"\x12CHANNEL_TYPE_VOICE\x10\x05B\x9f\x01\n" +
 	"\rcom.gochat.v1B\n" +
 	"TypesProtoP\x01Z=github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1;gochatv1\xa2\x02\x03GXX\xaa\x02\tGochat.V1\xca\x02\tGochat\\V1\xe2\x02\x15Gochat\\V1\\GPBMetadata\xea\x02\n" +
 	"Gochat::V1b\x06proto3"
@@ -1348,7 +1496,7 @@ func file_gochat_v1_types_proto_rawDescGZIP() []byte {
 }
 
 var file_gochat_v1_types_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_gochat_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_gochat_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_gochat_v1_types_proto_goTypes = []any{
 	(SystemRole)(0),               // 0: gochat.v1.SystemRole
 	(TeamRole)(0),                 // 1: gochat.v1.TeamRole
@@ -1364,42 +1512,46 @@ var file_gochat_v1_types_proto_goTypes = []any{
 	(*ChannelMember)(nil),         // 11: gochat.v1.ChannelMember
 	(*Attachment)(nil),            // 12: gochat.v1.Attachment
 	(*Message)(nil),               // 13: gochat.v1.Message
-	(*Reaction)(nil),              // 14: gochat.v1.Reaction
-	(*timestamppb.Timestamp)(nil), // 15: google.protobuf.Timestamp
+	(*VoiceState)(nil),            // 14: gochat.v1.VoiceState
+	(*VoiceChannelState)(nil),     // 15: gochat.v1.VoiceChannelState
+	(*Reaction)(nil),              // 16: gochat.v1.Reaction
+	(*timestamppb.Timestamp)(nil), // 17: google.protobuf.Timestamp
 }
 var file_gochat_v1_types_proto_depIdxs = []int32{
-	15, // 0: gochat.v1.CustomStatus.expires_at:type_name -> google.protobuf.Timestamp
+	17, // 0: gochat.v1.CustomStatus.expires_at:type_name -> google.protobuf.Timestamp
 	0,  // 1: gochat.v1.User.role:type_name -> gochat.v1.SystemRole
-	15, // 2: gochat.v1.User.created_at:type_name -> google.protobuf.Timestamp
+	17, // 2: gochat.v1.User.created_at:type_name -> google.protobuf.Timestamp
 	3,  // 3: gochat.v1.User.status:type_name -> gochat.v1.Status
-	15, // 4: gochat.v1.User.dnd_until:type_name -> google.protobuf.Timestamp
+	17, // 4: gochat.v1.User.dnd_until:type_name -> google.protobuf.Timestamp
 	5,  // 5: gochat.v1.User.custom_status:type_name -> gochat.v1.CustomStatus
-	15, // 6: gochat.v1.Session.expires_at:type_name -> google.protobuf.Timestamp
+	17, // 6: gochat.v1.Session.expires_at:type_name -> google.protobuf.Timestamp
 	1,  // 7: gochat.v1.Team.role:type_name -> gochat.v1.TeamRole
-	15, // 8: gochat.v1.Team.created_at:type_name -> google.protobuf.Timestamp
+	17, // 8: gochat.v1.Team.created_at:type_name -> google.protobuf.Timestamp
 	6,  // 9: gochat.v1.TeamMember.user:type_name -> gochat.v1.User
 	1,  // 10: gochat.v1.TeamMember.role:type_name -> gochat.v1.TeamRole
-	15, // 11: gochat.v1.TeamMember.joined_at:type_name -> google.protobuf.Timestamp
+	17, // 11: gochat.v1.TeamMember.joined_at:type_name -> google.protobuf.Timestamp
 	4,  // 12: gochat.v1.Channel.type:type_name -> gochat.v1.ChannelType
 	2,  // 13: gochat.v1.Channel.role:type_name -> gochat.v1.ChannelRole
 	6,  // 14: gochat.v1.Channel.peer:type_name -> gochat.v1.User
-	15, // 15: gochat.v1.Channel.created_at:type_name -> google.protobuf.Timestamp
+	17, // 15: gochat.v1.Channel.created_at:type_name -> google.protobuf.Timestamp
 	6,  // 16: gochat.v1.Channel.peers:type_name -> gochat.v1.User
-	15, // 17: gochat.v1.Channel.archived_at:type_name -> google.protobuf.Timestamp
+	17, // 17: gochat.v1.Channel.archived_at:type_name -> google.protobuf.Timestamp
 	6,  // 18: gochat.v1.ChannelMember.user:type_name -> gochat.v1.User
 	2,  // 19: gochat.v1.ChannelMember.role:type_name -> gochat.v1.ChannelRole
-	15, // 20: gochat.v1.ChannelMember.joined_at:type_name -> google.protobuf.Timestamp
+	17, // 20: gochat.v1.ChannelMember.joined_at:type_name -> google.protobuf.Timestamp
 	6,  // 21: gochat.v1.Message.author:type_name -> gochat.v1.User
 	12, // 22: gochat.v1.Message.attachments:type_name -> gochat.v1.Attachment
-	15, // 23: gochat.v1.Message.created_at:type_name -> google.protobuf.Timestamp
-	15, // 24: gochat.v1.Message.edited_at:type_name -> google.protobuf.Timestamp
-	15, // 25: gochat.v1.Message.last_reply_at:type_name -> google.protobuf.Timestamp
-	14, // 26: gochat.v1.Message.reactions:type_name -> gochat.v1.Reaction
-	27, // [27:27] is the sub-list for method output_type
-	27, // [27:27] is the sub-list for method input_type
-	27, // [27:27] is the sub-list for extension type_name
-	27, // [27:27] is the sub-list for extension extendee
-	0,  // [0:27] is the sub-list for field type_name
+	17, // 23: gochat.v1.Message.created_at:type_name -> google.protobuf.Timestamp
+	17, // 24: gochat.v1.Message.edited_at:type_name -> google.protobuf.Timestamp
+	17, // 25: gochat.v1.Message.last_reply_at:type_name -> google.protobuf.Timestamp
+	16, // 26: gochat.v1.Message.reactions:type_name -> gochat.v1.Reaction
+	6,  // 27: gochat.v1.VoiceState.user:type_name -> gochat.v1.User
+	14, // 28: gochat.v1.VoiceChannelState.states:type_name -> gochat.v1.VoiceState
+	29, // [29:29] is the sub-list for method output_type
+	29, // [29:29] is the sub-list for method input_type
+	29, // [29:29] is the sub-list for extension type_name
+	29, // [29:29] is the sub-list for extension extendee
+	0,  // [0:29] is the sub-list for field type_name
 }
 
 func init() { file_gochat_v1_types_proto_init() }
@@ -1413,7 +1565,7 @@ func file_gochat_v1_types_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gochat_v1_types_proto_rawDesc), len(file_gochat_v1_types_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   10,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

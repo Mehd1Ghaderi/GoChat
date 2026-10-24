@@ -33,3 +33,24 @@ func TestCheckVoice(t *testing.T) {
 		}
 	}
 }
+
+func TestVoiceChannelsCarryNoMessages(t *testing.T) {
+	voice := &channel{ch: &models.Channel{Kind: models.ChannelVoice}}
+	text := &channel{ch: &models.Channel{Kind: models.ChannelPublic}}
+	for _, req := range []Request{Post{}, Edit{}, Delete{}, History{}, GetMessage{}, Thread{}, ThreadRead{}, Typing{}, React{}, Pin{}, Pins{}, Save{}, Follow{}, Mute{}, MarkRead{}, SetVoice{}, Join{}, AddMember{}, Settings{}, Privacy{}, Archive{}} {
+		if err := voice.voiceRefuses(req); !ierrors.Is(err, ierrors.CodeFailedPrecondition) {
+			t.Errorf("a voice channel took %T: %v", req, err)
+		}
+		if err := text.voiceRefuses(req); err != nil {
+			t.Errorf("a text channel refused %T: %v", req, err)
+		}
+	}
+	for _, req := range []Request{Access{}, View{}, Leave{}, Members{}, VoiceAccess{}} {
+		if err := voice.voiceRefuses(req); err != nil {
+			t.Errorf("a voice channel refused %T: %v", req, err)
+		}
+	}
+	if !voice.open() || !text.open() || (&channel{ch: &models.Channel{Kind: models.ChannelPrivate}}).open() {
+		t.Error("only public and voice channels are open to their team")
+	}
+}

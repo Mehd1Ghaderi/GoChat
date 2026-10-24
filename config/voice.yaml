@@ -1,0 +1,15 @@
+# Development: the web gateway on localhost:8080, browsers on this machine.
+logging:
+  console:
+    level: debug
+    format: text
+
+voice:
+  public_url: ws://localhost:8090/rtc
+  allowed_origins: [http://localhost:8080]
+  http:
+    address: "127.0.0.1:8090"
+
+client:
+  drpc:
+    address: 127.0.0.1:7070

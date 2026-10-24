@@ -16,7 +16,10 @@ type Config struct {
 	// PublicURL is the origin browsers use; https makes every cookie Secure.
 	PublicURL string `mapstructure:"public_url"`
 	// TrustedProxies are the CIDRs whose X-Forwarded-For is believed.
-	TrustedProxies  []string         `mapstructure:"trusted_proxies"`
+	TrustedProxies []string `mapstructure:"trusted_proxies"`
+	// VoiceOrigins are the voice servers' signaling origins, such as
+	// wss://voice.example.com, which pages may connect to.
+	VoiceOrigins    []string         `mapstructure:"voice_origins"`
 	UploadLimit     int64            `mapstructure:"upload_limit"`
 	RenderCacheSize int              `mapstructure:"render_cache_size"`
 	HTTP            *HTTPConfig      `mapstructure:"http"`
@@ -67,6 +70,12 @@ func (c *Config) Validate() error {
 	for _, cidr := range c.TrustedProxies {
 		if _, _, err := net.ParseCIDR(cidr); err != nil {
 			return fmt.Errorf("trusted_proxies: %q is not a CIDR", cidr)
+		}
+	}
+	for _, o := range c.VoiceOrigins {
+		u, err := url.Parse(o)
+		if err != nil || (u.Scheme != "ws" && u.Scheme != "wss") || u.Host == "" || (u.Path != "" && u.Path != "/") {
+			return fmt.Errorf("voice_origins: %q is not a ws(s) origin, such as wss://voice.example.com", o)
 		}
 	}
 	if c.UploadLimit < 1024 {

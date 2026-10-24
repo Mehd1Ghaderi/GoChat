@@ -37,7 +37,7 @@ func (h *Handler) channelSettings(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	if !moderator(u, team, res.Channel) || render.Conversation(res.Channel) {
+	if !moderator(u, team, res.Channel) || render.Conversation(res.Channel) || res.Channel.GetType() == pb.ChannelType_CHANNEL_TYPE_VOICE {
 		h.fail(w, r, ierrors.PermissionDenied())
 		return
 	}
