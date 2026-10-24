@@ -1,8 +1,8 @@
 # GoChat
 
 A self-hosted team chat in the spirit of Mattermost: teams, public and private
-channels, direct messages, one-time invite links, attachments, presence and
-typing indicators, all delivered in real time. The whole application runs on
+channels, direct messages, one-time invite links, attachments, voice messages,
+presence and typing indicators, all delivered in real time. The whole application runs on
 the [hollywood](https://github.com/anthdm/hollywood) actor engine, on both the
 server and the web gateway, and the browser UI is server-rendered HTML driven
 by [htmx](https://htmx.org) over a WebSocket.
@@ -48,6 +48,15 @@ one process. Scylla and MinIO scale independently.
 - **MinIO** stores attachments under `attachments/<channel>/<id>`. Uploads
   stream through the server, which sniffs the content type and enforces the
   size limit; attachments never posted are deleted by a janitor.
+- **Voice messages** are attachments marked as voice. The browser records
+  them with `MediaRecorder` and uploads them with their length; the server
+  takes them only in channels that allow voice, only up to
+  `services.files.max_voice_duration` (10 minutes by default) and
+  `services.files.max_voice_size` (16 MiB), and only when their first bytes
+  are a WebM, Ogg or MP4 recording. Each channel allows
+  voice unless its admins, or the team's, turn it off in the channel's
+  settings (or when creating it); direct conversations always allow it.
+  Turning it off keeps the voice messages already sent.
 - **Casbin** policies live in Scylla too (custom adapter). Policies grant
   actions to role names; who holds which role in a team or channel is part of
   the membership rows.
@@ -66,11 +75,13 @@ one process. Scylla and MinIO scale independently.
   invite, and creating them is capped per person.
 - Web: strict CSP (no inline script, no eval), CSRF double-submit token plus
   `Origin` and `Sec-Fetch-Site` checks, `__Host-` `Secure` cookies and HSTS on
-  https, `X-Frame-Options: DENY`, `nosniff`, per-IP rate limits.
+  https, `X-Frame-Options: DENY`, `nosniff`, per-IP rate limits. The page may
+  use the microphone, for voice messages, and no other device.
 - Content: messages are rendered as Markdown with raw HTML disabled; images
   become links so a message cannot make readers fetch outside URLs; links open
   with `rel="nofollow noopener noreferrer"`. Attachments are served with
-  `Content-Disposition: attachment` unless they are safe images.
+  `Content-Disposition: attachment` unless they are safe images or voice
+  messages, which play in place with the audio type the server detected.
 - Server API: every DRPC call carries the shared gateway key (checked in
   constant time) and the user's session; errors returned to gateways never
   carry internal causes. TLS and client certificates are supported on the DRPC
@@ -262,8 +273,8 @@ just test
 ```
 
 The end-to-end suite in [test/e2e](test/e2e) drives a running stack through the
-web gateway: invites, real-time delivery, typing, attachments, private channel
-isolation, CSRF, TOTP with recovery codes and session revocation. It needs an
+web gateway: invites, real-time delivery, typing, attachments, voice messages
+and their channel setting, private channel isolation, CSRF, TOTP with recovery codes and session revocation. It needs an
 existing admin account and team:
 
 ```bash

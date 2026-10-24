@@ -107,6 +107,8 @@ services:
     workers: 8
     op_timeout: 30s
     max_size: 52428800
+    max_voice_duration: 10m
+    max_voice_size: 16777216
     max_uploads: 64
     max_user_uploads: 4
     orphan_after: 24h

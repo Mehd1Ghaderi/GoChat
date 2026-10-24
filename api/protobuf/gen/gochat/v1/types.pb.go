@@ -707,8 +707,11 @@ type Channel struct {
 	// The others of a group conversation.
 	Peers []*User `protobuf:"bytes,14,rep,name=peers,proto3" json:"peers,omitempty"`
 	// Set while the channel is archived: read only.
-	ArchivedAt    *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=archived_at,json=archivedAt,proto3" json:"archived_at,omitempty"`
-	PinnedCount   int32                  `protobuf:"varint,16,opt,name=pinned_count,json=pinnedCount,proto3" json:"pinned_count,omitempty"`
+	ArchivedAt  *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=archived_at,json=archivedAt,proto3" json:"archived_at,omitempty"`
+	PinnedCount int32                  `protobuf:"varint,16,opt,name=pinned_count,json=pinnedCount,proto3" json:"pinned_count,omitempty"`
+	// Whether members may post voice messages. Direct and group
+	// conversations always allow them.
+	VoiceEnabled  bool `protobuf:"varint,17,opt,name=voice_enabled,json=voiceEnabled,proto3" json:"voice_enabled,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -855,6 +858,13 @@ func (x *Channel) GetPinnedCount() int32 {
 	return 0
 }
 
+func (x *Channel) GetVoiceEnabled() bool {
+	if x != nil {
+		return x.VoiceEnabled
+	}
+	return false
+}
+
 type ChannelMember struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	User          *User                  `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
@@ -916,11 +926,15 @@ func (x *ChannelMember) GetJoinedAt() *timestamppb.Timestamp {
 }
 
 type Attachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	ContentType   string                 `protobuf:"bytes,3,opt,name=content_type,json=contentType,proto3" json:"content_type,omitempty"`
-	Size          int64                  `protobuf:"varint,4,opt,name=size,proto3" json:"size,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Id          string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name        string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	ContentType string                 `protobuf:"bytes,3,opt,name=content_type,json=contentType,proto3" json:"content_type,omitempty"`
+	Size        int64                  `protobuf:"varint,4,opt,name=size,proto3" json:"size,omitempty"`
+	// A voice message recorded in the browser, played in place.
+	Voice bool `protobuf:"varint,5,opt,name=voice,proto3" json:"voice,omitempty"`
+	// The length of a voice message, as its recorder measured it.
+	DurationMs    uint32 `protobuf:"varint,6,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -979,6 +993,20 @@ func (x *Attachment) GetContentType() string {
 func (x *Attachment) GetSize() int64 {
 	if x != nil {
 		return x.Size
+	}
+	return 0
+}
+
+func (x *Attachment) GetVoice() bool {
+	if x != nil {
+		return x.Voice
+	}
+	return false
+}
+
+func (x *Attachment) GetDurationMs() uint32 {
+	if x != nil {
+		return x.DurationMs
 	}
 	return 0
 }
@@ -1220,7 +1248,7 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"TeamMember\x12#\n" +
 	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user\x12'\n" +
 	"\x04role\x18\x02 \x01(\x0e2\x13.gochat.v1.TeamRoleR\x04role\x127\n" +
-	"\tjoined_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bjoinedAt\"\xc7\x04\n" +
+	"\tjoined_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bjoinedAt\"\xec\x04\n" +
 	"\aChannel\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
 	"\ateam_id\x18\x02 \x01(\tR\x06teamId\x12\x12\n" +
@@ -1241,17 +1269,21 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"\x05peers\x18\x0e \x03(\v2\x0f.gochat.v1.UserR\x05peers\x12;\n" +
 	"\varchived_at\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"archivedAt\x12!\n" +
-	"\fpinned_count\x18\x10 \x01(\x05R\vpinnedCount\"\x99\x01\n" +
+	"\fpinned_count\x18\x10 \x01(\x05R\vpinnedCount\x12#\n" +
+	"\rvoice_enabled\x18\x11 \x01(\bR\fvoiceEnabled\"\x99\x01\n" +
 	"\rChannelMember\x12#\n" +
 	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user\x12*\n" +
 	"\x04role\x18\x02 \x01(\x0e2\x16.gochat.v1.ChannelRoleR\x04role\x127\n" +
-	"\tjoined_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bjoinedAt\"g\n" +
+	"\tjoined_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bjoinedAt\"\x9e\x01\n" +
 	"\n" +
 	"Attachment\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12!\n" +
 	"\fcontent_type\x18\x03 \x01(\tR\vcontentType\x12\x12\n" +
-	"\x04size\x18\x04 \x01(\x03R\x04size\"\x83\x04\n" +
+	"\x04size\x18\x04 \x01(\x03R\x04size\x12\x14\n" +
+	"\x05voice\x18\x05 \x01(\bR\x05voice\x12\x1f\n" +
+	"\vduration_ms\x18\x06 \x01(\rR\n" +
+	"durationMs\"\x83\x04\n" +
 	"\aMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +

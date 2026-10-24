@@ -1068,7 +1068,7 @@ func (x *PinsChanged) GetCount() int32 {
 }
 
 // ChannelUpdated tells the members of a channel it was renamed, made public
-// or private, archived or restored.
+// or private, archived or restored, or took or stopped voice messages.
 type ChannelUpdated struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Channel       *Channel               `protobuf:"bytes,1,opt,name=channel,proto3" json:"channel,omitempty"`

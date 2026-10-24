@@ -141,6 +141,32 @@ func (a *channel) archive(msg Archive) (*pb.Channel, error) {
 	return a.changed(msg.P)
 }
 
+// setVoice lets the channel's members post voice messages, or stops them.
+// Messages posted before stay as they are.
+func (a *channel) setVoice(msg SetVoice) (*pb.Channel, error) {
+	ctx, cancel := a.ctx()
+	defer cancel()
+	if err := a.manage(ctx, msg.P, authz.ActUpdate); err != nil {
+		return nil, err
+	}
+	if a.archived() {
+		return nil, errArchived
+	}
+	// Each change reaches every member.
+	if !a.poster(msg.P.UserID).Allow() {
+		return nil, ierrors.ResourceExhausted("you are changing settings too fast")
+	}
+	disabled := !msg.Enabled
+	if disabled == a.ch.VoiceDisabled {
+		return a.channelFor(msg.P.UserID, a.members[msg.P.UserID])
+	}
+	if err := a.Repo.SetVoiceDisabled(ctx, a.id, disabled); err != nil {
+		return nil, err
+	}
+	a.ch.VoiceDisabled = disabled
+	return a.changed(msg.P)
+}
+
 // changed tells the members about the channel's new state and answers p.
 func (a *channel) changed(p *models.Principal) (*pb.Channel, error) {
 	ch := convert.Channel(a.ch, "", gocql.UUID{}, nil)

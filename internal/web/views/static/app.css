@@ -135,7 +135,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 label { display: flex; flex-direction: column; gap: .35rem; font-weight: 600; font-size: .92rem; }
 label small { font-weight: 400; color: var(--fg-muted); }
 label.inline { flex-direction: row; align-items: center; gap: .5rem; font-weight: 400; }
-input:not([type=radio]):not([type=checkbox]):not([type=file]), textarea {
+input:not([type=radio]):not([type=checkbox]):not([type=file]):not([type=range]), textarea {
   width: 100%; min-height: 42px; padding: .55rem .75rem; border: 1px solid var(--border);
   border-radius: 10px; background: var(--bg); font-weight: 400; font-size: 16px;
   transition: border-color .15s ease, box-shadow .15s ease;
@@ -145,7 +145,7 @@ select {
   background: var(--bg); font-weight: 400; font-size: 16px; cursor: pointer;
 }
 select:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); outline: none; }
-input:not([type=radio]):not([type=checkbox]):not([type=file]):focus, textarea:focus {
+input:not([type=radio]):not([type=checkbox]):not([type=file]):not([type=range]):focus, textarea:focus {
   border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); outline: none;
 }
 input::placeholder, textarea::placeholder { color: color-mix(in srgb, var(--fg-muted) 85%, transparent); }
@@ -418,6 +418,48 @@ kbd {
 .chip-remove .i { width: 14px; height: 14px; }
 .chip-remove:hover { background: color-mix(in srgb, var(--accent-soft-ink) 14%, transparent); }
 .upload-progress { width: 100%; height: 4px; margin-top: 6px; }
+
+/* Voice messages: the recorder takes the composer's place while it runs. */
+.voice-slot { display: contents; }
+.voice-record { width: 40px; height: 40px; color: var(--fg-muted); }
+.voice-record:hover { color: var(--fg); }
+.composer-wrap.recording .composer-row { display: none; }
+.recorder {
+  display: flex; align-items: center; gap: .6rem; border: 1px solid var(--accent); border-radius: 14px;
+  padding: 4px; background: var(--bg); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.recorder-cancel { width: 40px; height: 40px; color: var(--danger); }
+.recorder-cancel:hover { background: var(--danger-fill); }
+.rec-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--unread); animation: blink 1.2s infinite both; flex: none; }
+.rec-time { font-variant-numeric: tabular-nums; font-weight: 600; }
+.rec-label { flex: 1; color: var(--fg-muted); font-size: .88rem; }
+.recorder-send { margin-left: auto; }
+.chip.voice .chip-name { display: inline-flex; align-items: center; gap: .3rem; }
+.chip.voice .i { width: 15px; height: 15px; }
+.file.voice { display: flex; align-items: center; gap: .3rem; }
+.voice-player {
+  display: flex; align-items: center; gap: .6rem; padding: .35rem .75rem .35rem .4rem; width: min(320px, 100%);
+  border: 1px solid var(--border); border-radius: 99px; background: var(--bg);
+}
+.voice-play {
+  display: grid; place-items: center; width: 34px; height: 34px; flex: none; padding: 0; border: 0; border-radius: 50%;
+  background: var(--accent-fill); color: var(--accent-ink); cursor: pointer; line-height: 0;
+}
+.voice-play:hover { background: var(--accent-fill-hover); }
+.voice-play:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.voice-play .i { width: 18px; height: 18px; }
+.voice-player .when-paused, .voice-player.playing .when-playing { display: contents; }
+.voice-player .when-playing, .voice-player.playing .when-paused { display: none; }
+.voice-seek {
+  --at: 0%; flex: 1; min-width: 60px; height: 4px; margin: 0; border-radius: 99px; cursor: pointer; appearance: none;
+  background: linear-gradient(to right, var(--accent) var(--at), var(--border) var(--at));
+}
+.voice-seek::-webkit-slider-thumb { appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); }
+.voice-seek::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%; background: var(--accent); }
+.voice-seek:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.voice-time { flex: none; font-size: .82rem; color: var(--fg-muted); font-variant-numeric: tabular-nums; min-width: 2.6em; text-align: right; }
+.voice-download { color: var(--fg-muted); }
+.voice-download:hover { color: var(--fg); }
 
 /* Modals, lists and toasts */
 .modal-backdrop {

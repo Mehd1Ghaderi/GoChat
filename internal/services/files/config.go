@@ -11,6 +11,11 @@ type Config struct {
 	Workers   int           `mapstructure:"workers"`
 	OpTimeout time.Duration `mapstructure:"op_timeout"`
 	MaxSize   int64         `mapstructure:"max_size"`
+	// MaxVoiceDuration bounds how long a voice message may be, and
+	// MaxVoiceSize how large, below MaxSize, which bounds it too: a
+	// recording that plays in place must stay a recording.
+	MaxVoiceDuration time.Duration `mapstructure:"max_voice_duration"`
+	MaxVoiceSize     int64         `mapstructure:"max_voice_size"`
 	// MaxUploads bounds the uploads streaming at once, and MaxUserUploads
 	// those of one user.
 	MaxUploads     int `mapstructure:"max_uploads"`
@@ -32,6 +37,12 @@ func (c *Config) Validate() error {
 	}
 	if c.MaxSize < 1024 || c.MaxSize > 5<<30 {
 		return errors.New("max_size must be between 1KiB and 5GiB")
+	}
+	if c.MaxVoiceDuration < time.Second || c.MaxVoiceDuration > time.Hour {
+		return errors.New("max_voice_duration must be between 1s and 1h")
+	}
+	if c.MaxVoiceSize < 1024 {
+		return errors.New("max_voice_size must be at least 1KiB")
 	}
 	if c.OrphanAfter < time.Hour || c.JanitorInterval < time.Minute {
 		return errors.New("orphan_after must be at least 1h and janitor_interval at least 1m")

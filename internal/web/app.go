@@ -455,7 +455,7 @@ func (h *Handler) createChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := h.client.Channels.CreateChannel(ctx, &pb.CreateChannelRequest{
 		TeamId: team.Id, Name: r.PostFormValue("name"), DisplayName: r.PostFormValue("display_name"),
-		Purpose: r.PostFormValue("purpose"), Type: kind,
+		Purpose: r.PostFormValue("purpose"), Type: kind, VoiceDisabled: r.PostFormValue("voice") != "1",
 	})
 	if err != nil {
 		if msg, ok := formError(err); ok {
@@ -984,6 +984,7 @@ type threadView struct {
 	Title     string
 	Member    bool
 	Following bool
+	Voice     bool
 }
 
 // threadPanel shows a thread, or with ?before its older replies.
@@ -1036,6 +1037,7 @@ func (h *Handler) threadPanel(w http.ResponseWriter, r *http.Request) {
 		Title:     render.Title(ch),
 		Member:    ch.Role != pb.ChannelRole_CHANNEL_ROLE_UNSPECIFIED,
 		Following: thread.Following,
+		Voice:     ch.VoiceEnabled,
 	}
 	if len(thread.Replies) > 0 {
 		view.Oldest = thread.Replies[0].Id

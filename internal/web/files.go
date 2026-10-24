@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
+	"github.com/ssenerg/gochat/internal/core/audio"
 	ierrors "github.com/ssenerg/gochat/internal/errors"
 	"github.com/ssenerg/gochat/internal/web/render"
 )
@@ -23,12 +24,19 @@ const (
 )
 
 // upload streams each file part of a multipart request to the server
-// without buffering it, and answers with the chips the composer posts.
+// without buffering it, and answers with the chips the composer posts. With
+// ?voice=1 the one file is a voice message, ?duration its length in ms.
 func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 	if h.signedIn(w, r) == nil {
 		return
 	}
-	chID, form := r.URL.Query().Get("channel"), r.URL.Query().Get("form")
+	q := r.URL.Query()
+	chID, form := q.Get("channel"), q.Get("form")
+	voice := q.Get("voice") == "1"
+	var duration uint32
+	if d, err := strconv.ParseUint(q.Get("duration"), 10, 32); err == nil {
+		duration = uint32(d)
+	}
 	if form == "" {
 		form = "composer"
 	}
@@ -65,11 +73,15 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 			_ = part.Close()
 			continue
 		}
-		if len(atts) == maxFilesPerUpload {
-			h.fail(w, r, ierrors.InvalidArgument("attach at most 10 files at once"))
+		if len(atts) == maxFilesPerUpload || (voice && len(atts) == 1) {
+			h.fail(w, r, ierrors.InvalidArgument("attach at most 10 files at once, or one voice message"))
 			return
 		}
-		att, err := h.sendFile(ctx, chID, part.FileName(), part, buf)
+		header := &pb.UploadHeader{ChannelId: chID, Name: part.FileName(), Voice: voice}
+		if voice {
+			header.DurationMs = duration
+		}
+		att, err := h.sendFile(ctx, header, part, buf)
 		_ = part.Close()
 		if err != nil {
 			h.fail(w, r, err)
@@ -91,13 +103,13 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, out.String())
 }
 
-func (h *Handler) sendFile(ctx context.Context, chID, name string, body io.Reader, buf []byte) (*pb.Attachment, error) {
+func (h *Handler) sendFile(ctx context.Context, header *pb.UploadHeader, body io.Reader, buf []byte) (*pb.Attachment, error) {
 	stream, err := h.client.Files.Upload(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = stream.Close() }()
-	if err := stream.Send(&pb.UploadRequest{Part: &pb.UploadRequest_Header{Header: &pb.UploadHeader{ChannelId: chID, Name: name}}}); err != nil {
+	if err := stream.Send(&pb.UploadRequest{Part: &pb.UploadRequest_Header{Header: header}}); err != nil {
 		return nil, err
 	}
 	var sent int64
@@ -185,7 +197,10 @@ func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, ierrors.Internal(errors.New("download began without a header")))
 		return
 	}
-	if inline && !render.IsImage(att.ContentType) {
+	// Pictures show in place and voice messages play there; anything else
+	// only downloads.
+	inPlace := render.IsImage(att.ContentType) || (att.Voice && audio.Playable(att.ContentType))
+	if inline && !inPlace {
 		h.notFound(w, r)
 		return
 	}

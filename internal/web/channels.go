@@ -74,6 +74,25 @@ func (h *Handler) updateChannel(w http.ResponseWriter, r *http.Request) {
 	h.fragment(w, http.StatusOK, "channel-settings", channelSettingsData{Team: team, Channel: res.Channel, TeamAdmin: teamAdmin(u, team), Status: "Saved."})
 }
 
+// setChannelVoice lets the channel take voice messages, or stops it.
+func (h *Handler) setChannelVoice(w http.ResponseWriter, r *http.Request) {
+	u, team, ctx, cancel := h.teamFor(w, r)
+	if team == nil {
+		return
+	}
+	defer cancel()
+	chID, ok := h.channelTarget(w, r)
+	if !ok {
+		return
+	}
+	res, err := h.client.Channels.SetChannelVoice(ctx, &pb.SetChannelVoiceRequest{ChannelId: chID, Enabled: r.PostFormValue("enabled") == "1"})
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	h.fragment(w, http.StatusOK, "channel-settings", channelSettingsData{Team: team, Channel: res.Channel, TeamAdmin: teamAdmin(u, team), Status: "Saved."})
+}
+
 func (h *Handler) channelPrivacy(w http.ResponseWriter, r *http.Request) {
 	u, team, ctx, cancel := h.teamFor(w, r)
 	if team == nil {

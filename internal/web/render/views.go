@@ -236,7 +236,9 @@ func Excerpt(m *pb.Message) string {
 		text = string(r[:excerptRunes]) + "…"
 	}
 	if text == "" {
-		if n := len(m.GetAttachments()); n == 1 {
+		if n := len(m.GetAttachments()); n == 1 && m.Attachments[0].GetVoice() {
+			text = "Sent a voice message"
+		} else if n == 1 {
 			text = "Sent a file"
 		} else if n > 1 {
 			text = fmt.Sprintf("Sent %d files", n)

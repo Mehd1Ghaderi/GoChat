@@ -27,6 +27,18 @@ service ChannelService {
   rpc SetChannelPrivacy(SetChannelPrivacyRequest) returns (SetChannelPrivacyResponse);
   // An archived channel can be read but takes no new messages.
   rpc ArchiveChannel(ArchiveChannelRequest) returns (ArchiveChannelResponse);
+  // Lets the channel's members post voice messages, or stops them. Channel
+  // and team admins may change it.
+  rpc SetChannelVoice(SetChannelVoiceRequest) returns (SetChannelVoiceResponse);
+}
+
+message SetChannelVoiceRequest {
+  string channel_id = 1;
+  bool enabled = 2;
+}
+
+message SetChannelVoiceResponse {
+  Channel channel = 1;
 }
 
 message UpdateChannelRequest {
@@ -99,6 +111,8 @@ message CreateChannelRequest {
   string display_name = 3;
   string purpose = 4;
   ChannelType type = 5;
+  // Creates the channel without voice messages, which can be allowed later.
+  bool voice_disabled = 6;
 }
 
 message CreateChannelResponse {

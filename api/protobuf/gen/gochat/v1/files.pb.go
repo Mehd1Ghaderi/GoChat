@@ -22,9 +22,13 @@ const (
 )
 
 type UploadHeader struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ChannelId     string                 `protobuf:"bytes,1,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	ChannelId string                 `protobuf:"bytes,1,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	Name      string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// Set for a voice message, which only channels that allow voice take and
+	// which must be audio.
+	Voice         bool   `protobuf:"varint,3,opt,name=voice,proto3" json:"voice,omitempty"`
+	DurationMs    uint32 `protobuf:"varint,4,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -71,6 +75,20 @@ func (x *UploadHeader) GetName() string {
 		return x.Name
 	}
 	return ""
+}
+
+func (x *UploadHeader) GetVoice() bool {
+	if x != nil {
+		return x.Voice
+	}
+	return false
+}
+
+func (x *UploadHeader) GetDurationMs() uint32 {
+	if x != nil {
+		return x.DurationMs
+	}
+	return 0
 }
 
 type UploadRequest struct {
@@ -481,11 +499,14 @@ var File_gochat_v1_files_proto protoreflect.FileDescriptor
 
 const file_gochat_v1_files_proto_rawDesc = "" +
 	"\n" +
-	"\x15gochat/v1/files.proto\x12\tgochat.v1\x1a\x15gochat/v1/types.proto\"A\n" +
+	"\x15gochat/v1/files.proto\x12\tgochat.v1\x1a\x15gochat/v1/types.proto\"x\n" +
 	"\fUploadHeader\x12\x1d\n" +
 	"\n" +
 	"channel_id\x18\x01 \x01(\tR\tchannelId\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\"b\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
+	"\x05voice\x18\x03 \x01(\bR\x05voice\x12\x1f\n" +
+	"\vduration_ms\x18\x04 \x01(\rR\n" +
+	"durationMs\"b\n" +
 	"\rUploadRequest\x121\n" +
 	"\x06header\x18\x01 \x01(\v2\x17.gochat.v1.UploadHeaderH\x00R\x06header\x12\x16\n" +
 	"\x05chunk\x18\x02 \x01(\fH\x00R\x05chunkB\x06\n" +

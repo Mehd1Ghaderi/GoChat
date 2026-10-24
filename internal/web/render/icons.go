@@ -34,6 +34,9 @@ var icons = map[string]string{
 	"pin":      `<path d="M9 3.5h6M10 3.5l-.7 5.6L6 12.5V14h12v-1.5l-3.3-3.4L14 3.5M12 14v6.5"/>`,
 	"bookmark": `<path d="M7 3.5h10a1 1 0 0 1 1 1V20.5l-6-4.2-6 4.2V4.5a1 1 0 0 1 1-1z"/>`,
 	"reply":    `<path d="M10 7L5 12l5 5"/><path d="M5 12h8.5a5.5 5.5 0 0 1 5.5 5.5V19"/>`,
+	"mic":      `<rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5M9 20.5h6"/>`,
+	"play":     `<path d="M8.5 5.8v12.4a.8.8 0 0 0 1.2.7l9.6-6.2a.8.8 0 0 0 0-1.4L9.7 5.1a.8.8 0 0 0-1.2.7z" fill="currentColor"/>`,
+	"pause":    `<rect x="7" y="5.5" width="3.5" height="13" rx="1" fill="currentColor"/><rect x="13.5" y="5.5" width="3.5" height="13" rx="1" fill="currentColor"/>`,
 	"browse":   `<path d="M4 6h16M4 12h10M4 18h7"/><circle cx="17.5" cy="16.5" r="2.5"/><path d="M19.5 18.5L21 20"/>`,
 }
 

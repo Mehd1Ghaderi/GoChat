@@ -156,6 +156,7 @@ func (r *Renderer) funcs() template.FuncMap {
 		"avatar":  AvatarClass,
 		"icon":    Icon,
 		"size":    HumanSize,
+		"clockMS": ClockMS,
 		"isImage": IsImage,
 		"iso":     func(t time.Time) string { return t.UTC().Format(time.RFC3339) },
 		"clock":   func(t time.Time) string { return t.UTC().Format("15:04") },
@@ -248,6 +249,12 @@ func HumanSize(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGT"[exp])
+}
+
+// ClockMS shows a length in milliseconds as minutes and seconds, 1:05.
+func ClockMS(ms uint32) string {
+	s := (ms + 500) / 1000
+	return fmt.Sprintf("%d:%02d", s/60, s%60)
 }
 
 // IsImage reports whether a file may be shown inline: raster formats only,

@@ -758,6 +758,8 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 			}
 			s.fragment("channel-header", view)
 			s.fragment("composer-area", view)
+			// The thread's composer offers voice as the channel does.
+			s.fragment("voice-slot", map[string]any{"Channel": ch.Id, "Enabled": ch.VoiceEnabled, "OOB": true})
 		}
 	case *pb.Event_SavedChanged:
 		d := p.SavedChanged

@@ -209,6 +209,8 @@ func (a *channel) handle(c *actor.Context, req Request) {
 		out, err = a.save(msg)
 	case Follow:
 		out, err = a.follow(msg)
+	case SetVoice:
+		out, err = a.setVoice(msg)
 	case MarkRead:
 		err = a.markRead(c, msg)
 	case Join:
@@ -392,6 +394,9 @@ func (a *channel) post(msg Post) (*pb.Message, error) {
 	}
 	atts, err := a.ownAttachments(ctx, msg.P.UserID, attIDs)
 	if err != nil {
+		return nil, err
+	}
+	if err := a.checkVoice(atts); err != nil {
 		return nil, err
 	}
 	id := ids.NewTime()
@@ -599,6 +604,24 @@ func (a *channel) ownAttachments(ctx context.Context, userID gocql.UUID, attIDs 
 		out = append(out, att)
 	}
 	return out, nil
+}
+
+// checkVoice refuses voice messages where the channel stopped them since
+// they were recorded, and more than one in a message.
+func (a *channel) checkVoice(atts []*models.Attachment) error {
+	voices := 0
+	for _, att := range atts {
+		if att.Voice {
+			voices++
+		}
+	}
+	switch {
+	case voices > 0 && a.ch.VoiceDisabled:
+		return ierrors.FailedPrecondition("voice messages are turned off in this channel")
+	case voices > 1:
+		return ierrors.InvalidArgument("a message carries one voice message at most")
+	}
+	return nil
 }
 
 // messageOf finds a message, or with rawRoot a reply in that thread.

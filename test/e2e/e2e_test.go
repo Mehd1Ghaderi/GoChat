@@ -541,6 +541,57 @@ func TestEndToEnd(t *testing.T) {
 		bobWS.expect(5*time.Second, "attachment is not available")
 	})
 
+	t.Run("voice messages follow the channel's setting", func(t *testing.T) {
+		webm := []byte("\x1a\x45\xdf\xa3" + strings.Repeat("\x00", 64))
+		upload := func(c *client, data []byte, duration string) (*http.Response, string) {
+			var buf bytes.Buffer
+			mw := multipart.NewWriter(&buf)
+			fw, _ := mw.CreateFormFile("file", "voice-message.webm")
+			_, _ = fw.Write(data)
+			_ = mw.Close()
+			return c.do(http.MethodPost, "/upload?channel="+town+"&voice=1&duration="+duration, &buf, mw.FormDataContentType(), true)
+		}
+		// Whatever an earlier run left, the channel starts with voice on.
+		settings := "/t/" + teamName + "/ch/" + town + "/voice"
+		if res, _ := admin.hx(settings, url.Values{"enabled": {"1"}}); res.StatusCode != http.StatusOK {
+			t.Fatalf("turn voice on: %d", res.StatusCode)
+		}
+		// Drop the update that may have caused, so it cannot pass for a later one.
+		bobWS.collect(500 * time.Millisecond)
+		res, body := upload(bob, webm, "2500")
+		m := attRe.FindStringSubmatch(body)
+		if res.StatusCode != http.StatusOK || m == nil || !strings.Contains(body, "Voice message") {
+			t.Fatalf("voice upload: %d %s", res.StatusCode, body)
+		}
+		att := m[1]
+		bobWS.send(map[string]any{"op": "post", "channel_id": town, "content": "", "attachment": att})
+		adminWS.expect(5*time.Second, "voice-player", `data-duration="2500"`, "/files/"+att+"/inline")
+		res, got := admin.get("/files/" + att + "/inline")
+		if res.StatusCode != http.StatusOK || res.Header.Get("Content-Type") != "audio/webm" || got != string(webm) {
+			t.Fatalf("voice playback: %d %s", res.StatusCode, res.Header.Get("Content-Type"))
+		}
+		if res, _ := upload(bob, []byte("not a recording"), "1000"); res.StatusCode != http.StatusBadRequest {
+			t.Fatalf("a voice message that is no recording: %d", res.StatusCode)
+		}
+
+		if res, _ := bob.hx(settings, url.Values{"enabled": {"0"}}); res.StatusCode != http.StatusForbidden {
+			t.Fatalf("a member turned voice off: %d", res.StatusCode)
+		}
+		if res, body := admin.hx(settings, url.Values{"enabled": {"0"}}); res.StatusCode != http.StatusOK || !strings.Contains(body, "Saved.") {
+			t.Fatalf("turn voice off: %d %s", res.StatusCode, body)
+		}
+		if got := bobWS.expect(5*time.Second, `data-voice-for="`+town+`"`); strings.Contains(got, "voice-record") {
+			t.Fatalf("the composer still offers voice: %s", got)
+		}
+		if res, _ := upload(bob, webm, "1000"); res.StatusCode != http.StatusConflict {
+			t.Fatalf("voice upload where voice is off: %d", res.StatusCode)
+		}
+		if res, _ := admin.hx(settings, url.Values{"enabled": {"1"}}); res.StatusCode != http.StatusOK {
+			t.Fatalf("turn voice on: %d", res.StatusCode)
+		}
+		bobWS.expect(5*time.Second, `data-voice-for="`+town+`"`, "voice-record")
+	})
+
 	t.Run("private channels stay private", func(t *testing.T) {
 		name := "secret-" + random(3)
 		res, body := admin.hx("/t/"+teamName+"/channels", url.Values{"name": {name}, "display_name": {"Secret"}, "type": {"private"}})

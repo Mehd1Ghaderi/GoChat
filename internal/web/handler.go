@@ -78,6 +78,7 @@ func NewHandler(logger *zap.Logger, cfg *Config, client *drpc.Client, r *render.
 		"script-src 'self'",
 		"style-src 'self'",
 		"img-src 'self' data:",
+		"media-src 'self'",
 		"connect-src 'self' " + h.wsOrig,
 		"form-action 'self'",
 		"frame-ancestors 'none'",
@@ -121,6 +122,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("POST /t/{team}/ch/{channel}/settings", h.csrf(http.HandlerFunc(h.updateChannel)))
 	mux.Handle("POST /t/{team}/ch/{channel}/privacy", h.csrf(http.HandlerFunc(h.channelPrivacy)))
 	mux.Handle("POST /t/{team}/ch/{channel}/archive", h.csrf(http.HandlerFunc(h.archiveChannel)))
+	mux.Handle("POST /t/{team}/ch/{channel}/voice", h.csrf(http.HandlerFunc(h.setChannelVoice)))
 	mux.HandleFunc("GET /t/{team}/channels/new", h.newChannelModal)
 	mux.Handle("POST /t/{team}/channels", h.csrf(http.HandlerFunc(h.createChannel)))
 	mux.HandleFunc("GET /t/{team}/channels/browse", h.browseModal)

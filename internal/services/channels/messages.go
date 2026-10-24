@@ -119,6 +119,13 @@ type Mute struct {
 	Muted bool
 }
 
+// SetVoice lets the channel's members post voice messages, or with Enabled
+// false stops them. It replies with the caller's *pb.Channel.
+type SetVoice struct {
+	Target
+	Enabled bool
+}
+
 type Typing struct{ Target }
 
 type MarkRead struct {

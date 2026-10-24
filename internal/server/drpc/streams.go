@@ -14,6 +14,7 @@ import (
 
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
 	"github.com/ssenerg/gochat/internal/actors"
+	"github.com/ssenerg/gochat/internal/core/audio"
 	"github.com/ssenerg/gochat/internal/core/models"
 	"github.com/ssenerg/gochat/internal/core/secure"
 	ierrors "github.com/ssenerg/gochat/internal/errors"
@@ -45,7 +46,9 @@ func (s *fileService) Upload(stream pb.DRPCFileService_UploadStream) error {
 	if header == nil {
 		return ierrors.InvalidArgument("the first message must be the header")
 	}
-	up, err := actors.Ask[*files.Upload](ctx, s.sys.Engine, s.sys.Files, files.BeginUpload{P: p, ChannelID: header.ChannelId, Name: header.Name})
+	up, err := actors.Ask[*files.Upload](ctx, s.sys.Engine, s.sys.Files, files.BeginUpload{
+		P: p, ChannelID: header.ChannelId, Name: header.Name, Voice: header.Voice, DurationMS: header.DurationMs,
+	})
 	if err != nil {
 		return err
 	}
@@ -60,7 +63,10 @@ func (s *fileService) Upload(stream pb.DRPCFileService_UploadStream) error {
 		return ierrors.ResourceExhausted("the server is busy, try again")
 	}
 
-	maxSize := s.cfg.Files.MaxSize
+	maxSize, tooLarge := s.cfg.Files.MaxSize, ierrors.InvalidArgument("file is too large")
+	if up.Voice {
+		maxSize, tooLarge = min(s.cfg.Files.MaxVoiceSize, maxSize), ierrors.InvalidArgument("the voice message is too large")
+	}
 	var head bytes.Buffer
 	size := int64(0)
 	eof := false
@@ -75,7 +81,7 @@ func (s *fileService) Upload(stream pb.DRPCFileService_UploadStream) error {
 		}
 		size += int64(len(chunk))
 		if size > maxSize {
-			return ierrors.InvalidArgument("file is too large")
+			return tooLarge
 		}
 		head.Write(chunk)
 	}
@@ -83,6 +89,12 @@ func (s *fileService) Upload(stream pb.DRPCFileService_UploadStream) error {
 		return ierrors.InvalidArgument("file is empty")
 	}
 	contentType := http.DetectContentType(head.Bytes())
+	if up.Voice {
+		var ok bool
+		if contentType, ok = audio.Sniff(head.Bytes()); !ok {
+			return ierrors.InvalidArgument("a voice message must be an audio recording")
+		}
+	}
 
 	pr, pw := io.Pipe()
 	stored := make(chan struct{})
@@ -116,7 +128,7 @@ func (s *fileService) Upload(stream pb.DRPCFileService_UploadStream) error {
 		}
 		size += int64(len(chunk))
 		if size > maxSize {
-			return abort(ierrors.InvalidArgument("file is too large"))
+			return abort(tooLarge)
 		}
 		if _, err := pw.Write(chunk); err != nil {
 			return abort(err)
