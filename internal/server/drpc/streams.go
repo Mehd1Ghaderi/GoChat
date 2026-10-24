@@ -30,6 +30,8 @@ const (
 	sniffSize = 512
 )
 
+var errTooLarge = ierrors.InvalidArgument("file is too large")
+
 type fileService struct{ *base }
 
 func (s *fileService) Upload(stream pb.DRPCFileService_UploadStream) error {
@@ -63,9 +65,12 @@ func (s *fileService) Upload(stream pb.DRPCFileService_UploadStream) error {
 		return ierrors.ResourceExhausted("the server is busy, try again")
 	}
 
-	maxSize, tooLarge := s.cfg.Files.MaxSize, ierrors.InvalidArgument("file is too large")
+	maxSize, tooLarge := s.cfg.Files.MaxSize, errTooLarge
 	if up.Voice {
 		maxSize, tooLarge = min(s.cfg.Files.MaxVoiceSize, maxSize), ierrors.InvalidArgument("the voice message is too large")
+	}
+	if up.Room >= 0 && up.Room < maxSize {
+		maxSize, tooLarge = up.Room, files.ErrQuota
 	}
 	var head bytes.Buffer
 	size := int64(0)
@@ -195,6 +200,18 @@ func (s *fileService) GetPhoto(ctx context.Context, req *pb.GetPhotoRequest) (*p
 		return nil, err
 	}
 	return &pb.GetPhotoResponse{Image: ph.Data, ContentType: ph.ContentType, Version: ph.Version}, nil
+}
+
+func (s *fileService) GetStorageUsage(ctx context.Context, req *pb.GetStorageUsageRequest) (*pb.GetStorageUsageResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	u, err := actors.Ask[*files.StorageUsage](ctx, s.sys.Engine, s.sys.Files, files.Usage{P: p, UserID: req.UserId})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.GetStorageUsageResponse{Used: u.Used, Quota: u.Quota, Custom: u.Custom}, nil
 }
 
 func (s *fileService) Download(req *pb.DownloadRequest, stream pb.DRPCFileService_DownloadStream) error {

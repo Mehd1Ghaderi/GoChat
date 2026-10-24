@@ -86,6 +86,9 @@ func Start(logger *zap.Logger, cfg *Config, repo *scylla.Repository, storage *mi
 	}
 	accountDeps.Voice = s.Voice
 	s.Sessions = accountDeps
+	checkCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	accountDeps.WarnIfSetupClosed(checkCtx)
+	cancel()
 	s.Accounts = engine.Spawn(accounts.Pool(accountDeps), "accounts", actor.WithID("main"))
 	s.Auth = engine.Spawn(accounts.Pool(accountDeps), "accounts", actor.WithID("auth"))
 	logger.Info("actors started")

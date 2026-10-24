@@ -3,6 +3,9 @@
 //
 //	GOCHAT_E2E_URL=http://localhost:8080 GOCHAT_E2E_ADMIN=admin \
 //	GOCHAT_E2E_ADMIN_PASSWORD=... GOCHAT_E2E_TEAM=acme go test ./test/e2e/
+//
+// With GOCHAT_E2E_BOOTSTRAP set it first creates the admin and the team on a
+// fresh server, with the server's setup token in GOCHAT_E2E_SETUP_TOKEN.
 package e2e
 
 import (
@@ -40,6 +43,7 @@ var (
 	adminName = os.Getenv("GOCHAT_E2E_ADMIN")
 	adminPass = os.Getenv("GOCHAT_E2E_ADMIN_PASSWORD")
 	teamName  = os.Getenv("GOCHAT_E2E_TEAM")
+	setupKey  = os.Getenv("GOCHAT_E2E_SETUP_TOKEN")
 )
 
 type client struct {
@@ -92,7 +96,8 @@ func (c *client) do(method, path string, body io.Reader, contentType string, htm
 		buf, _ = io.ReadAll(body)
 	}
 	// The sign-in endpoints are rate limited per address, which every client
-	// here shares: wait for the limiter rather than fail.
+	// here shares: wait for the limiter, which says how long, rather than
+	// fail.
 	for attempt := 0; ; attempt++ {
 		if buf != nil {
 			req.Body = io.NopCloser(bytes.NewReader(buf))
@@ -103,8 +108,9 @@ func (c *client) do(method, path string, body io.Reader, contentType string, htm
 		}
 		b, _ := io.ReadAll(res.Body)
 		_ = res.Body.Close()
-		wait, _ := strconv.Atoi(res.Header.Get("Retry-After"))
-		if res.StatusCode != http.StatusTooManyRequests || attempt == 5 || wait > 15 {
+		after := res.Header.Get("Retry-After")
+		wait, _ := strconv.Atoi(after)
+		if res.StatusCode != http.StatusTooManyRequests || after == "" || attempt == 5 || wait > 15 {
 			return res, string(b)
 		}
 		time.Sleep(time.Duration(wait) * time.Second)
@@ -224,6 +230,22 @@ func (s *socket) collect(within time.Duration) []string {
 	}
 }
 
+// closed waits for the server to close the socket.
+func (s *socket) closed(within time.Duration) {
+	s.t.Helper()
+	deadline := time.After(within)
+	for {
+		select {
+		case _, ok := <-s.in:
+			if !ok {
+				return
+			}
+		case <-deadline:
+			s.t.Fatal("the socket is still open")
+		}
+	}
+}
+
 func (s *socket) refuse(within time.Duration, part string) {
 	s.t.Helper()
 	deadline := time.After(within)
@@ -255,16 +277,28 @@ var (
 	photoRe     = regexp.MustCompile(`/photos/([ut])/([0-9a-f-]{36})/([0-9a-f]{16})`)
 	staticCSSRe = regexp.MustCompile(`/static/[0-9a-f]+/app\.css`)
 	pickRe      = regexp.MustCompile(`data-pick="([0-9a-f-]{36})"`)
+	adminUserRe = regexp.MustCompile(`/admin/users/([0-9a-f-]{36})/`)
+	sessionRe   = regexp.MustCompile(`/settings/sessions/([0-9a-f]{24})/revoke`)
 )
 
 // bootstrap sets a fresh server up with the admin and the team the tests use.
 func bootstrap(t *testing.T, admin *client) {
 	t.Helper()
-	admin.get("/signup")
-	res, body := admin.form("/signup", url.Values{
+	if setupKey == "" {
+		t.Fatal("GOCHAT_E2E_SETUP_TOKEN is not set")
+	}
+	if _, page := admin.get("/signup"); !strings.Contains(page, `name="setup_token"`) {
+		t.Fatalf("the first sign-up asks for no setup token: %s", page)
+	}
+	form := url.Values{
 		"username": {adminName}, "display_name": {"Ada Admin"}, "email": {adminName + "@example.test"},
 		"password": {adminPass}, "confirm": {adminPass},
-	})
+	}
+	if res, body := admin.form("/signup", form); res.StatusCode == http.StatusSeeOther || !strings.Contains(body, "the setup token is not correct") {
+		t.Fatalf("the first account was created without the setup token: %d %s", res.StatusCode, body)
+	}
+	form.Set("setup_token", setupKey)
+	res, body := admin.form("/signup", form)
 	if res.StatusCode != http.StatusSeeOther {
 		t.Fatalf("bootstrap sign-up: %d %s", res.StatusCode, body)
 	}
@@ -272,6 +306,43 @@ func bootstrap(t *testing.T, admin *client) {
 	if res.StatusCode != http.StatusSeeOther {
 		t.Fatalf("bootstrap team: %d %s", res.StatusCode, body)
 	}
+}
+
+// join signs a new person up with an invite from admin.
+func join(t *testing.T, admin *client, prefix string) (c *client, name, pass string) {
+	t.Helper()
+	_, body := admin.hx("/t/"+teamName+"/invites", url.Values{})
+	m := inviteRe.FindStringSubmatch(body)
+	if m == nil {
+		t.Fatalf("no invite link in %s", body)
+	}
+	c = newClient(t, prefix)
+	name, pass = prefix+"-"+random(4), "pw-"+random(8)
+	c.get("/signup?invite=" + m[1])
+	if res, body := c.form("/signup", url.Values{
+		"username": {name}, "display_name": {prefix}, "email": {name + "@example.test"},
+		"password": {pass}, "confirm": {pass}, "invite": {m[1]},
+	}); res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("%s's signup: %d %s", prefix, res.StatusCode, body)
+	}
+	return c, name, pass
+}
+
+// adminFind returns the id of the user the admin page finds for login.
+func adminFind(t *testing.T, admin *client, login string) string {
+	t.Helper()
+	_, page := admin.get("/admin/users?q=" + url.QueryEscape(login))
+	m := adminUserRe.FindStringSubmatch(page)
+	if m == nil {
+		t.Fatalf("the admin page did not find %s: %s", login, page)
+	}
+	return m[1]
+}
+
+// signedOut reports whether c's session no longer works.
+func signedOut(c *client) bool {
+	res, _ := c.get("/settings")
+	return res.StatusCode == http.StatusSeeOther && strings.HasPrefix(res.Header.Get("Location"), "/login")
 }
 
 func TestEndToEnd(t *testing.T) {
@@ -1174,6 +1245,162 @@ func TestEndToEnd(t *testing.T) {
 		again.form("/login/mfa", url.Values{"code": {codes[0][1]}})
 		if again.cookie("gochat_session") != "" {
 			t.Fatal("a recovery code worked twice")
+		}
+	})
+
+	// live opens c's socket and waits until it carries c's own posts.
+	live := func(t *testing.T, c *client) *socket {
+		t.Helper()
+		ws, _, err := c.socket(baseURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ws.t = t
+		view(ws, town)
+		word := "here-" + random(4)
+		ws.send(map[string]string{"op": "post", "channel_id": town, "content": word})
+		ws.expect(5*time.Second, word)
+		return ws
+	}
+
+	t.Run("deactivation signs out at once and bars sign-in", func(t *testing.T) {
+		dave, daveName, davePass := join(t, admin, "dave")
+		ws := live(t, dave)
+		daveID := adminFind(t, admin, daveName)
+		deactivate := func(c *client, on string) (*http.Response, string) {
+			return c.hx("/admin/users/"+daveID+"/deactivate", url.Values{"deactivated": {on}})
+		}
+		if res, _ := deactivate(bob, "1"); res.StatusCode != http.StatusNotFound {
+			t.Fatalf("a member deactivated someone: %d", res.StatusCode)
+		}
+		if res, _ := bob.get("/admin/users?q=" + daveName); res.StatusCode != http.StatusNotFound {
+			t.Fatalf("a member opened the admin page: %d", res.StatusCode)
+		}
+		res, card := deactivate(admin, "1")
+		if res.StatusCode != http.StatusOK || !strings.Contains(card, "Reactivate") || !strings.Contains(card, "Not signed in anywhere") {
+			t.Fatalf("deactivate: %d %s", res.StatusCode, card)
+		}
+		ws.expect(5*time.Second, `data-redirect="/login"`)
+		ws.closed(5 * time.Second)
+		if !signedOut(dave) {
+			t.Fatal("a deactivated user's session still works")
+		}
+		if again, _, err := dave.socket(baseURL); err == nil {
+			again.t = t
+			again.expect(5*time.Second, `data-redirect="/login"`)
+		}
+		fresh := newClient(t, "dave2")
+		if res, body := fresh.form("/login", url.Values{"login": {daveName}, "password": {davePass}}); res.StatusCode == http.StatusSeeOther || !strings.Contains(body, "account is deactivated") {
+			t.Fatalf("a deactivated user signed in: %d %s", res.StatusCode, body)
+		}
+		if _, card := deactivate(admin, "0"); !strings.Contains(card, `"deactivated": "1"`) {
+			t.Fatalf("reactivate: %s", card)
+		}
+		fresh.login(daveName, davePass)
+		if _, card := admin.hx("/admin/users/"+adminFind(t, admin, adminName)+"/deactivate", url.Values{"deactivated": {"1"}}); !strings.Contains(card, "cannot deactivate your own account") {
+			t.Fatalf("the admin deactivated themself: %s", card)
+		}
+	})
+
+	t.Run("people see and revoke their sessions", func(t *testing.T) {
+		erin, erinName, erinPass := join(t, admin, "erin")
+		laptop := newClient(t, "erin-laptop")
+		laptop.login(erinName, erinPass)
+		laptopWS := live(t, laptop)
+		_, page := erin.get("/settings")
+		others := sessionRe.FindAllStringSubmatch(page, -1)
+		if len(others) != 1 || !strings.Contains(page, "This device") || !strings.Contains(page, "Go-http-client") {
+			t.Fatalf("sessions on the settings page: %s", page)
+		}
+		res, list := erin.hx("/settings/sessions/"+others[0][1]+"/revoke", url.Values{})
+		if res.StatusCode != http.StatusOK || strings.Contains(list, others[0][1]) || !strings.Contains(list, "Signed out.") {
+			t.Fatalf("revoke a session: %d %s", res.StatusCode, list)
+		}
+		laptopWS.expect(5*time.Second, `data-redirect="/login"`)
+		if !signedOut(laptop) || signedOut(erin) {
+			t.Fatal("the wrong session was signed out")
+		}
+		if _, list := erin.hx("/settings/sessions/"+strings.Repeat("0", 24)+"/revoke", url.Values{}); !strings.Contains(list, "session not found") {
+			t.Fatalf("revoking a session that is not hers: %s", list)
+		}
+
+		phone := newClient(t, "erin-phone")
+		phone.login(erinName, erinPass)
+		if _, list := erin.hx("/settings/sessions/revoke", url.Values{}); !strings.Contains(list, "Every other session was signed out.") {
+			t.Fatalf("sign out the others: %s", list)
+		}
+		if !signedOut(phone) || signedOut(erin) {
+			t.Fatal("signing out the others did not keep only this one")
+		}
+
+		erinWS := live(t, erin)
+		erinID := adminFind(t, admin, erinName)
+		if res, _ := bob.hx("/admin/users/"+erinID+"/sessions/revoke", url.Values{}); res.StatusCode != http.StatusNotFound {
+			t.Fatalf("a member signed someone out: %d", res.StatusCode)
+		}
+		res, card := admin.hx("/admin/users/"+erinID+"/sessions/revoke", url.Values{})
+		if res.StatusCode != http.StatusOK || !strings.Contains(card, "Signed out everywhere.") || !strings.Contains(card, "Not signed in anywhere") {
+			t.Fatalf("admin sign-out: %d %s", res.StatusCode, card)
+		}
+		erinWS.expect(5*time.Second, `data-redirect="/login"`)
+		if !signedOut(erin) {
+			t.Fatal("erin's session survived the admin's sign-out")
+		}
+	})
+
+	t.Run("storage quotas bound uploads", func(t *testing.T) {
+		fay, fayName, _ := join(t, admin, "fay")
+		fayID := adminFind(t, admin, fayName)
+		quota := func(c *client, v url.Values) (*http.Response, string) {
+			return c.hx("/admin/users/"+fayID+"/quota", v)
+		}
+		if res, _ := quota(bob, url.Values{"mib": {"100"}}); res.StatusCode != http.StatusNotFound {
+			t.Fatalf("a member set a quota: %d", res.StatusCode)
+		}
+		if res, card := quota(admin, url.Values{"mib": {"1"}}); res.StatusCode != http.StatusOK || !strings.Contains(card, "Quota saved.") || !strings.Contains(card, "0 B used of 1.0 MB") {
+			t.Fatalf("set a quota: %d %s", res.StatusCode, card)
+		}
+		upload := func(size int) (*http.Response, string) {
+			data := make([]byte, size)
+			_, _ = rand.Read(data)
+			var buf bytes.Buffer
+			mw := multipart.NewWriter(&buf)
+			fw, _ := mw.CreateFormFile("file", "data.bin")
+			_, _ = fw.Write(data)
+			_ = mw.Close()
+			return fay.do(http.MethodPost, "/upload?channel="+town, &buf, mw.FormDataContentType(), true)
+		}
+		res, body := upload(700 << 10)
+		m := attRe.FindStringSubmatch(body)
+		if res.StatusCode != http.StatusOK || m == nil {
+			t.Fatalf("an upload within the quota: %d %s", res.StatusCode, body)
+		}
+		if _, page := fay.get("/settings"); !strings.Contains(page, "700.0 KB used of 1.0 MB") {
+			t.Fatalf("usage on the settings page: %s", page)
+		}
+		if res, _ := upload(700 << 10); res.StatusCode == http.StatusOK || !strings.Contains(res.Header.Get("X-Error"), "not enough storage left") {
+			t.Fatalf("an upload passed the quota: %d %q", res.StatusCode, res.Header.Get("X-Error"))
+		}
+
+		ws := live(t, fay)
+		ws.send(map[string]any{"op": "post", "channel_id": town, "content": "big file", "attachment": m[1]})
+		msg := msgIDRe.FindStringSubmatch(ws.expect(5*time.Second, "/files/"+m[1]))[1]
+		if res, _ := fay.hx("/m/"+town+"/"+msg+"/delete", url.Values{}); res.StatusCode != http.StatusOK {
+			t.Fatalf("delete the message: %d", res.StatusCode)
+		}
+		for deadline := time.Now().Add(8 * time.Second); ; time.Sleep(300 * time.Millisecond) {
+			if _, page := fay.get("/settings"); strings.Contains(page, "0 B used of 1.0 MB") {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("deleting the message did not free its space")
+			}
+		}
+		if res, body := upload(700 << 10); res.StatusCode != http.StatusOK {
+			t.Fatalf("an upload after freeing space: %d %s", res.StatusCode, body)
+		}
+		if _, card := quota(admin, url.Values{"default": {"1"}}); strings.Contains(card, "of 1.0 MB") || !strings.Contains(card, "Quota saved.") {
+			t.Fatalf("back to the default quota: %s", card)
 		}
 	})
 

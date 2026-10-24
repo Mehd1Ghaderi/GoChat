@@ -11,6 +11,9 @@ type Config struct {
 	Workers   int           `mapstructure:"workers"`
 	OpTimeout time.Duration `mapstructure:"op_timeout"`
 	MaxSize   int64         `mapstructure:"max_size"`
+	// Quota bounds the bytes of attachments one user keeps; zero is no
+	// limit. A system admin can give a user another.
+	Quota int64 `mapstructure:"quota"`
 	// MaxVoiceDuration bounds how long a voice message may be, and
 	// MaxVoiceSize how large, below MaxSize, which bounds it too: a
 	// recording that plays in place must stay a recording.
@@ -37,6 +40,9 @@ func (c *Config) Validate() error {
 	}
 	if c.MaxSize < 1024 || c.MaxSize > 5<<30 {
 		return errors.New("max_size must be between 1KiB and 5GiB")
+	}
+	if c.Quota < 0 {
+		return errors.New("quota cannot be negative")
 	}
 	if c.MaxVoiceDuration < time.Second || c.MaxVoiceDuration > time.Hour {
 		return errors.New("max_voice_duration must be between 1s and 1h")

@@ -82,7 +82,10 @@ A channel takes at most 25 people.
   lightweight transactions.
 - **MinIO** stores attachments under `attachments/<channel>/<id>`. Uploads
   stream through the server, which sniffs the content type and enforces the
-  size limit; attachments never posted are deleted by a janitor.
+  size limit and the uploader's quota; attachments never posted are deleted
+  by a janitor. What each person stores is kept as a running total, updated
+  with lightweight transactions as files come and go, so a quota never needs
+  a scan.
 - **Voice messages** are attachments marked as voice. The browser records
   them with `MediaRecorder` and uploads them with their length; the server
   takes them only in channels that allow voice, only up to
@@ -101,7 +104,16 @@ A channel takes at most 25 people.
 - Passwords: argon2id with configurable cost; constant-time paths for unknown
   users; per-account and per-IP sign-in limits.
 - Sessions: 256-bit random tokens, only their SHA-256 is stored; revocation
-  (logout, password change, TOTP change) closes live sockets at once.
+  (logout, password change, TOTP change) closes live sockets at once. Account
+  settings list each session's device, addresses and when it was last seen,
+  and sign any of them out.
+- Administration: system admins find people by username or email at
+  `/admin/users`, deactivate them, which signs them out everywhere and closes
+  their sockets at once, sign out all their sessions, and set their storage
+  quota (`services.files.quota` by default). Deactivated people cannot sign
+  in; an admin cannot deactivate themself.
+- Bootstrap: the first account, which becomes the system admin, needs the
+  setup token unless `services.accounts.allow_open_bootstrap` is set.
 - TOTP: optional per user, secrets sealed with AES-256-GCM bound to the user
   id, codes single-use, ten hashed single-use recovery codes.
 - Invites: one-time, expiring links; only the token hash is stored and it is
@@ -142,7 +154,8 @@ cp .env.template .env
 ```
 
 Fill in `.env`: database and MinIO credentials, a `GATEWAY_KEY` of at least 32
-characters and a `SERVICES_ACCOUNTS_SECRET_KEY` from `openssl rand -base64 32`.
+characters, a `SERVICES_ACCOUNTS_SECRET_KEY` from `openssl rand -base64 32` and
+a `SERVICES_ACCOUNTS_SETUP_TOKEN` from `openssl rand -hex 24`.
 If Docker Hub is not reachable, set `DOCKER_REGISTRY` to a mirror such as
 `mirror.gcr.io/`.
 
@@ -154,11 +167,16 @@ just up
 
 This builds the image, starts Scylla and MinIO on an internal network, applies
 the migrations and starts the server and the web gateway on
-`http://localhost:8080` (`WEB_PORT`). The first account to sign up becomes the
-system admin and is asked to create the first team; everyone else joins through
-invite links (or freely when `services.accounts.open_signup` is on). Set
-`SERVICES_ACCOUNTS_SETUP_TOKEN` to require a token for that first account when
-the server is reachable by others before you set it up.
+`http://localhost:8080` (`WEB_PORT`). The first account to sign up, with the
+setup token, becomes the system admin and is asked to create the first team;
+everyone else joins through invite links (or freely when
+`services.accounts.open_signup` is on).
+
+Without a setup token the server refuses to create that first account, and
+says so in its log and on the sign-up page: whoever reached it first would
+own it. On a machine nobody else can reach, `services.accounts.allow_open_bootstrap`
+(`SERVICES_ACCOUNTS_ALLOW_OPEN_BOOTSTRAP` for host runs) lets the first sign-up
+become the admin without one.
 
 ### Running the binaries on the host
 
@@ -342,7 +360,7 @@ Secrets that should come from the environment:
 | `SERVER_DRPC_GATEWAY_KEY` / `CLIENT_DRPC_GATEWAY_KEY` | server / web and voice (same value) |
 | `VOICE_ICE_TURN_SECRET` (optional) | voice |
 | `SERVICES_ACCOUNTS_SECRET_KEY` | server |
-| `SERVICES_ACCOUNTS_SETUP_TOKEN` (optional) | server |
+| `SERVICES_ACCOUNTS_SETUP_TOKEN` (until the first account exists) | server |
 
 Set `web.public_url` to the origin browsers use; an `https` origin turns on
 `Secure` cookies and HSTS. Behind a reverse proxy, list its addresses in
@@ -361,8 +379,10 @@ just test
 The end-to-end suite in [test/e2e](test/e2e) drives a running stack through the
 web gateway: invites, real-time delivery, typing, attachments, voice messages
 and their channel setting, voice channels (with Pion peers that talk through
-the voice server), private channel isolation, CSRF, TOTP with recovery codes and session revocation. It needs an
-existing admin account and team:
+the voice server), private channel isolation, CSRF, TOTP with recovery codes,
+session revocation, deactivation and storage quotas. It needs an existing
+admin account and team, or with `GOCHAT_E2E_BOOTSTRAP=1` and the server's
+token in `GOCHAT_E2E_SETUP_TOKEN` creates them on a fresh server:
 
 ```bash
 GOCHAT_E2E_URL=http://localhost:8080 GOCHAT_E2E_ADMIN=admin GOCHAT_E2E_ADMIN_PASSWORD=... GOCHAT_E2E_TEAM=acme go test ./test/e2e -count=1

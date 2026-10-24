@@ -130,6 +130,12 @@ func nullable(s string) *string {
 	return &s
 }
 
+// SetDeactivated deactivates or reactivates a user.
+func (r *Repository) SetDeactivated(ctx context.Context, id gocql.UUID, deactivated bool, now time.Time) error {
+	_, err := r.query(ctx, "UPDATE users SET deactivated = ?, updated_at = ? WHERE id = ? IF EXISTS", deactivated, now, id).ExecCASRelease()
+	return wrap(err)
+}
+
 func (r *Repository) UpdatePassword(ctx context.Context, id gocql.UUID, hash string, now time.Time) error {
 	return wrap(r.query(ctx, "UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?", hash, now, id).ExecRelease())
 }

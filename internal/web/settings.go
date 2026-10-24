@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"image/png"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/pquerna/otp"
@@ -16,8 +17,19 @@ import (
 
 type settingsData struct {
 	Page
-	Email string
+	Email    string
+	Sessions sessionsData
+	Storage  *pb.GetStorageUsageResponse
 }
+
+type sessionsData struct {
+	List []*pb.SessionInfo
+	// Others is set when a session other than the current one is listed.
+	Others        bool
+	Status, Error string
+}
+
+var sessionIDRe = regexp.MustCompile(`^[0-9a-f]{24}$`)
 
 type totpData struct {
 	User  *pb.User
@@ -42,10 +54,74 @@ func (h *Handler) settingsPage(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
+	sessions, err := h.client.Auth.ListSessions(ctx, &pb.ListSessionsRequest{})
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	storage, err := h.client.Files.GetStorageUsage(ctx, &pb.GetStorageUsageRequest{})
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
 	h.page(w, r, http.StatusOK, "settings", settingsData{
-		Page:  Page{Title: "Settings", CSRF: h.csrfToken(w, r), User: me.User},
-		Email: me.Email,
+		Page:     Page{Title: "Settings", CSRF: h.csrfToken(w, r), User: me.User},
+		Email:    me.Email,
+		Sessions: listed(sessions.Sessions),
+		Storage:  storage,
 	})
+}
+
+func listed(list []*pb.SessionInfo) sessionsData {
+	d := sessionsData{List: list}
+	for _, s := range list {
+		d.Others = d.Others || !s.Current
+	}
+	return d
+}
+
+// sessionsFragment answers with the caller's sessions, and with what became
+// of a change to them.
+func (h *Handler) sessionsFragment(w http.ResponseWriter, r *http.Request, err error, ok string) {
+	ctx, cancel := h.ctx(r)
+	defer cancel()
+	res, lerr := h.client.Auth.ListSessions(ctx, &pb.ListSessionsRequest{})
+	if lerr != nil {
+		h.fail(w, r, lerr)
+		return
+	}
+	d := listed(res.Sessions)
+	if err != nil {
+		d.Error = drpc.Err(err).Message
+	} else {
+		d.Status = ok
+	}
+	h.fragment(w, http.StatusOK, "sessions", d)
+}
+
+func (h *Handler) revokeSession(w http.ResponseWriter, r *http.Request) {
+	if h.signedIn(w, r) == nil {
+		return
+	}
+	id := r.PathValue("id")
+	if !sessionIDRe.MatchString(id) {
+		h.notFound(w, r)
+		return
+	}
+	ctx, cancel := h.ctx(r)
+	defer cancel()
+	_, err := h.client.Auth.RevokeSession(ctx, &pb.RevokeSessionRequest{SessionId: id})
+	h.sessionsFragment(w, r, err, "Signed out.")
+}
+
+func (h *Handler) revokeOtherSessions(w http.ResponseWriter, r *http.Request) {
+	if h.signedIn(w, r) == nil {
+		return
+	}
+	ctx, cancel := h.ctx(r)
+	defer cancel()
+	_, err := h.client.Auth.RevokeSessions(ctx, &pb.RevokeSessionsRequest{})
+	h.sessionsFragment(w, r, err, "Every other session was signed out.")
 }
 
 func (h *Handler) status(w http.ResponseWriter, err error, ok string) {

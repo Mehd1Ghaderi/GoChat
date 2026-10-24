@@ -4,6 +4,7 @@ package hub
 
 import (
 	"errors"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -76,9 +77,12 @@ type Deliver struct {
 
 type Broadcast struct{ Event *pb.Event }
 
+// RevokeSessions closes the connections of SessionIDs, or with All every
+// connection of UserID.
 type RevokeSessions struct {
 	UserID     string
 	SessionIDs []string
+	All        bool
 }
 
 // Online replies with the users among UserIDs who are not offline, and
@@ -366,6 +370,22 @@ func shallowEvent(e *pb.Event) *pb.Event {
 }
 
 func (h *hub) revoke(c *actor.Context, msg RevokeSessions) {
+	if msg.All {
+		msg.SessionIDs = slices.Clone(msg.SessionIDs)
+		for gwID := range h.online[msg.UserID] {
+			gw := h.gateways[gwID]
+			if gw == nil {
+				continue
+			}
+			for _, cn := range gw.conns {
+				if cn.userID == msg.UserID {
+					msg.SessionIDs = append(msg.SessionIDs, cn.sessionID)
+				}
+			}
+		}
+		slices.Sort(msg.SessionIDs)
+		msg.SessionIDs = slices.Compact(msg.SessionIDs)
+	}
 	if len(msg.SessionIDs) == 0 {
 		return
 	}

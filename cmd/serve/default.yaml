@@ -79,14 +79,19 @@ services:
     session_ttl: 720h
     session_cache_ttl: 1m
     session_cache_size: 100000
+    # How often a session in use records when and where it was last seen.
+    last_seen_interval: 5m
     mfa_ttl: 5m
     mfa_max_attempts: 5
     totp_issuer: GoChat
     # Seals TOTP secrets at rest: 32 random bytes, base64.
     secret_key: ""
     open_signup: false
-    # When set, creating the first (admin) account requires this token.
+    # Creating the first (admin) account requires this token. Without one,
+    # no account can be created at all, unless allow_open_bootstrap lets
+    # whoever signs up first become the admin.
     setup_token: ""
+    allow_open_bootstrap: false
     login_failures: 10
     login_window: 15m
   directory:
@@ -107,6 +112,9 @@ services:
     workers: 8
     op_timeout: 30s
     max_size: 52428800
+    # Bytes of attachments each person may keep, 0 for no limit. A system
+    # admin can give someone another quota.
+    quota: 1073741824
     max_voice_duration: 10m
     max_voice_size: 16777216
     max_uploads: 64

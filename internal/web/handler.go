@@ -181,6 +181,13 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("POST /settings/totp/begin", h.csrf(http.HandlerFunc(h.beginTOTP)))
 	mux.Handle("POST /settings/totp/confirm", h.csrf(http.HandlerFunc(h.confirmTOTP)))
 	mux.Handle("POST /settings/totp/disable", h.csrf(http.HandlerFunc(h.disableTOTP)))
+	mux.Handle("POST /settings/sessions/{id}/revoke", h.csrf(http.HandlerFunc(h.revokeSession)))
+	mux.Handle("POST /settings/sessions/revoke", h.csrf(http.HandlerFunc(h.revokeOtherSessions)))
+
+	mux.HandleFunc("GET /admin/users", h.adminUsers)
+	mux.Handle("POST /admin/users/{user}/deactivate", h.csrf(http.HandlerFunc(h.adminDeactivate)))
+	mux.Handle("POST /admin/users/{user}/sessions/revoke", h.csrf(http.HandlerFunc(h.adminRevokeSessions)))
+	mux.Handle("POST /admin/users/{user}/quota", h.csrf(http.HandlerFunc(h.adminQuota)))
 
 	mux.HandleFunc("GET /ws", h.websocket)
 

@@ -118,10 +118,12 @@ type (
 	// TeamChanged says someone joined the team, who should hear of its
 	// voice channels from now on.
 	TeamChanged struct{ TeamID gocql.UUID }
-	// RevokeSessions disconnects whoever joined from a revoked session.
+	// RevokeSessions disconnects whoever joined from a revoked session, or
+	// with All from any of the user's.
 	RevokeSessions struct {
 		UserID     gocql.UUID
 		SessionIDs []string
+		All        bool
 	}
 )
 
@@ -260,7 +262,7 @@ func (v *voice) Receive(c *actor.Context) {
 			v.remove(st, "removed from the team")
 		}
 	case RevokeSessions:
-		if st := v.states[msg.UserID]; st != nil && slices.Contains(msg.SessionIDs, st.gwSession) {
+		if st := v.states[msg.UserID]; st != nil && (msg.All || slices.Contains(msg.SessionIDs, st.gwSession)) {
 			v.remove(st, "signed out")
 		}
 	case ServerUp:

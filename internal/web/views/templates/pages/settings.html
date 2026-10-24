@@ -33,5 +33,19 @@
   <section class="card" id="totp">
     {{template "totp" .}}
   </section>
+  <section class="card" id="sessions">
+    {{template "sessions" .Sessions}}
+  </section>
+  <section class="card">
+    <h2>Storage</h2>
+    <p class="muted">What the files you attached take. Deleting their messages frees it.</p>
+    {{template "storage" .Storage}}
+  </section>
+  {{if isSystemAdmin .User}}
+  <section class="card">
+    <h2>Administration</h2>
+    <p><a class="btn" href="/admin/users">Manage users</a></p>
+  </section>
+  {{end}}
 </main>
 {{end}}

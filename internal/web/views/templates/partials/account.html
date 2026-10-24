@@ -1,0 +1,55 @@
+{{define "session-meta"}}
+<div class="meta">
+  <span><strong title="{{.UserAgent}}">{{device .UserAgent}}</strong>{{if .Current}} <span class="badge on">This device</span>{{end}}</span>
+  <small class="muted">{{if .LastIp}}{{.LastIp}}{{else}}{{.Ip}}{{end}} · {{if .Current}}active now{{else}}last seen {{with .LastSeenAt}}{{date .AsTime}}, {{clock .AsTime}} UTC{{else}}never{{end}}{{end}}</small>
+  <small class="muted">Signed in {{date .CreatedAt.AsTime}}{{if and .LastIp (ne .LastIp .Ip)}} from {{.Ip}}{{end}}</small>
+</div>
+{{end}}
+
+{{define "sessions"}}
+<h2>Sessions</h2>
+<p class="muted">Where you are signed in. Sign out any you do not recognize, then change your password.</p>
+{{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
+{{with .Status}}<p class="status ok" role="status">{{.}}</p>{{end}}
+<ul class="list">
+  {{range .List}}
+  <li>
+    {{template "session-meta" .}}
+    {{if not .Current}}<button class="btn sm danger" hx-post="/settings/sessions/{{.Id}}/revoke" hx-target="#sessions" hx-confirm="Sign this session out?">Sign out</button>{{end}}
+  </li>
+  {{end}}
+</ul>
+{{if .Others}}<div class="row"><button class="btn danger" hx-post="/settings/sessions/revoke" hx-target="#sessions" hx-confirm="Sign out every other session?">Sign out all other sessions</button></div>{{end}}
+{{end}}
+
+{{define "storage"}}
+<p>{{size .Used}} used{{if .Quota}} of {{size .Quota}}{{end}}{{if .Custom}} <small class="muted">(set by an admin)</small>{{end}}.</p>
+{{if .Quota}}<progress class="usage" max="{{.Quota}}" value="{{.Used}}" aria-label="Storage used"></progress>{{end}}
+{{end}}
+
+{{define "admin-user"}}
+<section class="card" id="admin-user">
+  {{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
+  {{with .Status}}<p class="status ok" role="status">{{.}}</p>{{end}}
+  <div class="person">{{template "avatar" (dict "User" .User "Size" "sm")}}<span><strong>{{name .User}}</strong> <small class="muted">@{{.User.Username}} · {{.Email}}{{if isSystemAdmin .User}} · system admin{{end}}</small></span></div>
+  {{if .User.Deactivated}}<p><span class="badge">Deactivated</span> Cannot sign in.</p>{{else}}<p><span class="badge on">Active</span> Joined {{date .User.CreatedAt.AsTime}}.</p>{{end}}
+  {{if not .Self}}
+  <div class="row">
+    {{if .User.Deactivated}}<button class="btn" hx-post="/admin/users/{{.User.Id}}/deactivate" hx-vals='{"deactivated": "0"}' hx-target="#admin-user" hx-swap="outerHTML">Reactivate</button>
+    {{else}}<button class="btn danger" hx-post="/admin/users/{{.User.Id}}/deactivate" hx-vals='{"deactivated": "1"}' hx-target="#admin-user" hx-swap="outerHTML" hx-confirm="Deactivate {{name .User}}? They are signed out everywhere at once and cannot sign in.">Deactivate</button>{{end}}
+  </div>
+  {{end}}
+  <h3 class="subhead">Sessions</h3>
+  {{if .Sessions}}
+  <ul class="list">{{range .Sessions}}<li>{{template "session-meta" .}}</li>{{end}}</ul>
+  <div class="row"><button class="btn danger" hx-post="/admin/users/{{.User.Id}}/sessions/revoke" hx-target="#admin-user" hx-swap="outerHTML" hx-confirm="Sign {{name .User}} out everywhere?">Sign out everywhere</button></div>
+  {{else}}<p class="muted">Not signed in anywhere.</p>{{end}}
+  <h3 class="subhead">Storage</h3>
+  {{template "storage" .Storage}}
+  <form class="row" hx-post="/admin/users/{{.User.Id}}/quota" hx-target="#admin-user" hx-swap="outerHTML">
+    <label class="row">Quota in MiB<input name="mib" type="number" min="1" max="1073741824" required value="{{mib .Storage.Quota}}"></label>
+    <button class="btn" type="submit">Set quota</button>
+    {{if .Storage.Custom}}<button class="btn" type="button" hx-post="/admin/users/{{.User.Id}}/quota" hx-vals='{"default": "1"}' hx-target="#admin-user" hx-swap="outerHTML">Use the default</button>{{end}}
+  </form>
+</section>
+{{end}}

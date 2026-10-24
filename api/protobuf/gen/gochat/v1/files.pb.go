@@ -495,6 +495,113 @@ func (x *GetPhotoResponse) GetVersion() string {
 	return ""
 }
 
+type GetStorageUsageRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Empty for the caller.
+	UserId        string `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetStorageUsageRequest) Reset() {
+	*x = GetStorageUsageRequest{}
+	mi := &file_gochat_v1_files_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetStorageUsageRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetStorageUsageRequest) ProtoMessage() {}
+
+func (x *GetStorageUsageRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_files_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetStorageUsageRequest.ProtoReflect.Descriptor instead.
+func (*GetStorageUsageRequest) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_files_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *GetStorageUsageRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+type GetStorageUsageResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Used  int64                  `protobuf:"varint,1,opt,name=used,proto3" json:"used,omitempty"`
+	// Zero when there is no limit.
+	Quota int64 `protobuf:"varint,2,opt,name=quota,proto3" json:"quota,omitempty"`
+	// The user has a quota of their own rather than the server's default.
+	Custom        bool `protobuf:"varint,3,opt,name=custom,proto3" json:"custom,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetStorageUsageResponse) Reset() {
+	*x = GetStorageUsageResponse{}
+	mi := &file_gochat_v1_files_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetStorageUsageResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetStorageUsageResponse) ProtoMessage() {}
+
+func (x *GetStorageUsageResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_files_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetStorageUsageResponse.ProtoReflect.Descriptor instead.
+func (*GetStorageUsageResponse) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_files_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *GetStorageUsageResponse) GetUsed() int64 {
+	if x != nil {
+		return x.Used
+	}
+	return 0
+}
+
+func (x *GetStorageUsageResponse) GetQuota() int64 {
+	if x != nil {
+		return x.Quota
+	}
+	return 0
+}
+
+func (x *GetStorageUsageResponse) GetCustom() bool {
+	if x != nil {
+		return x.Custom
+	}
+	return false
+}
+
 var File_gochat_v1_files_proto protoreflect.FileDescriptor
 
 const file_gochat_v1_files_proto_rawDesc = "" +
@@ -529,11 +636,18 @@ const file_gochat_v1_files_proto_rawDesc = "" +
 	"\x10GetPhotoResponse\x12\x14\n" +
 	"\x05image\x18\x01 \x01(\fR\x05image\x12!\n" +
 	"\fcontent_type\x18\x02 \x01(\tR\vcontentType\x12\x18\n" +
-	"\aversion\x18\x03 \x01(\tR\aversion2\xda\x01\n" +
+	"\aversion\x18\x03 \x01(\tR\aversion\"1\n" +
+	"\x16GetStorageUsageRequest\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\"[\n" +
+	"\x17GetStorageUsageResponse\x12\x12\n" +
+	"\x04used\x18\x01 \x01(\x03R\x04used\x12\x14\n" +
+	"\x05quota\x18\x02 \x01(\x03R\x05quota\x12\x16\n" +
+	"\x06custom\x18\x03 \x01(\bR\x06custom2\xb4\x02\n" +
 	"\vFileService\x12?\n" +
 	"\x06Upload\x12\x18.gochat.v1.UploadRequest\x1a\x19.gochat.v1.UploadResponse(\x01\x12E\n" +
 	"\bDownload\x12\x1a.gochat.v1.DownloadRequest\x1a\x1b.gochat.v1.DownloadResponse0\x01\x12C\n" +
-	"\bGetPhoto\x12\x1a.gochat.v1.GetPhotoRequest\x1a\x1b.gochat.v1.GetPhotoResponseB\x9f\x01\n" +
+	"\bGetPhoto\x12\x1a.gochat.v1.GetPhotoRequest\x1a\x1b.gochat.v1.GetPhotoResponse\x12X\n" +
+	"\x0fGetStorageUsage\x12!.gochat.v1.GetStorageUsageRequest\x1a\".gochat.v1.GetStorageUsageResponseB\x9f\x01\n" +
 	"\rcom.gochat.v1B\n" +
 	"FilesProtoP\x01Z=github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1;gochatv1\xa2\x02\x03GXX\xaa\x02\tGochat.V1\xca\x02\tGochat\\V1\xe2\x02\x15Gochat\\V1\\GPBMetadata\xea\x02\n" +
 	"Gochat::V1b\x06proto3"
@@ -550,29 +664,33 @@ func file_gochat_v1_files_proto_rawDescGZIP() []byte {
 	return file_gochat_v1_files_proto_rawDescData
 }
 
-var file_gochat_v1_files_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_gochat_v1_files_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_gochat_v1_files_proto_goTypes = []any{
-	(*UploadHeader)(nil),     // 0: gochat.v1.UploadHeader
-	(*UploadRequest)(nil),    // 1: gochat.v1.UploadRequest
-	(*UploadResponse)(nil),   // 2: gochat.v1.UploadResponse
-	(*DownloadRequest)(nil),  // 3: gochat.v1.DownloadRequest
-	(*DownloadResponse)(nil), // 4: gochat.v1.DownloadResponse
-	(*GetPhotoRequest)(nil),  // 5: gochat.v1.GetPhotoRequest
-	(*GetPhotoResponse)(nil), // 6: gochat.v1.GetPhotoResponse
-	(*Attachment)(nil),       // 7: gochat.v1.Attachment
+	(*UploadHeader)(nil),            // 0: gochat.v1.UploadHeader
+	(*UploadRequest)(nil),           // 1: gochat.v1.UploadRequest
+	(*UploadResponse)(nil),          // 2: gochat.v1.UploadResponse
+	(*DownloadRequest)(nil),         // 3: gochat.v1.DownloadRequest
+	(*DownloadResponse)(nil),        // 4: gochat.v1.DownloadResponse
+	(*GetPhotoRequest)(nil),         // 5: gochat.v1.GetPhotoRequest
+	(*GetPhotoResponse)(nil),        // 6: gochat.v1.GetPhotoResponse
+	(*GetStorageUsageRequest)(nil),  // 7: gochat.v1.GetStorageUsageRequest
+	(*GetStorageUsageResponse)(nil), // 8: gochat.v1.GetStorageUsageResponse
+	(*Attachment)(nil),              // 9: gochat.v1.Attachment
 }
 var file_gochat_v1_files_proto_depIdxs = []int32{
 	0, // 0: gochat.v1.UploadRequest.header:type_name -> gochat.v1.UploadHeader
-	7, // 1: gochat.v1.UploadResponse.attachment:type_name -> gochat.v1.Attachment
-	7, // 2: gochat.v1.DownloadResponse.header:type_name -> gochat.v1.Attachment
+	9, // 1: gochat.v1.UploadResponse.attachment:type_name -> gochat.v1.Attachment
+	9, // 2: gochat.v1.DownloadResponse.header:type_name -> gochat.v1.Attachment
 	1, // 3: gochat.v1.FileService.Upload:input_type -> gochat.v1.UploadRequest
 	3, // 4: gochat.v1.FileService.Download:input_type -> gochat.v1.DownloadRequest
 	5, // 5: gochat.v1.FileService.GetPhoto:input_type -> gochat.v1.GetPhotoRequest
-	2, // 6: gochat.v1.FileService.Upload:output_type -> gochat.v1.UploadResponse
-	4, // 7: gochat.v1.FileService.Download:output_type -> gochat.v1.DownloadResponse
-	6, // 8: gochat.v1.FileService.GetPhoto:output_type -> gochat.v1.GetPhotoResponse
-	6, // [6:9] is the sub-list for method output_type
-	3, // [3:6] is the sub-list for method input_type
+	7, // 6: gochat.v1.FileService.GetStorageUsage:input_type -> gochat.v1.GetStorageUsageRequest
+	2, // 7: gochat.v1.FileService.Upload:output_type -> gochat.v1.UploadResponse
+	4, // 8: gochat.v1.FileService.Download:output_type -> gochat.v1.DownloadResponse
+	6, // 9: gochat.v1.FileService.GetPhoto:output_type -> gochat.v1.GetPhotoResponse
+	8, // 10: gochat.v1.FileService.GetStorageUsage:output_type -> gochat.v1.GetStorageUsageResponse
+	7, // [7:11] is the sub-list for method output_type
+	3, // [3:7] is the sub-list for method input_type
 	3, // [3:3] is the sub-list for extension type_name
 	3, // [3:3] is the sub-list for extension extendee
 	0, // [0:3] is the sub-list for field type_name
@@ -602,7 +720,7 @@ func file_gochat_v1_files_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gochat_v1_files_proto_rawDesc), len(file_gochat_v1_files_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
