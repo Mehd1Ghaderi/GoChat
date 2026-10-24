@@ -27,7 +27,7 @@
 {{define "hit"}}
 <a class="hit" href="{{.URL}}" hx-get="{{.URL}}" hx-target="#main" hx-push-url="true">
   <span class="hit-where">
-    {{if isDirect .Channel}}{{icon "members"}}{{else if isPrivate .Channel}}{{icon "lock"}}{{else}}{{icon "hash"}}{{end}}
+    {{if isConversation .Channel}}{{icon "members"}}{{else if isPrivate .Channel}}{{icon "lock"}}{{else}}{{icon "hash"}}{{end}}
     <span class="hit-channel">{{.Where}}</span>{{if .Message.RootId}}<span class="hit-thread">{{icon "reply"}}In a thread</span>{{end}}
   </span>
   <span class="hit-body">

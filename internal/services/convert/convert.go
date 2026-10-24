@@ -75,6 +75,8 @@ func ChannelType(k models.ChannelKind) pb.ChannelType {
 		return pb.ChannelType_CHANNEL_TYPE_PRIVATE
 	case models.ChannelDirect:
 		return pb.ChannelType_CHANNEL_TYPE_DIRECT
+	case models.ChannelGroup:
+		return pb.ChannelType_CHANNEL_TYPE_GROUP
 	default:
 		return pb.ChannelType_CHANNEL_TYPE_UNSPECIFIED
 	}
@@ -162,8 +164,25 @@ func Message(m *models.Message, author *pb.User, atts []*models.Attachment) *pb.
 	return out
 }
 
-// PeerIDs returns the other people of a direct conversation, whose name
-// lists its members' ids.
+// Conversation renders ch as self sees it, naming the others of a direct
+// or group conversation from people, which holds them.
+func Conversation(ch *models.Channel, role models.ChannelRole, lastRead, self gocql.UUID, people map[gocql.UUID]*models.User) *pb.Channel {
+	out := Channel(ch, role, lastRead, nil)
+	for _, id := range PeerIDs(ch, self) {
+		if u := PublicUser(people[id]); u != nil {
+			switch ch.Kind {
+			case models.ChannelDirect:
+				out.Peer = u
+			case models.ChannelGroup:
+				out.Peers = append(out.Peers, u)
+			}
+		}
+	}
+	return out
+}
+
+// PeerIDs returns the other people of a conversation, whose name lists its
+// members' ids.
 func PeerIDs(ch *models.Channel, self gocql.UUID) []gocql.UUID {
 	var out []gocql.UUID
 	for _, raw := range strings.Split(ch.Name, ":") {

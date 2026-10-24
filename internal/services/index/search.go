@@ -488,13 +488,7 @@ func (s *searcher) hits(ctx context.Context, found []*models.Message, self gocql
 	}
 	views := make(map[gocql.UUID]*pb.Channel, len(chans))
 	for _, ch := range chans {
-		var peer *pb.User
-		if ch.Kind == models.ChannelDirect {
-			if p := convert.PeerIDs(ch, self); len(p) > 0 {
-				peer = convert.PublicUser(people[p[0]])
-			}
-		}
-		views[ch.ID] = convert.Channel(ch, "", gocql.UUID{}, peer)
+		views[ch.ID] = convert.Conversation(ch, "", gocql.UUID{}, self, people)
 	}
 	out := make([]*pb.SearchHit, 0, len(found))
 	for _, m := range found {

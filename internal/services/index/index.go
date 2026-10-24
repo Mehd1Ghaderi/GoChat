@@ -74,9 +74,9 @@ type (
 type filed interface{ id() gocql.UUID }
 
 // Scopes are where a channel's messages are filed: its team, or each person
-// of a direct conversation.
+// of a conversation.
 func Scopes(ch *models.Channel, members []gocql.UUID) []gocql.UUID {
-	if ch.Kind == models.ChannelDirect {
+	if ch.Kind.Conversation() {
 		return members
 	}
 	return []gocql.UUID{ch.TeamID}

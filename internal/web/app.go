@@ -137,7 +137,7 @@ func (h *Handler) defaultChannel(ctx context.Context, team *pb.Team) (string, er
 	}
 	var first string
 	for _, ch := range res.Channels {
-		if ch.Type == pb.ChannelType_CHANNEL_TYPE_DIRECT {
+		if render.Conversation(ch) {
 			continue
 		}
 		if ch.Name == defaultChannel {
@@ -563,10 +563,7 @@ func (h *Handler) peopleModal(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "people", peopleData{
-		Heading: "Message someone", SearchURL: "/t/" + team.Name + "/people/search",
-		ActionURL: "/t/" + team.Name + "/dm", ActionLabel: "Message", Members: members,
-	})
+	h.fragment(w, http.StatusOK, "dm-picker", peopleData{SearchURL: "/t/" + team.Name + "/people/search", ActionURL: "/t/" + team.Name + "/dm", Members: members})
 }
 
 func (h *Handler) peopleSearch(w http.ResponseWriter, r *http.Request) {
@@ -580,16 +577,27 @@ func (h *Handler) peopleSearch(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "people-results", peopleData{ActionURL: "/t/" + team.Name + "/dm", ActionLabel: "Message", Members: members})
+	h.fragment(w, http.StatusOK, "dm-results", peopleData{Members: members})
 }
 
+// maxPicked bounds the people a conversation is started with.
+const maxPicked = 7
+
+// openDirect opens the conversation with the people picked: one for a
+// direct message, more for a group.
 func (h *Handler) openDirect(w http.ResponseWriter, r *http.Request) {
 	_, team, ctx, cancel := h.teamFor(w, r)
 	if team == nil {
 		return
 	}
 	defer cancel()
-	res, err := h.client.Channels.OpenDirectChannel(ctx, &pb.OpenDirectChannelRequest{UserId: r.PostFormValue("user_id")})
+	_ = r.ParseForm()
+	picked := r.PostForm["user_id"]
+	if len(picked) == 0 || len(picked) > maxPicked {
+		h.fail(w, r, ierrors.InvalidArgument("pick one to seven people"))
+		return
+	}
+	res, err := h.client.Channels.OpenGroupChannel(ctx, &pb.OpenGroupChannelRequest{UserIds: picked})
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -781,8 +789,8 @@ func (h *Handler) renderChannelMembers(w http.ResponseWriter, r *http.Request, c
 	}
 	h.fragment(w, http.StatusOK, "channel-members", channelMembersData{
 		Team: team, ChannelID: chID, Members: members,
-		CanAdd:    ch.Type != pb.ChannelType_CHANNEL_TYPE_DIRECT,
-		CanRemove: ch.Type != pb.ChannelType_CHANNEL_TYPE_DIRECT && moderator(u, team, ch),
+		CanAdd:    !render.Conversation(ch),
+		CanRemove: !render.Conversation(ch) && moderator(u, team, ch),
 	})
 }
 
@@ -1097,7 +1105,7 @@ func (h *Handler) mentionSuggestions(w http.ResponseWriter, r *http.Request) {
 			items = append(items, suggestion{Name: u.Username, User: u})
 		}
 	}
-	if ch.Type != pb.ChannelType_CHANNEL_TYPE_DIRECT {
+	if !render.Conversation(ch) {
 		for _, e := range everyone {
 			if strings.HasPrefix(e.Name, q) && len(items) < maxSuggestions {
 				items = append(items, e)

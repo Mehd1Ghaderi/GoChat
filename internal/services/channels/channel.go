@@ -223,7 +223,7 @@ func (a *channel) member(p *models.Principal) (models.ChannelRole, error) {
 }
 
 func (a *channel) teamRole(ctx context.Context, userID gocql.UUID) (models.TeamRole, error) {
-	if a.ch.Kind == models.ChannelDirect {
+	if a.ch.Kind.Conversation() {
 		return "", nil
 	}
 	tm, err := a.Repo.GetTeamMember(ctx, a.ch.TeamID, userID)
@@ -281,21 +281,16 @@ func (a *channel) mute(msg Mute) (Done, error) {
 
 // channelFor renders the channel as userID sees it.
 func (a *channel) channelFor(userID gocql.UUID, role models.ChannelRole) (*pb.Channel, error) {
-	var peer *pb.User
-	if a.ch.Kind == models.ChannelDirect {
-		for id := range a.members {
-			if id != userID {
-				ctx, cancel := a.ctx()
-				u, err := a.Users.Get(ctx, id)
-				cancel()
-				if err != nil {
-					return nil, err
-				}
-				peer = convert.PublicUser(u)
-			}
-		}
+	if !a.ch.Kind.Conversation() {
+		return convert.Channel(a.ch, role, gocql.UUID{}, nil), nil
 	}
-	return convert.Channel(a.ch, role, gocql.UUID{}, peer), nil
+	ctx, cancel := a.ctx()
+	defer cancel()
+	people, err := a.Users.GetMany(ctx, convert.PeerIDs(a.ch, userID))
+	if err != nil {
+		return nil, err
+	}
+	return convert.Conversation(a.ch, role, gocql.UUID{}, userID, people), nil
 }
 
 func (a *channel) poster(userID gocql.UUID) *rate.Limiter {
@@ -434,11 +429,11 @@ func (a *channel) file(msg any) {
 }
 
 // recordMentions notes, off the actor, whom m calls out: named members,
-// everyone for @channel, those online for @here, and the other person of a
-// direct conversation.
+// everyone for @channel, those online for @here, and the others of a
+// conversation.
 func (a *channel) recordMentions(m *models.Message) {
 	found := mention.Parse(m.Content)
-	direct := a.ch.Kind == models.ChannelDirect
+	direct := a.ch.Kind.Conversation()
 	if !direct && len(found.Usernames) == 0 && !found.Channel && !found.Here {
 		return
 	}
@@ -1148,8 +1143,8 @@ func (a *channel) leave(msg Leave) (Done, error) {
 	if _, err := a.member(msg.P); err != nil {
 		return Done{}, err
 	}
-	if a.ch.Kind == models.ChannelDirect {
-		return Done{}, ierrors.FailedPrecondition("direct conversations cannot be left")
+	if a.ch.Kind.Conversation() {
+		return Done{}, ierrors.FailedPrecondition("conversations cannot be left")
 	}
 	if a.ch.Name == DefaultChannel {
 		return Done{}, ierrors.FailedPrecondition("every team member stays in this channel")
@@ -1168,8 +1163,8 @@ func (a *channel) addMember(msg AddMember) (Done, error) {
 	if err != nil {
 		return Done{}, err
 	}
-	if a.ch.Kind == models.ChannelDirect {
-		return Done{}, ierrors.FailedPrecondition("direct conversations have two members")
+	if a.ch.Kind.Conversation() {
+		return Done{}, ierrors.FailedPrecondition("a conversation keeps the people it started with")
 	}
 	if !a.Authz.Can(authz.ObjChannelMember, authz.ActAdd, string(role), string(msg.P.Role)) {
 		return Done{}, ierrors.PermissionDenied()
@@ -1206,8 +1201,8 @@ func (a *channel) removeMember(msg RemoveMember) (Done, error) {
 		}
 		return Done{}, ierrors.NotFound("not a member")
 	}
-	if a.ch.Kind == models.ChannelDirect && !msg.System {
-		return Done{}, ierrors.FailedPrecondition("direct conversations have two members")
+	if a.ch.Kind.Conversation() && !msg.System {
+		return Done{}, ierrors.FailedPrecondition("a conversation keeps the people it started with")
 	}
 	ctx, cancel := a.ctx()
 	defer cancel()

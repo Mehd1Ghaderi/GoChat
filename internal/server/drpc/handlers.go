@@ -500,6 +500,21 @@ func (s *channelService) OpenDirectChannel(ctx context.Context, req *pb.OpenDire
 	return &pb.OpenDirectChannelResponse{Channel: ch}, nil
 }
 
+func (s *channelService) OpenGroupChannel(ctx context.Context, req *pb.OpenGroupChannelRequest) (*pb.OpenGroupChannelResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(req.UserIds) > 16 {
+		return nil, ierrors.InvalidArgument("too many people")
+	}
+	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Directory, directory.OpenGroup{P: p, UserIDs: req.UserIds})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.OpenGroupChannelResponse{Channel: ch}, nil
+}
+
 func (s *channelService) MarkChannelRead(ctx context.Context, req *pb.MarkChannelReadRequest) (*pb.MarkChannelReadResponse, error) {
 	t, err := channelTarget(ctx, req.ChannelId)
 	if err != nil {

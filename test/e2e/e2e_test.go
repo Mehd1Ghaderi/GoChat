@@ -252,6 +252,7 @@ var (
 	offTopicRe  = regexp.MustCompile(`data-channel="([0-9a-f-]{36})"(?s:[^<]*>.{0,600}?)<span class="label">Off-Topic</span>`)
 	photoRe     = regexp.MustCompile(`/photos/([ut])/([0-9a-f-]{36})/([0-9a-f]{16})`)
 	staticCSSRe = regexp.MustCompile(`/static/[0-9a-f]+/app\.css`)
+	pickRe      = regexp.MustCompile(`data-pick="([0-9a-f-]{36})"`)
 )
 
 // bootstrap sets a fresh server up with the admin and the team the tests use.
@@ -628,6 +629,70 @@ func TestEndToEnd(t *testing.T) {
 			if time.Now().After(deadline) {
 				t.Fatal("an edited message is still found by its old words")
 			}
+		}
+	})
+
+	t.Run("group conversations and the switcher", func(t *testing.T) {
+		_, body := admin.hx("/t/"+teamName+"/invites", url.Values{})
+		carol := newClient(t, "carol")
+		carolName, carolPass := "carol-"+random(4), "pw-"+random(8)
+		inv := inviteRe.FindStringSubmatch(body)[1]
+		carol.get("/signup?invite=" + inv)
+		if res, body := carol.form("/signup", url.Values{
+			"username": {carolName}, "display_name": {"Carol"}, "email": {carolName + "@example.test"},
+			"password": {carolPass}, "confirm": {carolPass}, "invite": {inv},
+		}); res.StatusCode != http.StatusSeeOther {
+			t.Fatalf("carol's signup: %d %s", res.StatusCode, body)
+		}
+		userID := func(q string) string {
+			_, list := admin.do(http.MethodGet, "/t/"+teamName+"/people/search?q="+q, nil, "", true)
+			m := pickRe.FindStringSubmatch(list)
+			if m == nil {
+				t.Fatalf("no one found for %q: %s", q, list)
+			}
+			return m[1]
+		}
+		bobUser, carolUser := userID(bobName), userID(carolName)
+		open := func(people ...string) string {
+			t.Helper()
+			res, body := admin.hx("/t/"+teamName+"/dm", url.Values{"user_id": people})
+			m := channelRe.FindStringSubmatch(res.Header.Get("HX-Location"))
+			if m == nil {
+				t.Fatalf("open %v: %d %s", people, res.StatusCode, body)
+			}
+			return m[1]
+		}
+		group := open(bobUser, carolUser)
+		if again := open(carolUser, bobUser); again != group {
+			t.Fatalf("the same people opened another group: %s, %s", group, again)
+		}
+		if direct := open(bobUser); direct == group {
+			t.Fatal("one person opened the group")
+		}
+		bobWS.expect(5*time.Second, `id="channel-lists"`, `class="group-count"`)
+		view(adminWS, group)
+		adminWS.send(map[string]string{"op": "post", "channel_id": group, "content": "hello group"})
+		bobWS.expect(5*time.Second, `id="notify"`, "hello group")
+		bobWS.expect(5*time.Second, `id="unread-`+group+`" class="mentions"`)
+		view(adminWS, town)
+		if _, page := carol.get("/t/" + teamName + "/ch/" + group); !strings.Contains(page, "hello group") || !strings.Contains(page, "Your conversation with") {
+			t.Fatalf("carol's view of the group: %s", page)
+		}
+		if res, _ := bob.hx("/t/"+teamName+"/ch/"+group+"/leave", url.Values{}); res.StatusCode < 400 {
+			t.Fatalf("bob left a group conversation: %d", res.StatusCode)
+		}
+		if res, _ := admin.hx("/t/"+teamName+"/dm", url.Values{"user_id": {bobUser, carolUser, "00000000-0000-4000-8000-000000000000"}}); res.StatusCode != http.StatusNotFound {
+			t.Fatalf("a group with a stranger: %d", res.StatusCode)
+		}
+
+		if _, list := bob.do(http.MethodGet, "/t/"+teamName+"/switch/results?q=off", nil, "", true); !strings.Contains(list, "Off-Topic") || !strings.Contains(list, `role="option"`) {
+			t.Fatalf("switcher for off: %s", list)
+		}
+		if _, list := bob.do(http.MethodGet, "/t/"+teamName+"/switch/results?q=carol", nil, "", true); !strings.Contains(list, "Carol") {
+			t.Fatalf("switcher for carol: %s", list)
+		}
+		if _, modal := bob.do(http.MethodGet, "/t/"+teamName+"/switch", nil, "", true); !strings.Contains(modal, "data-switch-input") || !strings.Contains(modal, "Town Square") {
+			t.Fatalf("switcher: %s", modal)
 		}
 	})
 

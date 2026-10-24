@@ -236,6 +236,9 @@ func (s *session) Receive(c *actor.Context) {
 		for _, ch := range msg.lists.DMs {
 			s.sidebar[ch.Id] = true
 			s.directs[ch.Id] = true
+			if ch.Type == pb.ChannelType_CHANNEL_TYPE_GROUP {
+				s.names[ch.Id] = render.Title(ch)
+			}
 			s.mentions[ch.Id] = int(ch.MentionCount)
 			s.muted[ch.Id] = ch.Muted
 			if ch.Peer != nil {
@@ -541,7 +544,7 @@ func (s *session) notify(m *pb.Message, participants []string) {
 	case m.RootId != "":
 		n.Title += " replied in a thread"
 		n.URL += "?thread=" + m.RootId
-	case !direct && s.names[m.ChannelId] != "":
+	case s.names[m.ChannelId] != "":
 		n.Title += " in " + s.names[m.ChannelId]
 	}
 	s.fragment("notify", map[string]any{"Notice": n, "Channel": m.ChannelId, "Root": m.RootId})

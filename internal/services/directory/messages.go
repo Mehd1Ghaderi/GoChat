@@ -101,6 +101,12 @@ type OpenDirect struct {
 	UserID string
 }
 
+// OpenGroup opens the conversation of the caller and UserIDs.
+type OpenGroup struct {
+	P       *models.Principal
+	UserIDs []string
+}
+
 type GetUser struct {
 	P      *models.Principal
 	UserID string

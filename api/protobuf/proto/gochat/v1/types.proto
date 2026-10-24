@@ -27,6 +27,7 @@ enum ChannelType {
   CHANNEL_TYPE_PUBLIC = 1;
   CHANNEL_TYPE_PRIVATE = 2;
   CHANNEL_TYPE_DIRECT = 3;
+  CHANNEL_TYPE_GROUP = 4;
 }
 
 message User {
@@ -83,6 +84,8 @@ message Channel {
   // direct conversation.
   int32 mention_count = 12;
   bool muted = 13;
+  // The others of a group conversation.
+  repeated User peers = 14;
 }
 
 message ChannelMember {

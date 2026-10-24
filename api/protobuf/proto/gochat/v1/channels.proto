@@ -15,6 +15,9 @@ service ChannelService {
   rpc RemoveChannelMember(RemoveChannelMemberRequest) returns (RemoveChannelMemberResponse);
   rpc ListChannelMembers(ListChannelMembersRequest) returns (ListChannelMembersResponse);
   rpc OpenDirectChannel(OpenDirectChannelRequest) returns (OpenDirectChannelResponse);
+  // OpenGroupChannel opens the conversation of the caller and user_ids: a
+  // direct one for one person, a group one for two to seven.
+  rpc OpenGroupChannel(OpenGroupChannelRequest) returns (OpenGroupChannelResponse);
   rpc MarkChannelRead(MarkChannelReadRequest) returns (MarkChannelReadResponse);
   // A muted channel neither notifies nor shows its unread messages.
   rpc SetChannelMuted(SetChannelMutedRequest) returns (SetChannelMutedResponse);
@@ -113,6 +116,14 @@ message OpenDirectChannelRequest {
 }
 
 message OpenDirectChannelResponse {
+  Channel channel = 1;
+}
+
+message OpenGroupChannelRequest {
+  repeated string user_ids = 1;
+}
+
+message OpenGroupChannelResponse {
   Channel channel = 1;
 }
 

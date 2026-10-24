@@ -165,10 +165,7 @@ func (r *Renderer) funcs() template.FuncMap {
 			if ch == nil {
 				return ""
 			}
-			if ch.Peer != nil {
-				return DisplayName(ch.Peer)
-			}
-			return ch.DisplayName
+			return Title(ch)
 		},
 		"unread": Unread,
 		"dict": func(kv ...any) (map[string]any, error) {
@@ -185,9 +182,12 @@ func (r *Renderer) funcs() template.FuncMap {
 			}
 			return m, nil
 		},
-		"isPrivate": func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_PRIVATE },
-		"isDirect":  func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_DIRECT },
-		"isAdmin":   func(t *pb.Team) bool { return t != nil && t.Role == pb.TeamRole_TEAM_ROLE_ADMIN },
+		"isPrivate":      func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_PRIVATE },
+		"isDirect":       func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_DIRECT },
+		"isGroup":        func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_GROUP },
+		"isConversation": Conversation,
+		"inc":            func(n int) int { return n + 1 },
+		"isAdmin":        func(t *pb.Team) bool { return t != nil && t.Role == pb.TeamRole_TEAM_ROLE_ADMIN },
 		"isSystemAdmin": func(u *pb.User) bool {
 			return u != nil && u.Role == pb.SystemRole_SYSTEM_ROLE_ADMIN
 		},

@@ -120,6 +120,8 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /t/{team}/channels/new", h.newChannelModal)
 	mux.Handle("POST /t/{team}/channels", h.csrf(http.HandlerFunc(h.createChannel)))
 	mux.HandleFunc("GET /t/{team}/channels/browse", h.browseModal)
+	mux.HandleFunc("GET /t/{team}/switch", h.switcher)
+	mux.HandleFunc("GET /t/{team}/switch/results", h.switcherResults)
 	mux.HandleFunc("GET /t/{team}/search", h.searchPanel)
 	mux.HandleFunc("GET /t/{team}/search/more", h.searchMore)
 	mux.HandleFunc("GET /t/{team}/people", h.peopleModal)

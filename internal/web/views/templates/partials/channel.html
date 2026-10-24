@@ -3,7 +3,7 @@
   <header class="channel-header">
     <label for="nav-toggle" class="icon-btn menu-btn" aria-label="Open navigation">{{icon "menu"}}</label>
     <div class="channel-title">
-      <h1>{{if isDirect .Channel}}<span class="presence{{if .PeerOnline}} on{{end}}" aria-hidden="true"></span>{{else if isPrivate .Channel}}<span class="glyph" aria-hidden="true">{{icon "lock"}}</span>{{else}}<span class="glyph" aria-hidden="true">{{icon "hash"}}</span>{{end}}<span class="title-text">{{.Title}}</span></h1>
+      <h1>{{if isDirect .Channel}}<span class="presence{{if .PeerOnline}} on{{end}}" aria-hidden="true"></span>{{else if isGroup .Channel}}<span class="glyph" aria-hidden="true">{{icon "members"}}</span>{{else if isPrivate .Channel}}<span class="glyph" aria-hidden="true">{{icon "lock"}}</span>{{else}}<span class="glyph" aria-hidden="true">{{icon "hash"}}</span>{{end}}<span class="title-text">{{.Title}}</span></h1>
       {{with .Channel.Purpose}}<p class="purpose">{{.}}</p>{{end}}
     </div>
     <div class="channel-actions">
@@ -11,7 +11,7 @@
       {{if .Member}}{{template "mute-button" (dict "Team" .Team.Name "Channel" .Channel.Id "Muted" .Channel.Muted)}}{{end}}
       {{if and .Member (not (isDirect .Channel))}}
       <button class="icon-btn" hx-get="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/members" hx-target="#modal" aria-label="Members" title="Members">{{icon "members"}}</button>
-      {{if ne .Channel.Name "town-square"}}
+      {{if and (ne .Channel.Name "town-square") (not (isGroup .Channel))}}
       <button class="icon-btn" hx-post="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/leave" hx-confirm="Leave this channel?" aria-label="Leave channel" title="Leave channel">{{icon "leave"}}</button>
       {{end}}
       {{end}}
@@ -36,7 +36,7 @@
 
 {{define "channel-start"}}
 <div class="channel-start">
-  <h2>{{if isDirect .Channel}}Your conversation with {{.Title}}{{else}}Welcome to {{.Title}}{{end}}</h2>
+  <h2>{{if isConversation .Channel}}Your conversation with {{.Title}}{{else}}Welcome to {{.Title}}{{end}}</h2>
   <p class="muted">This is the start of the conversation.</p>
 </div>
 {{end}}
@@ -66,7 +66,7 @@
       <input type="hidden" name="op" value="post">
       <input type="hidden" name="channel_id" value="{{.Channel.Id}}">
       <textarea name="content" rows="1" maxlength="16000" autocomplete="off" aria-label="Message"
-                placeholder="Message {{if isDirect .Channel}}{{.Title}}{{else}}#{{.Title}}{{end}}"></textarea>
+                placeholder="Message {{if isConversation .Channel}}{{.Title}}{{else}}#{{.Title}}{{end}}"></textarea>
       <button class="send" type="submit" aria-label="Send">{{icon "send"}}</button>
     </form>
   </div>

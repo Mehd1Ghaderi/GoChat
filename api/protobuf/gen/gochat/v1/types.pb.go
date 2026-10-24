@@ -176,6 +176,7 @@ const (
 	ChannelType_CHANNEL_TYPE_PUBLIC      ChannelType = 1
 	ChannelType_CHANNEL_TYPE_PRIVATE     ChannelType = 2
 	ChannelType_CHANNEL_TYPE_DIRECT      ChannelType = 3
+	ChannelType_CHANNEL_TYPE_GROUP       ChannelType = 4
 )
 
 // Enum value maps for ChannelType.
@@ -185,12 +186,14 @@ var (
 		1: "CHANNEL_TYPE_PUBLIC",
 		2: "CHANNEL_TYPE_PRIVATE",
 		3: "CHANNEL_TYPE_DIRECT",
+		4: "CHANNEL_TYPE_GROUP",
 	}
 	ChannelType_value = map[string]int32{
 		"CHANNEL_TYPE_UNSPECIFIED": 0,
 		"CHANNEL_TYPE_PUBLIC":      1,
 		"CHANNEL_TYPE_PRIVATE":     2,
 		"CHANNEL_TYPE_DIRECT":      3,
+		"CHANNEL_TYPE_GROUP":       4,
 	}
 )
 
@@ -553,8 +556,10 @@ type Channel struct {
 	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	// Unread messages that call out the caller, or every unread one in a
 	// direct conversation.
-	MentionCount  int32 `protobuf:"varint,12,opt,name=mention_count,json=mentionCount,proto3" json:"mention_count,omitempty"`
-	Muted         bool  `protobuf:"varint,13,opt,name=muted,proto3" json:"muted,omitempty"`
+	MentionCount int32 `protobuf:"varint,12,opt,name=mention_count,json=mentionCount,proto3" json:"mention_count,omitempty"`
+	Muted        bool  `protobuf:"varint,13,opt,name=muted,proto3" json:"muted,omitempty"`
+	// The others of a group conversation.
+	Peers         []*User `protobuf:"bytes,14,rep,name=peers,proto3" json:"peers,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -678,6 +683,13 @@ func (x *Channel) GetMuted() bool {
 		return x.Muted
 	}
 	return false
+}
+
+func (x *Channel) GetPeers() []*User {
+	if x != nil {
+		return x.Peers
+	}
+	return nil
 }
 
 type ChannelMember struct {
@@ -1019,7 +1031,7 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"TeamMember\x12#\n" +
 	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user\x12'\n" +
 	"\x04role\x18\x02 \x01(\x0e2\x13.gochat.v1.TeamRoleR\x04role\x127\n" +
-	"\tjoined_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bjoinedAt\"\xc0\x03\n" +
+	"\tjoined_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bjoinedAt\"\xe7\x03\n" +
 	"\aChannel\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
 	"\ateam_id\x18\x02 \x01(\tR\x06teamId\x12\x12\n" +
@@ -1036,7 +1048,8 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12#\n" +
 	"\rmention_count\x18\f \x01(\x05R\fmentionCount\x12\x14\n" +
-	"\x05muted\x18\r \x01(\bR\x05muted\"\x99\x01\n" +
+	"\x05muted\x18\r \x01(\bR\x05muted\x12%\n" +
+	"\x05peers\x18\x0e \x03(\v2\x0f.gochat.v1.UserR\x05peers\"\x99\x01\n" +
 	"\rChannelMember\x12#\n" +
 	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user\x12*\n" +
 	"\x04role\x18\x02 \x01(\x0e2\x16.gochat.v1.ChannelRoleR\x04role\x127\n" +
@@ -1078,12 +1091,13 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"\vChannelRole\x12\x1c\n" +
 	"\x18CHANNEL_ROLE_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13CHANNEL_ROLE_MEMBER\x10\x01\x12\x16\n" +
-	"\x12CHANNEL_ROLE_ADMIN\x10\x02*w\n" +
+	"\x12CHANNEL_ROLE_ADMIN\x10\x02*\x8f\x01\n" +
 	"\vChannelType\x12\x1c\n" +
 	"\x18CHANNEL_TYPE_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13CHANNEL_TYPE_PUBLIC\x10\x01\x12\x18\n" +
 	"\x14CHANNEL_TYPE_PRIVATE\x10\x02\x12\x17\n" +
-	"\x13CHANNEL_TYPE_DIRECT\x10\x03B\x9f\x01\n" +
+	"\x13CHANNEL_TYPE_DIRECT\x10\x03\x12\x16\n" +
+	"\x12CHANNEL_TYPE_GROUP\x10\x04B\x9f\x01\n" +
 	"\rcom.gochat.v1B\n" +
 	"TypesProtoP\x01Z=github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1;gochatv1\xa2\x02\x03GXX\xaa\x02\tGochat.V1\xca\x02\tGochat\\V1\xe2\x02\x15Gochat\\V1\\GPBMetadata\xea\x02\n" +
 	"Gochat::V1b\x06proto3"
@@ -1131,20 +1145,21 @@ var file_gochat_v1_types_proto_depIdxs = []int32{
 	2,  // 9: gochat.v1.Channel.role:type_name -> gochat.v1.ChannelRole
 	4,  // 10: gochat.v1.Channel.peer:type_name -> gochat.v1.User
 	13, // 11: gochat.v1.Channel.created_at:type_name -> google.protobuf.Timestamp
-	4,  // 12: gochat.v1.ChannelMember.user:type_name -> gochat.v1.User
-	2,  // 13: gochat.v1.ChannelMember.role:type_name -> gochat.v1.ChannelRole
-	13, // 14: gochat.v1.ChannelMember.joined_at:type_name -> google.protobuf.Timestamp
-	4,  // 15: gochat.v1.Message.author:type_name -> gochat.v1.User
-	10, // 16: gochat.v1.Message.attachments:type_name -> gochat.v1.Attachment
-	13, // 17: gochat.v1.Message.created_at:type_name -> google.protobuf.Timestamp
-	13, // 18: gochat.v1.Message.edited_at:type_name -> google.protobuf.Timestamp
-	13, // 19: gochat.v1.Message.last_reply_at:type_name -> google.protobuf.Timestamp
-	12, // 20: gochat.v1.Message.reactions:type_name -> gochat.v1.Reaction
-	21, // [21:21] is the sub-list for method output_type
-	21, // [21:21] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	4,  // 12: gochat.v1.Channel.peers:type_name -> gochat.v1.User
+	4,  // 13: gochat.v1.ChannelMember.user:type_name -> gochat.v1.User
+	2,  // 14: gochat.v1.ChannelMember.role:type_name -> gochat.v1.ChannelRole
+	13, // 15: gochat.v1.ChannelMember.joined_at:type_name -> google.protobuf.Timestamp
+	4,  // 16: gochat.v1.Message.author:type_name -> gochat.v1.User
+	10, // 17: gochat.v1.Message.attachments:type_name -> gochat.v1.Attachment
+	13, // 18: gochat.v1.Message.created_at:type_name -> google.protobuf.Timestamp
+	13, // 19: gochat.v1.Message.edited_at:type_name -> google.protobuf.Timestamp
+	13, // 20: gochat.v1.Message.last_reply_at:type_name -> google.protobuf.Timestamp
+	12, // 21: gochat.v1.Message.reactions:type_name -> gochat.v1.Reaction
+	22, // [22:22] is the sub-list for method output_type
+	22, // [22:22] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_gochat_v1_types_proto_init() }

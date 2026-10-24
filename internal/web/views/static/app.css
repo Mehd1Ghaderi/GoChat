@@ -252,6 +252,25 @@ fieldset.choice legend { font-weight: 600; font-size: .92rem; padding: 0 .3rem; 
   border: 2px solid var(--side-muted);
 }
 .presence.on { background: var(--online); border-color: var(--online); }
+.group-count {
+  display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; flex: none; border-radius: 6px;
+  background: var(--side-hover); color: var(--side-fg); font-size: .68rem; font-weight: 800; font-variant-numeric: tabular-nums;
+}
+.sb-link.active .group-count { background: color-mix(in srgb, var(--side-active-fg) 16%, transparent); color: var(--side-active-fg); }
+.jump-to {
+  display: flex; align-items: center; gap: .55rem; width: 100%; min-height: 38px; margin: 0 0 12px; padding: .35rem .65rem;
+  border: 1px solid var(--side-border); border-radius: 10px; background: var(--side-bg); color: var(--side-muted);
+  font: inherit; font-size: .9rem; cursor: pointer; text-align: left;
+}
+.jump-to .i { width: 16px; height: 16px; flex: none; }
+.jump-to span { flex: 1; }
+.jump-to:hover { background: var(--side-hover); color: var(--side-fg); }
+.jump-to:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+kbd {
+  display: inline-grid; place-items: center; min-width: 22px; height: 20px; padding: 0 5px; border-radius: 6px;
+  border: 1px solid currentColor; font: inherit; font-size: .7rem; font-weight: 650; opacity: .75;
+}
+@media (hover: none) and (pointer: coarse) { .jump-to kbd { display: none; } }
 .me {
   display: flex; align-items: center; gap: .55rem; padding: 10px 10px 10px 14px;
   border-top: 1px solid var(--side-border); padding-bottom: max(10px, env(safe-area-inset-bottom));
@@ -522,6 +541,42 @@ fieldset.choice legend { font-weight: 600; font-size: .92rem; padding: 0 .3rem; 
 .hit-meta strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hit-meta time { flex: none; color: var(--fg-muted); font-size: .76rem; }
 .hit-excerpt { overflow-wrap: anywhere; font-size: .92rem; }
+/* Picking people: each row toggles, the picked wait as chips. */
+.pick-list li { padding: 0; }
+.pick {
+  display: flex; align-items: center; justify-content: space-between; gap: .75rem; width: 100%; min-height: 52px; padding: .45rem .5rem;
+  border: 0; border-radius: 10px; background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer;
+}
+.pick .person { min-width: 0; }
+.pick-mark {
+  display: grid; place-items: center; width: 24px; height: 24px; flex: none; border-radius: 50%;
+  border: 1.5px solid var(--border); color: transparent;
+}
+.pick-mark .i { width: 15px; height: 15px; }
+.pick[aria-pressed="true"] { background: var(--accent-soft); }
+.pick[aria-pressed="true"] .pick-mark { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--accent-ink); }
+@media (hover: hover) { .pick:hover { background: var(--bg-soft); } .pick[aria-pressed="true"]:hover { background: var(--accent-soft); } }
+.pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dm-form { display: grid; gap: .6rem; position: sticky; bottom: -20px; padding: 10px 0 0; background: var(--bg); }
+.picked { display: flex; flex-wrap: wrap; gap: .4rem; }
+.picked:empty { display: none; }
+/* The quick switcher: a list that follows the keys. */
+.switcher { display: grid; gap: .6rem; }
+.switch-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.switch-item {
+  display: flex; align-items: center; gap: .6rem; width: 100%; min-height: 42px; padding: .35rem .6rem; border: 0; border-radius: 9px;
+  background: none; color: var(--fg); font: inherit; text-align: left; text-decoration: none; cursor: pointer;
+}
+.switch-item .glyph { color: var(--fg-muted); }
+.switch-item .group-count { background: var(--bg-hover); color: var(--fg); }
+.switch-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.switch-item small { flex: none; }
+[aria-selected="true"] > .switch-item { background: var(--accent-soft); color: var(--accent-soft-ink); }
+@media (hover: hover) { .switch-item:hover { background: var(--bg-hover); } [aria-selected="true"] > .switch-item:hover { background: var(--accent-soft); } }
+.switch-empty { padding: .6rem; }
+.switch-hint { display: flex; align-items: center; gap: .35rem; margin: 0; font-size: .8rem; }
+.switch-hint kbd + kbd { margin-left: -.15rem; }
+@media (hover: none) and (pointer: coarse) { .switch-hint { display: none; } }
 .hit-excerpt mark { background: color-mix(in srgb, var(--accent) 32%, transparent); color: inherit; border-radius: 4px; padding: 0 .1rem; }
 /* A message a link opened stands out until another is chosen. */
 .msg.focus { background: color-mix(in srgb, var(--accent-soft) 85%, transparent); box-shadow: inset 3px 0 0 var(--accent); }

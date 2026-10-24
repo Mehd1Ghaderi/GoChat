@@ -34,7 +34,14 @@ const (
 	ChannelPublic  ChannelKind = "public"
 	ChannelPrivate ChannelKind = "private"
 	ChannelDirect  ChannelKind = "direct"
+	ChannelGroup   ChannelKind = "group"
 )
+
+// Conversation reports whether channels of k belong to no team and have a
+// fixed set of people: direct and group conversations.
+func (k ChannelKind) Conversation() bool {
+	return k == ChannelDirect || k == ChannelGroup
+}
 
 type User struct {
 	ID           gocql.UUID `db:"id"`

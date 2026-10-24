@@ -262,14 +262,6 @@
     }, 120);
   }
 
-  function moveSuggest(box, step) {
-    var items = Array.prototype.slice.call(box.querySelectorAll("[role=option]"));
-    var at = items.findIndex(function (li) { return li.getAttribute("aria-selected") === "true"; });
-    var next = (at + step + items.length) % items.length;
-    items.forEach(function (li, i) { li.setAttribute("aria-selected", i === next ? "true" : "false"); });
-    items[next].scrollIntoView({ block: "nearest" });
-  }
-
   function acceptSuggest(ta, li) {
     var end = ta.selectionStart;
     var before = ta.value.slice(0, end).replace(/@[A-Za-z0-9._-]{0,32}$/, li.dataset.insert);
@@ -280,8 +272,85 @@
     ta.focus();
   }
 
+  // The people picked for a conversation are chips in its form.
+  var maxPicked = 7;
+
+  function pickedIDs() {
+    var box = document.getElementById("dm-picked");
+    if (!box) return [];
+    return Array.prototype.map.call(box.querySelectorAll("input[name=user_id]"), function (i) { return i.value; });
+  }
+
+  function syncPicks() {
+    var ids = pickedIDs();
+    document.querySelectorAll(".pick[data-pick]").forEach(function (b) {
+      b.setAttribute("aria-pressed", ids.indexOf(b.dataset.pick) >= 0 ? "true" : "false");
+    });
+    var go = document.querySelector("[data-dm-go]");
+    if (go) {
+      go.disabled = ids.length === 0;
+      go.textContent = ids.length > 1 ? "Start a group of " + (ids.length + 1) : "Start conversation";
+    }
+  }
+
+  function togglePick(button) {
+    var box = document.getElementById("dm-picked");
+    if (!box) return;
+    var id = button.dataset.pick;
+    var chip = Array.prototype.find.call(box.querySelectorAll(".chip"), function (c) { return c.dataset.id === id; });
+    if (chip) {
+      chip.remove();
+    } else if (pickedIDs().length >= maxPicked) {
+      toast("A group holds up to eight people.", "error");
+      expireToasts();
+      return;
+    } else {
+      chip = document.createElement("span");
+      chip.className = "chip";
+      chip.dataset.id = id;
+      var input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "user_id";
+      input.value = id;
+      var name = document.createElement("span");
+      name.className = "chip-name";
+      name.textContent = button.dataset.pickName;
+      var remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "chip-remove";
+      remove.setAttribute("aria-label", "Remove " + button.dataset.pickName);
+      remove.textContent = "\u00d7";
+      chip.append(input, name, remove);
+      box.appendChild(chip);
+    }
+    syncPicks();
+  }
+
+  // The quick switcher: Ctrl or Cmd and K.
+  function openSwitcher() {
+    var input = document.querySelector("[data-switch-input]");
+    if (input) {
+      input.select();
+      return;
+    }
+    var v = view();
+    if (v) htmx.ajax("GET", "/t/" + v.dataset.teamName + "/switch", { target: "#modal", swap: "innerHTML" });
+  }
+
+  function moveOption(list, step) {
+    var items = Array.prototype.slice.call(list.querySelectorAll("[role=option]"));
+    if (!items.length) return;
+    var at = items.findIndex(function (li) { return li.getAttribute("aria-selected") === "true"; });
+    var next = (at + step + items.length) % items.length;
+    items.forEach(function (li, i) { li.setAttribute("aria-selected", i === next ? "true" : "false"); });
+    items[next].scrollIntoView({ block: "nearest" });
+  }
+
+  var mac = /Mac|iPhone|iPad/.test(navigator.platform);
+
   htmx.onLoad(function (elt) {
     localTimes(elt);
+    if (mac) elt.querySelectorAll("[data-shortcut]").forEach(function (k) { k.textContent = "\u2318K"; });
   });
 
   document.body.addEventListener("htmx:wsOpen", function (e) {
@@ -323,7 +392,12 @@
       if (reply && wide.matches) reply.focus();
       return;
     }
+    if (e.detail.target && e.detail.target.id === "people-results") {
+      syncPicks();
+      return;
+    }
     if (e.detail.target && e.detail.target.id === "main") {
+      if (document.getElementById("switcher")) closeModal();
       if (!(roomy.matches && document.getElementById("search-view"))) closeThread();
       markActive();
       announce(false);
@@ -425,6 +499,12 @@
     var remove = target.closest(".chip-remove");
     if (remove) {
       remove.closest(".chip").remove();
+      syncPicks();
+      return;
+    }
+    var pick = target.closest(".pick[data-pick]");
+    if (pick) {
+      togglePick(pick);
       return;
     }
     var copy = target.closest("[data-copy]");
@@ -473,7 +553,7 @@
     if (box && !box.hidden) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
-        moveSuggest(box, e.key === "ArrowDown" ? 1 : -1);
+        moveOption(box, e.key === "ArrowDown" ? 1 : -1);
         return;
       }
       if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey && !e.isComposing) {
@@ -499,6 +579,25 @@
       e.preventDefault();
       openSearch();
       return;
+    }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === "k" || e.key === "K")) {
+      e.preventDefault();
+      openSwitcher();
+      return;
+    }
+    if (t instanceof HTMLInputElement && t.hasAttribute("data-switch-input")) {
+      var list = document.getElementById("switch-results");
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        moveOption(list, e.key === "ArrowDown" ? 1 : -1);
+        return;
+      }
+      if (e.key === "Enter" && !e.isComposing) {
+        e.preventDefault();
+        var item = list.querySelector("[aria-selected=true] .switch-item");
+        if (item) item.click();
+        return;
+      }
     }
     if (!(t instanceof HTMLTextAreaElement) || !isComposer(t.form)) return;
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !touch.matches) {

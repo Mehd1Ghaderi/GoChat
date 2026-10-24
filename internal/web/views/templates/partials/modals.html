@@ -54,6 +54,64 @@
 {{template "modal-end"}}
 {{end}}
 
+{{define "switcher"}}
+{{template "modal-start" "Go to"}}
+<div class="switcher" id="switcher">
+  <input type="search" name="q" class="search" placeholder="Channels, conversations and people" aria-label="Find a channel or person"
+         autofocus autocomplete="off" spellcheck="false" role="combobox" aria-controls="switch-results" aria-expanded="true"
+         hx-get="/t/{{.Team.Name}}/switch/results" hx-trigger="input changed delay:120ms, search" hx-target="#switch-results" data-switch-input>
+  <ul class="switch-list" id="switch-results" role="listbox" aria-label="Places">{{template "switch-results" .}}</ul>
+  <p class="switch-hint muted"><kbd>↑</kbd><kbd>↓</kbd> move <kbd>Enter</kbd> open <kbd>Esc</kbd> close</p>
+</div>
+{{template "modal-end"}}
+{{end}}
+
+{{define "switch-results"}}
+{{range $i, $it := .Items}}
+<li role="option" aria-selected="{{if eq $i 0}}true{{else}}false{{end}}">
+  {{if .URL}}<a class="switch-item" href="{{.URL}}" hx-get="{{.URL}}" hx-target="#main" hx-push-url="true">
+  {{else if .Channel}}<button type="button" class="switch-item" hx-post="{{.PostURL}}">
+  {{else}}<button type="button" class="switch-item" hx-post="{{.PostURL}}" hx-vals='{"user_id": "{{.User.Id}}"}'>{{end}}
+    {{if and .User (not (and .Channel (isGroup .Channel)))}}{{template "avatar" (dict "User" .User "Size" "xs")}}
+    {{else if and .Channel (isGroup .Channel)}}<span class="group-count">{{inc (len .Channel.Peers)}}</span>
+    {{else if and .Channel (isPrivate .Channel)}}<span class="glyph" aria-hidden="true">{{icon "lock"}}</span>
+    {{else}}<span class="glyph" aria-hidden="true">{{icon "hash"}}</span>{{end}}
+    <span class="switch-title">{{.Title}}</span>
+    {{with .Hint}}<small class="muted">{{.}}</small>{{end}}
+    {{if .Mentions}}<span class="mentions">{{if gt .Mentions 99}}99+{{else}}{{.Mentions}}{{end}}</span>{{else if .Unread}}<span class="dot on" aria-label="Unread"></span>{{end}}
+  {{if .URL}}</a>{{else}}</button>{{end}}
+</li>
+{{else}}<li class="switch-empty muted">Nothing matches.</li>{{end}}
+{{end}}
+
+{{define "dm-picker"}}
+{{template "modal-start" "Message people"}}
+<p class="muted">Pick one person for a direct message, or up to seven for a group.</p>
+<input type="search" name="q" class="search" placeholder="Search by name" aria-label="Search people" autofocus autocomplete="off"
+       hx-get="{{.SearchURL}}" hx-trigger="input changed delay:250ms, search" hx-target="#people-results">
+<div id="people-results">{{template "dm-results" .}}</div>
+<form class="dm-form" id="dm-form" hx-post="{{.ActionURL}}">
+  <div class="picked" id="dm-picked" aria-live="polite"></div>
+  <button class="btn primary" type="submit" data-dm-go disabled>Start conversation</button>
+</form>
+{{template "modal-end"}}
+{{end}}
+
+{{define "dm-results"}}
+{{if .Members}}
+<ul class="list pick-list">
+  {{range .Members}}
+  <li>
+    <button type="button" class="pick" data-pick="{{.User.Id}}" data-pick-name="{{name .User}}" aria-pressed="false">
+      <span class="person">{{template "avatar" (dict "User" .User "Size" "sm")}}<span><strong>{{name .User}}</strong> <small class="muted">@{{.User.Username}}</small></span></span>
+      <span class="pick-mark" aria-hidden="true">{{icon "check"}}</span>
+    </button>
+  </li>
+  {{end}}
+</ul>
+{{else}}<p class="muted">Nobody matches.</p>{{end}}
+{{end}}
+
 {{define "people-results"}}
 {{if .Members}}
 <ul class="list">

@@ -11,6 +11,7 @@
 
 {{define "channel-lists"}}
 <nav class="channel-lists" id="channel-lists" aria-label="Channels"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>
+  <button class="jump-to" type="button" hx-get="/t/{{.Team.Name}}/switch" hx-target="#modal">{{icon "search"}}<span>Go to…</span><kbd data-shortcut>Ctrl K</kbd></button>
   <section>
     <h2><span>Channels</span>
       <button class="icon-btn sm" hx-get="/t/{{.Team.Name}}/channels/browse" hx-target="#modal" aria-label="Browse channels" title="Browse channels">{{icon "search"}}</button>
@@ -36,6 +37,7 @@
   <a href="/t/{{.Team.Name}}/ch/{{.Ch.Id}}" hx-get="/t/{{.Team.Name}}/ch/{{.Ch.Id}}" hx-target="#main" hx-push-url="true"
      class="sb-link{{if .Active}} active{{end}}{{if .Ch.Muted}} muted{{end}}" data-channel="{{.Ch.Id}}"{{if .Active}} aria-current="page"{{end}}>
     {{if isDirect .Ch}}<span id="presence-{{.Ch.Peer.Id}}" class="presence{{if index .Online .Ch.Peer.Id}} on{{end}}" aria-hidden="true"></span>
+    {{else if isGroup .Ch}}<span class="group-count" title="{{inc (len .Ch.Peers)}} people">{{inc (len .Ch.Peers)}}</span>
     {{else if isPrivate .Ch}}<span class="glyph" aria-hidden="true">{{icon "lock"}}</span>
     {{else}}<span class="glyph" aria-hidden="true">{{icon "hash"}}</span>{{end}}
     <span class="label">{{channelName .Ch}}</span>

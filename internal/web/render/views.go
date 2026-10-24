@@ -71,10 +71,15 @@ type Lists struct {
 	OOB      bool
 }
 
-// Split separates a team's channels from the direct ones.
+// Conversation reports whether ch is a direct or group conversation.
+func Conversation(ch *pb.Channel) bool {
+	return ch != nil && (ch.Type == pb.ChannelType_CHANNEL_TYPE_DIRECT || ch.Type == pb.ChannelType_CHANNEL_TYPE_GROUP)
+}
+
+// Split separates a team's channels from the conversations.
 func Split(all []*pb.Channel) (channels, direct []*pb.Channel) {
 	for _, ch := range all {
-		if ch.Type == pb.ChannelType_CHANNEL_TYPE_DIRECT {
+		if Conversation(ch) {
 			direct = append(direct, ch)
 		} else {
 			channels = append(channels, ch)
@@ -115,6 +120,13 @@ type ChannelView struct {
 func Title(ch *pb.Channel) string {
 	if ch.Peer != nil {
 		return DisplayName(ch.Peer)
+	}
+	if len(ch.Peers) > 0 {
+		names := make([]string, len(ch.Peers))
+		for i, p := range ch.Peers {
+			names[i] = DisplayName(p)
+		}
+		return strings.Join(names, ", ")
 	}
 	return ch.DisplayName
 }
