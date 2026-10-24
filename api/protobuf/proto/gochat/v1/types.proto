@@ -122,6 +122,22 @@ message Message {
   repeated Reaction reactions = 11;
 }
 
+// VoiceState is one person talking in a voice channel.
+message VoiceState {
+  User user = 1;
+  string channel_id = 2;
+  bool self_mute = 3;
+  bool self_deaf = 4;
+}
+
+// VoiceChannelState is everyone talking in a voice channel. Version grows
+// with each change, so an older state never replaces a newer one.
+message VoiceChannelState {
+  string channel_id = 1;
+  repeated VoiceState states = 2;
+  uint64 version = 3;
+}
+
 // Reaction is one emoji on a message and who reacted with it.
 message Reaction {
   string emoji = 1;

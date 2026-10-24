@@ -18,6 +18,7 @@ import (
 	"github.com/ssenerg/gochat/internal/services/files"
 	"github.com/ssenerg/gochat/internal/services/hub"
 	"github.com/ssenerg/gochat/internal/services/users"
+	"github.com/ssenerg/gochat/internal/services/voice"
 )
 
 type System struct {
@@ -31,6 +32,7 @@ type System struct {
 	Auth      *actor.PID
 	Directory *actor.PID
 	Files     *actor.PID
+	Voice     *actor.PID
 	Sessions  *accounts.Deps
 	Users     *users.Cache
 	janitor   *actor.PID
@@ -51,6 +53,9 @@ func Start(logger *zap.Logger, cfg *Config, repo *scylla.Repository, storage *mi
 	// with their state lost.
 	recovered := actor.WithMiddleware(actors.Recover(logger))
 	s.Hub = engine.Spawn(hub.New(logger.Named("hub"), cfg.Hub), "hub", actor.WithID("main"), recovered)
+	s.Voice = engine.Spawn(voice.New(&voice.Deps{
+		Logger: logger.Named("voice"), Cfg: cfg.Voice, Repo: repo, Engine: engine, Hub: s.Hub,
+	}), "voice", actor.WithID("main"), recovered)
 	s.Channels = engine.Spawn(channels.New(&channels.Deps{
 		Logger: logger.Named("channels"), Cfg: cfg.Channels, Repo: repo, Storage: storage,
 		Authz: az, Users: userCache, Engine: engine, Hub: s.Hub,
@@ -63,12 +68,13 @@ func Start(logger *zap.Logger, cfg *Config, repo *scylla.Repository, storage *mi
 	s.janitor = engine.Spawn(files.Janitor(fileDeps), "janitor", actor.WithID("main"), recovered)
 	s.Directory = engine.Spawn(directory.Pool(&directory.Deps{
 		Logger: logger.Named("directory"), Cfg: cfg.Directory, Repo: repo, Storage: storage, Authz: az,
-		Users: userCache, Engine: engine, Hub: s.Hub, Channels: s.Channels,
+		Users: userCache, Engine: engine, Hub: s.Hub, Channels: s.Channels, Voice: s.Voice,
 	}), "directory", actor.WithID("main"))
 	accountDeps, err := accounts.NewDeps(logger.Named("accounts"), cfg.Accounts, repo, userCache, az, engine, s.Hub)
 	if err != nil {
 		return nil, err
 	}
+	accountDeps.Voice = s.Voice
 	s.Sessions = accountDeps
 	s.Accounts = engine.Spawn(accounts.Pool(accountDeps), "accounts", actor.WithID("main"))
 	s.Auth = engine.Spawn(accounts.Pool(accountDeps), "accounts", actor.WithID("auth"))
@@ -83,7 +89,7 @@ func (s *System) Stop(timeout time.Duration) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	for _, pid := range []*actor.PID{s.Accounts, s.Auth, s.Directory, s.Files, s.janitor, s.Channels, s.Hub, s.events} {
+	for _, pid := range []*actor.PID{s.Accounts, s.Auth, s.Directory, s.Files, s.janitor, s.Channels, s.Voice, s.Hub, s.events} {
 		if pid == nil {
 			continue
 		}

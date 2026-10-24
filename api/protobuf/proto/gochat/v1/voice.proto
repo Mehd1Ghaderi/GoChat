@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+package gochat.v1;
+
+import "gochat/v1/types.proto";
+
+// VoiceService is how people join the talk of voice channels, as Discord's
+// gateway does: the chat server keeps who talks where, and hands each
+// joiner a voice server and a token to connect to it with.
+service VoiceService {
+  rpc JoinVoice(JoinVoiceRequest) returns (JoinVoiceResponse);
+  // LeaveVoice disconnects the caller from whichever voice channel they
+  // talk in.
+  rpc LeaveVoice(LeaveVoiceRequest) returns (LeaveVoiceResponse);
+  rpc UpdateVoiceState(UpdateVoiceStateRequest) returns (UpdateVoiceStateResponse);
+  // DisconnectVoiceMember takes someone out of a voice channel's talk.
+  rpc DisconnectVoiceMember(DisconnectVoiceMemberRequest) returns (DisconnectVoiceMemberResponse);
+  // ListVoiceStates returns who talks in the team's voice channels.
+  rpc ListVoiceStates(ListVoiceStatesRequest) returns (ListVoiceStatesResponse);
+}
+
+message JoinVoiceRequest {
+  string channel_id = 1;
+}
+
+message JoinVoiceResponse {
+  // The voice server's signaling websocket, and the single-use token that
+  // identifies the caller there for a short while.
+  string endpoint = 1;
+  string token = 2;
+  Channel channel = 3;
+}
+
+message LeaveVoiceRequest {}
+
+message LeaveVoiceResponse {}
+
+message UpdateVoiceStateRequest {
+  bool self_mute = 1;
+  bool self_deaf = 2;
+}
+
+message UpdateVoiceStateResponse {}
+
+message DisconnectVoiceMemberRequest {
+  string channel_id = 1;
+  string user_id = 2;
+}
+
+message DisconnectVoiceMemberResponse {}
+
+message ListVoiceStatesRequest {
+  string team_id = 1;
+}
+
+message ListVoiceStatesResponse {
+  repeated VoiceChannelState channels = 1;
+}
+
+// VoiceServerService is the link of a voice server to the chat server: the
+// voice server claims the tokens its peers present and reports who left;
+// the chat server tells it whom to disconnect.
+service VoiceServerService {
+  rpc Connect(stream VoiceServerServiceConnectRequest) returns (stream VoiceServerServiceConnectResponse);
+}
+
+message VoiceServerServiceConnectRequest {
+  oneof frame {
+    VoiceServerHello hello = 1;
+    ClaimVoiceToken claim = 2;
+    VoicePeerLeft peer_left = 3;
+  }
+}
+
+message VoiceServerHello {
+  string server_id = 1;
+  // Where browsers reach the server's signaling websocket.
+  string endpoint = 2;
+}
+
+message ClaimVoiceToken {
+  uint64 request_id = 1;
+  string token = 2;
+}
+
+message VoicePeerLeft {
+  string user_id = 1;
+  string channel_id = 2;
+  string session = 3;
+}
+
+message VoiceServerServiceConnectResponse {
+  oneof frame {
+    VoiceServerWelcome welcome = 1;
+    VoiceTokenClaimed claimed = 2;
+    VoiceDisconnect disconnect = 3;
+  }
+}
+
+message VoiceServerWelcome {}
+
+message VoiceTokenClaimed {
+  uint64 request_id = 1;
+  // Set when the token is unknown, spent or expired.
+  string error = 2;
+  User user = 3;
+  string channel_id = 4;
+  // Names this connection of the user, so a later one is told apart.
+  string session = 5;
+}
+
+message VoiceDisconnect {
+  string user_id = 1;
+  string channel_id = 2;
+  string session = 3;
+  string reason = 4;
+}

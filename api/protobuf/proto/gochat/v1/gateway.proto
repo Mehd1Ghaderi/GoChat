@@ -81,7 +81,15 @@ message Event {
     ReactionsChanged reactions_changed = 12;
     ChannelMuted channel_muted = 13;
     ChannelUpdated channel_updated = 14;
+    VoiceChannelUpdate voice_channel_update = 15;
   }
+}
+
+// VoiceChannelUpdate tells a team's members who talks in one of its voice
+// channels now.
+message VoiceChannelUpdate {
+  string team_id = 1;
+  VoiceChannelState channel = 2;
 }
 
 // ChannelUpdated carries a channel's settings that every member shares.

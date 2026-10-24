@@ -31,6 +31,7 @@ import (
 	"github.com/ssenerg/gochat/internal/services/hub"
 	"github.com/ssenerg/gochat/internal/services/invites"
 	"github.com/ssenerg/gochat/internal/services/users"
+	"github.com/ssenerg/gochat/internal/services/voice"
 )
 
 type Repo interface {
@@ -79,6 +80,7 @@ type Deps struct {
 	Engine   *actor.Engine
 	Hub      *actor.PID
 	Channels *actor.PID
+	Voice    *actor.PID
 	invited  *window.Counter
 }
 
@@ -396,6 +398,7 @@ func (w *worker) removeTeamMember(ctx context.Context, msg RemoveTeamMember) (Do
 	if err := w.Repo.RemoveTeamMember(ctx, teamID, target); err != nil {
 		return Done{}, err
 	}
+	w.Engine.Send(w.Voice, voice.DropUser{UserID: target, TeamID: teamID})
 	w.deliver(target, &pb.Event{Payload: &pb.Event_TeamLeft{TeamLeft: &pb.TeamLeft{TeamId: teamID.String()}}})
 	return Done{}, nil
 }
@@ -656,6 +659,7 @@ func (w *worker) joinTeam(ctx context.Context, userID, teamID gocql.UUID) (*pb.T
 		}
 	}
 	out := convert.Team(team, role)
+	w.Engine.Send(w.Voice, voice.TeamChanged{TeamID: teamID})
 	w.deliver(userID, &pb.Event{Payload: &pb.Event_TeamJoined{TeamJoined: &pb.TeamJoined{Team: out}}})
 	return out, nil
 }

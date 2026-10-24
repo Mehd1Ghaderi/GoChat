@@ -26,9 +26,10 @@ const (
 )
 
 var streaming = map[string]bool{
-	"/gochat.v1.GatewayService/Connect": true,
-	"/gochat.v1.FileService/Upload":     true,
-	"/gochat.v1.FileService/Download":   true,
+	"/gochat.v1.GatewayService/Connect":     true,
+	"/gochat.v1.VoiceServerService/Connect": true,
+	"/gochat.v1.FileService/Upload":         true,
+	"/gochat.v1.FileService/Download":       true,
 }
 
 type principalKey struct{}

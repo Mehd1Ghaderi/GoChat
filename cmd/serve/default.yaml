@@ -113,6 +113,12 @@ services:
     max_user_uploads: 4
     orphan_after: 24h
     janitor_interval: 1h
+  voice:
+    token_ttl: 30s
+    max_per_channel: 25
+    server_queue_limit: 4096
+    members_ttl: 15s
+    op_timeout: 10s
   hub:
     gateway_queue_limit: 65536
     presence_grace: 10s
