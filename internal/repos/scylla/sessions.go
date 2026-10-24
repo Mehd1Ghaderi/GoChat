@@ -38,7 +38,7 @@ func (r *Repository) GetSession(ctx context.Context, hash []byte) (*models.Sessi
 	return &s, nil
 }
 
-// TouchSession records that s was used at at from ip. A session revoked
+// TouchSession records when s was last used, and from where. A session revoked
 // meanwhile leaves a row with no user and no expiry, which reads as gone and
 // lives no longer than the session would have.
 func (r *Repository) TouchSession(ctx context.Context, s *models.Session, at time.Time, ip string) error {
