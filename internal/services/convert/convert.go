@@ -78,6 +78,8 @@ func ChannelType(k models.ChannelKind) pb.ChannelType {
 		return pb.ChannelType_CHANNEL_TYPE_DIRECT
 	case models.ChannelGroup:
 		return pb.ChannelType_CHANNEL_TYPE_GROUP
+	case models.ChannelVoice:
+		return pb.ChannelType_CHANNEL_TYPE_VOICE
 	default:
 		return pb.ChannelType_CHANNEL_TYPE_UNSPECIFIED
 	}
@@ -179,11 +181,16 @@ func Channel(ch *models.Channel, role models.ChannelRole, lastRead gocql.UUID, p
 		Peer:          peer,
 		CreatedAt:     Time(ch.CreatedAt),
 		ArchivedAt:    Time(ch.ArchivedAt),
+		VoiceEnabled:  !ch.VoiceDisabled,
 	}
 }
 
 func Attachment(a *models.Attachment) *pb.Attachment {
-	return &pb.Attachment{Id: a.ID.String(), Name: a.Name, ContentType: a.ContentType, Size: a.Size}
+	return &pb.Attachment{
+		Id: a.ID.String(), Name: a.Name, ContentType: a.ContentType, Size: a.Size,
+		// Durations are bounded at upload; uint32 cannot overflow here.
+		Voice: a.Voice, DurationMs: uint32(max(a.DurationMS, 0)), //nolint:gosec
+	}
 }
 
 func Message(m *models.Message, author *pb.User, atts []*models.Attachment) *pb.Message {

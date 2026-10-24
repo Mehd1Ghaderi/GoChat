@@ -159,6 +159,7 @@ func (r *Renderer) funcs() template.FuncMap {
 		"size":    HumanSize,
 		"device":  Device,
 		"mib":     MiB,
+		"clockMS": ClockMS,
 		"isImage": IsImage,
 		"iso":     func(t time.Time) string { return t.UTC().Format(time.RFC3339) },
 		"clock":   func(t time.Time) string { return t.UTC().Format("15:04") },
@@ -187,6 +188,7 @@ func (r *Renderer) funcs() template.FuncMap {
 		},
 		"isPrivate":      func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_PRIVATE },
 		"isDirect":       func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_DIRECT },
+		"isVoice":        func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_VOICE },
 		"isGroup":        func(ch *pb.Channel) bool { return ch != nil && ch.Type == pb.ChannelType_CHANNEL_TYPE_GROUP },
 		"isConversation": Conversation,
 		"inc":            func(n int) int { return n + 1 },
@@ -259,6 +261,12 @@ func MiB(n int64) string {
 		return ""
 	}
 	return strconv.FormatInt(max(1, n>>20), 10)
+}
+
+// ClockMS shows a length in milliseconds as minutes and seconds, 1:05.
+func ClockMS(ms uint32) string {
+	s := (ms + 500) / 1000
+	return fmt.Sprintf("%d:%02d", s/60, s%60)
 }
 
 // IsImage reports whether a file may be shown inline: raster formats only,

@@ -22,10 +22,12 @@
   <label>URL name<input name="name" required minlength="2" maxlength="50" pattern="[a-z0-9][a-z0-9\-]{1,49}"><small>Lowercase letters, digits and '-'.</small></label>
   <label>Purpose<input name="purpose" maxlength="250"></label>
   <fieldset class="choice">
-    <legend>Who can join</legend>
-    <label class="inline"><input type="radio" name="type" value="public" checked> Public: anyone in the team</label>
+    <legend>Kind</legend>
+    <label class="inline"><input type="radio" name="type" value="public"{{if not .Voice}} checked{{end}}> Public: anyone in the team</label>
     <label class="inline"><input type="radio" name="type" value="private"> Private: by invitation only</label>
+    <label class="inline"><input type="radio" name="type" value="voice"{{if .Voice}} checked{{end}}> Voice: a room the team talks in</label>
   </fieldset>
+  <label class="inline voice-messages-option"><input type="checkbox" name="voice" value="1" checked> Allow voice messages</label>
   <button class="btn primary" type="submit">Create</button>
 </form>
 {{template "modal-end"}}
@@ -67,6 +69,15 @@
   <label>Purpose<input name="purpose" maxlength="250" value="{{.Channel.Purpose}}"><small>Shown under the channel's name.</small></label>
   <div class="row"><button class="btn primary" type="submit">Save</button>{{with .Status}}<span class="status ok" role="status">{{.}}</span>{{end}}</div>
 </form>
+<section class="setting">
+  <h3 class="subhead">Voice messages</h3>
+  <form hx-post="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/voice" hx-target="#modal" class="row">
+    {{if .Channel.VoiceEnabled}}<p class="muted">On: members can record and send voice messages.</p>
+    <input type="hidden" name="enabled" value="0"><button class="btn" type="submit">Turn off</button>
+    {{else}}<p class="muted">Off: nobody can send new ones; those sent stay.</p>
+    <input type="hidden" name="enabled" value="1"><button class="btn" type="submit">Turn on</button>{{end}}
+  </form>
+</section>
 {{if ne .Channel.Name "town-square"}}
 <section class="setting">
   <h3 class="subhead">Who can join</h3>

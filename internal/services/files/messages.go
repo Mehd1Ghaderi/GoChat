@@ -8,11 +8,13 @@ import (
 )
 
 // BeginUpload replies with an *Upload when the caller may upload to the
-// channel.
+// channel. A voice message needs a channel that allows voice.
 type BeginUpload struct {
-	P         *models.Principal
-	ChannelID string
-	Name      string
+	P          *models.Principal
+	ChannelID  string
+	Name       string
+	Voice      bool
+	DurationMS uint32
 }
 
 type Upload struct {
@@ -22,6 +24,9 @@ type Upload struct {
 	ObjectKey string
 	// Room is how many bytes the uploader may still store, -1 for no limit.
 	Room int64
+	// Voice uploads must be audio, which the transport checks.
+	Voice      bool
+	DurationMS int
 }
 
 // CompleteUpload records a stored upload and replies with its *pb.Attachment.

@@ -78,7 +78,8 @@ func NewHandler(logger *zap.Logger, cfg *Config, client *drpc.Client, r *render.
 		"script-src 'self'",
 		"style-src 'self'",
 		"img-src 'self' data:",
-		"connect-src 'self' " + h.wsOrig,
+		"media-src 'self'",
+		"connect-src " + strings.Join(append([]string{"'self'", h.wsOrig}, cfg.VoiceOrigins...), " "),
 		"form-action 'self'",
 		"frame-ancestors 'none'",
 		"base-uri 'none'",
@@ -121,6 +122,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("POST /t/{team}/ch/{channel}/settings", h.csrf(http.HandlerFunc(h.updateChannel)))
 	mux.Handle("POST /t/{team}/ch/{channel}/privacy", h.csrf(http.HandlerFunc(h.channelPrivacy)))
 	mux.Handle("POST /t/{team}/ch/{channel}/archive", h.csrf(http.HandlerFunc(h.archiveChannel)))
+	mux.Handle("POST /t/{team}/ch/{channel}/voice", h.csrf(http.HandlerFunc(h.setChannelVoice)))
 	mux.HandleFunc("GET /t/{team}/channels/new", h.newChannelModal)
 	mux.Handle("POST /t/{team}/channels", h.csrf(http.HandlerFunc(h.createChannel)))
 	mux.HandleFunc("GET /t/{team}/channels/browse", h.browseModal)
@@ -157,6 +159,11 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /m/{channel}/{message}/edit", h.editMessageForm)
 	mux.Handle("POST /m/{channel}/{message}", h.csrf(http.HandlerFunc(h.editMessage)))
 	mux.Handle("POST /m/{channel}/{message}/delete", h.csrf(http.HandlerFunc(h.deleteMessage)))
+
+	mux.Handle("POST /voice/join", h.csrf(http.HandlerFunc(h.joinVoice)))
+	mux.Handle("POST /voice/leave", h.csrf(http.HandlerFunc(h.leaveVoice)))
+	mux.Handle("POST /voice/state", h.csrf(http.HandlerFunc(h.voiceState)))
+	mux.Handle("POST /t/{team}/ch/{channel}/voice/{user}/disconnect", h.csrf(http.HandlerFunc(h.disconnectVoice)))
 
 	mux.Handle("POST /upload", h.csrfMultipart(http.HandlerFunc(h.upload)))
 	mux.HandleFunc("GET /files/{id}", h.download)

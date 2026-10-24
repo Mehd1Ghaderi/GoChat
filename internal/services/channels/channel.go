@@ -169,7 +169,13 @@ func (a *channel) handle(c *actor.Context, req Request) {
 		out any
 		err error
 	)
+	if err := a.voiceRefuses(req); err != nil {
+		actors.Reply(c, err)
+		return
+	}
 	switch msg := req.(type) {
+	case VoiceAccess:
+		out, err = a.voiceAccess(msg.P)
 	case Access:
 		ch := *a.ch
 		out = &AccessResult{Channel: &ch, Role: a.members[msg.P.UserID]}
@@ -209,6 +215,8 @@ func (a *channel) handle(c *actor.Context, req Request) {
 		out, err = a.save(msg)
 	case Follow:
 		out, err = a.follow(msg)
+	case SetVoice:
+		out, err = a.setVoice(msg)
 	case MarkRead:
 		err = a.markRead(c, msg)
 	case Join:
@@ -234,6 +242,51 @@ func (a *channel) handle(c *actor.Context, req Request) {
 	if out != nil {
 		actors.Reply(c, out)
 	}
+}
+
+// voiceRefuses refuses in a voice channel what only text channels do.
+func (a *channel) voiceRefuses(req Request) error {
+	if a.ch.Kind != models.ChannelVoice {
+		return nil
+	}
+	switch req.(type) {
+	case Post, Edit, Delete, History, GetMessage, Thread, ThreadRead, Typing, React, Pin, Pins, Save, Follow, Mute, MarkRead, SetVoice:
+		return ierrors.FailedPrecondition("voice channels carry no messages")
+	case Join, AddMember:
+		return ierrors.FailedPrecondition("everyone in the team may talk in a voice channel: join the talk instead")
+	case Settings, Privacy, Archive:
+		return ierrors.FailedPrecondition("voice channels have no settings")
+	}
+	return nil
+}
+
+// voiceAccess tells what the caller may do in the talk of a voice channel:
+// members of its team connect, its moderators disconnect others.
+func (a *channel) voiceAccess(p *models.Principal) (*VoiceAccessResult, error) {
+	if a.ch.Kind != models.ChannelVoice {
+		return nil, ierrors.NotFound("voice channel not found")
+	}
+	ctx, cancel := a.ctx()
+	defer cancel()
+	tr, err := a.teamRole(ctx, p.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if tr == "" && p.Role != models.SystemRoleAdmin {
+		return nil, ierrors.NotFound("voice channel not found")
+	}
+	ch := *a.ch
+	return &VoiceAccessResult{
+		Channel:     &ch,
+		CanConnect:  a.Authz.Can(authz.ObjVoice, authz.ActConnect, string(tr), string(p.Role)),
+		CanModerate: a.Authz.Can(authz.ObjVoice, authz.ActMove, string(a.members[p.UserID]), string(tr), string(p.Role)),
+	}, nil
+}
+
+// open reports whether the team's members may see the channel without
+// belonging to it.
+func (a *channel) open() bool {
+	return a.ch.Kind == models.ChannelPublic || a.ch.Kind == models.ChannelVoice
 }
 
 func (a *channel) member(p *models.Principal) (models.ChannelRole, error) {
@@ -263,7 +316,7 @@ func (a *channel) teamRole(ctx context.Context, userID gocql.UUID) (models.TeamR
 
 func (a *channel) view(p *models.Principal) (*pb.Channel, error) {
 	role, ok := a.members[p.UserID]
-	if !ok && a.ch.Kind != models.ChannelPublic {
+	if !ok && !a.open() {
 		return nil, ierrors.NotFound("channel not found")
 	}
 	if !ok {
@@ -392,6 +445,9 @@ func (a *channel) post(msg Post) (*pb.Message, error) {
 	}
 	atts, err := a.ownAttachments(ctx, msg.P.UserID, attIDs)
 	if err != nil {
+		return nil, err
+	}
+	if err := a.checkVoice(atts); err != nil {
 		return nil, err
 	}
 	id := ids.NewTime()
@@ -599,6 +655,24 @@ func (a *channel) ownAttachments(ctx context.Context, userID gocql.UUID, attIDs 
 		out = append(out, att)
 	}
 	return out, nil
+}
+
+// checkVoice refuses voice messages where the channel stopped them since
+// they were recorded, and more than one in a message.
+func (a *channel) checkVoice(atts []*models.Attachment) error {
+	voices := 0
+	for _, att := range atts {
+		if att.Voice {
+			voices++
+		}
+	}
+	switch {
+	case voices > 0 && a.ch.VoiceDisabled:
+		return ierrors.FailedPrecondition("voice messages are turned off in this channel")
+	case voices > 1:
+		return ierrors.InvalidArgument("a message carries one voice message at most")
+	}
+	return nil
 }
 
 // messageOf finds a message, or with rawRoot a reply in that thread.

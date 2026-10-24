@@ -1,0 +1,10 @@
+voice:
+  # Overridden by VOICE_PUBLIC_URL, VOICE_ALLOWED_ORIGINS and
+  # VOICE_ICE_PUBLIC_IPS. Without public IPs the container announces its
+  # own addresses, which only this machine reaches.
+  public_url: ws://localhost:8090/rtc
+  allowed_origins: [http://localhost:8080]
+
+client:
+  drpc:
+    address: server:7070

@@ -33,6 +33,10 @@ server: _require_env build
 web: _require_env build
     @CLIENT_DRPC_GATEWAY_KEY="$GATEWAY_KEY" {{bin_dir}}/{{app_name}} web
 
+# Run the voice server on the host.
+voice: _require_env build
+    @CLIENT_DRPC_GATEWAY_KEY="$GATEWAY_KEY" {{bin_dir}}/{{app_name}} voice
+
 # Apply the scylla migrations (dev stores).
 # Migrations run as the database's admin role; the app's role cannot change
 # the schema.

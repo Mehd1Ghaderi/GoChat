@@ -84,7 +84,15 @@ message Event {
     SavedChanged saved_changed = 15;
     PinsChanged pins_changed = 16;
     ProfileChanged profile_changed = 17;
+    VoiceChannelUpdate voice_channel_update = 18;
   }
+}
+
+// VoiceChannelUpdate tells a team's members who talks in one of its voice
+// channels now.
+message VoiceChannelUpdate {
+  string team_id = 1;
+  VoiceChannelState channel = 2;
 }
 
 // SavedChanged tells a person's tabs they saved a message, or dropped it.
@@ -107,7 +115,7 @@ message PinsChanged {
 }
 
 // ChannelUpdated tells the members of a channel it was renamed, made public
-// or private, archived or restored.
+// or private, archived or restored, or took or stopped voice messages.
 message ChannelUpdated {
   Channel channel = 1;
 }

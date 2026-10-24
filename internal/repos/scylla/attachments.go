@@ -12,7 +12,7 @@ import (
 	ierrors "github.com/ssenerg/gochat/internal/errors"
 )
 
-const attachmentColumns = "id, channel_id, uploader_id, name, content_type, size, object_key, message_id, created_at, counted"
+const attachmentColumns = "id, channel_id, uploader_id, name, content_type, size, object_key, message_id, created_at, counted, voice, duration_ms"
 
 // PendingShards spreads a day's unposted uploads over several partitions.
 const PendingShards = 16
@@ -36,8 +36,8 @@ func pendingShard(id gocql.UUID) int {
 
 func (r *Repository) InsertAttachment(ctx context.Context, a *models.Attachment) error {
 	b := r.batch(ctx, true)
-	b.Query("INSERT INTO attachments (id, channel_id, uploader_id, name, content_type, size, object_key, created_at, counted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		a.ID, a.ChannelID, a.UploaderID, a.Name, a.ContentType, a.Size, a.ObjectKey, a.CreatedAt, a.Counted)
+	b.Query("INSERT INTO attachments (id, channel_id, uploader_id, name, content_type, size, object_key, created_at, counted, voice, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		a.ID, a.ChannelID, a.UploaderID, a.Name, a.ContentType, a.Size, a.ObjectKey, a.CreatedAt, a.Counted, a.Voice, a.DurationMS)
 	b.Query("INSERT INTO pending_uploads (day, shard, id, object_key, created_at) VALUES (?, ?, ?, ?, ?)",
 		PendingDay(a.CreatedAt), pendingShard(a.ID), a.ID, a.ObjectKey, a.CreatedAt)
 	return r.execBatch(b)

@@ -97,7 +97,7 @@ type member struct{}
 
 func (member) Receive(c *actor.Context) {
 	if _, ok := c.Message().(channels.Access); ok {
-		actors.Reply(c, &channels.AccessResult{Role: models.ChannelRoleMember})
+		actors.Reply(c, &channels.AccessResult{Channel: &models.Channel{Kind: models.ChannelPublic}, Role: models.ChannelRoleMember})
 	}
 }
 
@@ -229,7 +229,7 @@ func TestAdminSetsQuotas(t *testing.T) {
 }
 
 func TestConfigRefusesNegativeQuota(t *testing.T) {
-	cfg := Config{Workers: 1, OpTimeout: time.Second, MaxSize: 1 << 20, MaxUploads: 1, MaxUserUploads: 1, OrphanAfter: time.Hour, JanitorInterval: time.Minute}
+	cfg := Config{Workers: 1, OpTimeout: time.Second, MaxSize: 1 << 20, MaxVoiceDuration: time.Minute, MaxVoiceSize: 1 << 20, MaxUploads: 1, MaxUserUploads: 1, OrphanAfter: time.Hour, JanitorInterval: time.Minute}
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}

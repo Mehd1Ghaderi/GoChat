@@ -115,6 +115,8 @@ services:
     # Bytes of attachments each person may keep, 0 for no limit. A system
     # admin can give someone another quota.
     quota: 1073741824
+    max_voice_duration: 10m
+    max_voice_size: 16777216
     max_uploads: 64
     max_user_uploads: 4
     orphan_after: 24h
@@ -127,6 +129,13 @@ services:
     rate: 1
     burst: 5
     backfill: true
+  voice:
+    token_ttl: 30s
+    max_per_channel: 25
+    max_pending_per_user: 5
+    server_queue_limit: 4096
+    members_ttl: 15s
+    op_timeout: 10s
   hub:
     gateway_queue_limit: 65536
     presence_grace: 10s

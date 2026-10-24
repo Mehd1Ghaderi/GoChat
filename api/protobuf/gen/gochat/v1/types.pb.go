@@ -234,6 +234,8 @@ const (
 	ChannelType_CHANNEL_TYPE_PRIVATE     ChannelType = 2
 	ChannelType_CHANNEL_TYPE_DIRECT      ChannelType = 3
 	ChannelType_CHANNEL_TYPE_GROUP       ChannelType = 4
+	// A voice channel carries no messages: its members talk live.
+	ChannelType_CHANNEL_TYPE_VOICE ChannelType = 5
 )
 
 // Enum value maps for ChannelType.
@@ -244,6 +246,7 @@ var (
 		2: "CHANNEL_TYPE_PRIVATE",
 		3: "CHANNEL_TYPE_DIRECT",
 		4: "CHANNEL_TYPE_GROUP",
+		5: "CHANNEL_TYPE_VOICE",
 	}
 	ChannelType_value = map[string]int32{
 		"CHANNEL_TYPE_UNSPECIFIED": 0,
@@ -251,6 +254,7 @@ var (
 		"CHANNEL_TYPE_PRIVATE":     2,
 		"CHANNEL_TYPE_DIRECT":      3,
 		"CHANNEL_TYPE_GROUP":       4,
+		"CHANNEL_TYPE_VOICE":       5,
 	}
 )
 
@@ -811,8 +815,11 @@ type Channel struct {
 	// The others of a group conversation.
 	Peers []*User `protobuf:"bytes,14,rep,name=peers,proto3" json:"peers,omitempty"`
 	// Set while the channel is archived: read only.
-	ArchivedAt    *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=archived_at,json=archivedAt,proto3" json:"archived_at,omitempty"`
-	PinnedCount   int32                  `protobuf:"varint,16,opt,name=pinned_count,json=pinnedCount,proto3" json:"pinned_count,omitempty"`
+	ArchivedAt  *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=archived_at,json=archivedAt,proto3" json:"archived_at,omitempty"`
+	PinnedCount int32                  `protobuf:"varint,16,opt,name=pinned_count,json=pinnedCount,proto3" json:"pinned_count,omitempty"`
+	// Whether members may post voice messages. Direct and group
+	// conversations always allow them.
+	VoiceEnabled  bool `protobuf:"varint,17,opt,name=voice_enabled,json=voiceEnabled,proto3" json:"voice_enabled,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -959,6 +966,13 @@ func (x *Channel) GetPinnedCount() int32 {
 	return 0
 }
 
+func (x *Channel) GetVoiceEnabled() bool {
+	if x != nil {
+		return x.VoiceEnabled
+	}
+	return false
+}
+
 type ChannelMember struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	User          *User                  `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
@@ -1020,11 +1034,15 @@ func (x *ChannelMember) GetJoinedAt() *timestamppb.Timestamp {
 }
 
 type Attachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	ContentType   string                 `protobuf:"bytes,3,opt,name=content_type,json=contentType,proto3" json:"content_type,omitempty"`
-	Size          int64                  `protobuf:"varint,4,opt,name=size,proto3" json:"size,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Id          string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name        string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	ContentType string                 `protobuf:"bytes,3,opt,name=content_type,json=contentType,proto3" json:"content_type,omitempty"`
+	Size        int64                  `protobuf:"varint,4,opt,name=size,proto3" json:"size,omitempty"`
+	// A voice message recorded in the browser, played in place.
+	Voice bool `protobuf:"varint,5,opt,name=voice,proto3" json:"voice,omitempty"`
+	// The length of a voice message, as its recorder measured it.
+	DurationMs    uint32 `protobuf:"varint,6,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1083,6 +1101,20 @@ func (x *Attachment) GetContentType() string {
 func (x *Attachment) GetSize() int64 {
 	if x != nil {
 		return x.Size
+	}
+	return 0
+}
+
+func (x *Attachment) GetVoice() bool {
+	if x != nil {
+		return x.Voice
+	}
+	return false
+}
+
+func (x *Attachment) GetDurationMs() uint32 {
+	if x != nil {
+		return x.DurationMs
 	}
 	return 0
 }
@@ -1229,6 +1261,137 @@ func (x *Message) GetSaved() bool {
 	return false
 }
 
+// VoiceState is one person talking in a voice channel.
+type VoiceState struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	User          *User                  `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	ChannelId     string                 `protobuf:"bytes,2,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	SelfMute      bool                   `protobuf:"varint,3,opt,name=self_mute,json=selfMute,proto3" json:"self_mute,omitempty"`
+	SelfDeaf      bool                   `protobuf:"varint,4,opt,name=self_deaf,json=selfDeaf,proto3" json:"self_deaf,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VoiceState) Reset() {
+	*x = VoiceState{}
+	mi := &file_gochat_v1_types_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VoiceState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VoiceState) ProtoMessage() {}
+
+func (x *VoiceState) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_types_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VoiceState.ProtoReflect.Descriptor instead.
+func (*VoiceState) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_types_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *VoiceState) GetUser() *User {
+	if x != nil {
+		return x.User
+	}
+	return nil
+}
+
+func (x *VoiceState) GetChannelId() string {
+	if x != nil {
+		return x.ChannelId
+	}
+	return ""
+}
+
+func (x *VoiceState) GetSelfMute() bool {
+	if x != nil {
+		return x.SelfMute
+	}
+	return false
+}
+
+func (x *VoiceState) GetSelfDeaf() bool {
+	if x != nil {
+		return x.SelfDeaf
+	}
+	return false
+}
+
+// VoiceChannelState is everyone talking in a voice channel. Version grows
+// with each change, so an older state never replaces a newer one.
+type VoiceChannelState struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ChannelId     string                 `protobuf:"bytes,1,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	States        []*VoiceState          `protobuf:"bytes,2,rep,name=states,proto3" json:"states,omitempty"`
+	Version       uint64                 `protobuf:"varint,3,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VoiceChannelState) Reset() {
+	*x = VoiceChannelState{}
+	mi := &file_gochat_v1_types_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VoiceChannelState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VoiceChannelState) ProtoMessage() {}
+
+func (x *VoiceChannelState) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_types_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VoiceChannelState.ProtoReflect.Descriptor instead.
+func (*VoiceChannelState) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_types_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *VoiceChannelState) GetChannelId() string {
+	if x != nil {
+		return x.ChannelId
+	}
+	return ""
+}
+
+func (x *VoiceChannelState) GetStates() []*VoiceState {
+	if x != nil {
+		return x.States
+	}
+	return nil
+}
+
+func (x *VoiceChannelState) GetVersion() uint64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
 // Reaction is one emoji on a message and who reacted with it.
 type Reaction struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1240,7 +1403,7 @@ type Reaction struct {
 
 func (x *Reaction) Reset() {
 	*x = Reaction{}
-	mi := &file_gochat_v1_types_proto_msgTypes[10]
+	mi := &file_gochat_v1_types_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1252,7 +1415,7 @@ func (x *Reaction) String() string {
 func (*Reaction) ProtoMessage() {}
 
 func (x *Reaction) ProtoReflect() protoreflect.Message {
-	mi := &file_gochat_v1_types_proto_msgTypes[10]
+	mi := &file_gochat_v1_types_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1265,7 +1428,7 @@ func (x *Reaction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Reaction.ProtoReflect.Descriptor instead.
 func (*Reaction) Descriptor() ([]byte, []int) {
-	return file_gochat_v1_types_proto_rawDescGZIP(), []int{10}
+	return file_gochat_v1_types_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *Reaction) GetEmoji() string {
@@ -1337,7 +1500,7 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"TeamMember\x12#\n" +
 	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user\x12'\n" +
 	"\x04role\x18\x02 \x01(\x0e2\x13.gochat.v1.TeamRoleR\x04role\x127\n" +
-	"\tjoined_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bjoinedAt\"\xc7\x04\n" +
+	"\tjoined_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bjoinedAt\"\xec\x04\n" +
 	"\aChannel\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
 	"\ateam_id\x18\x02 \x01(\tR\x06teamId\x12\x12\n" +
@@ -1358,17 +1521,21 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"\x05peers\x18\x0e \x03(\v2\x0f.gochat.v1.UserR\x05peers\x12;\n" +
 	"\varchived_at\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"archivedAt\x12!\n" +
-	"\fpinned_count\x18\x10 \x01(\x05R\vpinnedCount\"\x99\x01\n" +
+	"\fpinned_count\x18\x10 \x01(\x05R\vpinnedCount\x12#\n" +
+	"\rvoice_enabled\x18\x11 \x01(\bR\fvoiceEnabled\"\x99\x01\n" +
 	"\rChannelMember\x12#\n" +
 	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user\x12*\n" +
 	"\x04role\x18\x02 \x01(\x0e2\x16.gochat.v1.ChannelRoleR\x04role\x127\n" +
-	"\tjoined_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bjoinedAt\"g\n" +
+	"\tjoined_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bjoinedAt\"\x9e\x01\n" +
 	"\n" +
 	"Attachment\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12!\n" +
 	"\fcontent_type\x18\x03 \x01(\tR\vcontentType\x12\x12\n" +
-	"\x04size\x18\x04 \x01(\x03R\x04size\"\x83\x04\n" +
+	"\x04size\x18\x04 \x01(\x03R\x04size\x12\x14\n" +
+	"\x05voice\x18\x05 \x01(\bR\x05voice\x12\x1f\n" +
+	"\vduration_ms\x18\x06 \x01(\rR\n" +
+	"durationMs\"\x83\x04\n" +
 	"\aMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -1386,7 +1553,19 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\vlastReplyAt\x121\n" +
 	"\treactions\x18\v \x03(\v2\x13.gochat.v1.ReactionR\treactions\x12\x16\n" +
 	"\x06pinned\x18\f \x01(\bR\x06pinned\x12\x14\n" +
-	"\x05saved\x18\r \x01(\bR\x05saved\";\n" +
+	"\x05saved\x18\r \x01(\bR\x05saved\"\x8a\x01\n" +
+	"\n" +
+	"VoiceState\x12#\n" +
+	"\x04user\x18\x01 \x01(\v2\x0f.gochat.v1.UserR\x04user\x12\x1d\n" +
+	"\n" +
+	"channel_id\x18\x02 \x01(\tR\tchannelId\x12\x1b\n" +
+	"\tself_mute\x18\x03 \x01(\bR\bselfMute\x12\x1b\n" +
+	"\tself_deaf\x18\x04 \x01(\bR\bselfDeaf\"{\n" +
+	"\x11VoiceChannelState\x12\x1d\n" +
+	"\n" +
+	"channel_id\x18\x01 \x01(\tR\tchannelId\x12-\n" +
+	"\x06states\x18\x02 \x03(\v2\x15.gochat.v1.VoiceStateR\x06states\x12\x18\n" +
+	"\aversion\x18\x03 \x01(\x04R\aversion\";\n" +
 	"\bReaction\x12\x14\n" +
 	"\x05emoji\x18\x01 \x01(\tR\x05emoji\x12\x19\n" +
 	"\buser_ids\x18\x02 \x03(\tR\auserIds*V\n" +
@@ -1409,13 +1588,14 @@ const file_gochat_v1_types_proto_rawDesc = "" +
 	"\vSTATUS_AWAY\x10\x02\x12\x0e\n" +
 	"\n" +
 	"STATUS_DND\x10\x03\x12\x12\n" +
-	"\x0eSTATUS_OFFLINE\x10\x04*\x8f\x01\n" +
+	"\x0eSTATUS_OFFLINE\x10\x04*\xa7\x01\n" +
 	"\vChannelType\x12\x1c\n" +
 	"\x18CHANNEL_TYPE_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13CHANNEL_TYPE_PUBLIC\x10\x01\x12\x18\n" +
 	"\x14CHANNEL_TYPE_PRIVATE\x10\x02\x12\x17\n" +
 	"\x13CHANNEL_TYPE_DIRECT\x10\x03\x12\x16\n" +
-	"\x12CHANNEL_TYPE_GROUP\x10\x04B\x9f\x01\n" +
+	"\x12CHANNEL_TYPE_GROUP\x10\x04\x12\x16\n" +
+	"\x12CHANNEL_TYPE_VOICE\x10\x05B\x9f\x01\n" +
 	"\rcom.gochat.v1B\n" +
 	"TypesProtoP\x01Z=github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1;gochatv1\xa2\x02\x03GXX\xaa\x02\tGochat.V1\xca\x02\tGochat\\V1\xe2\x02\x15Gochat\\V1\\GPBMetadata\xea\x02\n" +
 	"Gochat::V1b\x06proto3"
@@ -1433,7 +1613,7 @@ func file_gochat_v1_types_proto_rawDescGZIP() []byte {
 }
 
 var file_gochat_v1_types_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_gochat_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_gochat_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_gochat_v1_types_proto_goTypes = []any{
 	(SystemRole)(0),               // 0: gochat.v1.SystemRole
 	(TeamRole)(0),                 // 1: gochat.v1.TeamRole
@@ -1450,45 +1630,49 @@ var file_gochat_v1_types_proto_goTypes = []any{
 	(*ChannelMember)(nil),         // 12: gochat.v1.ChannelMember
 	(*Attachment)(nil),            // 13: gochat.v1.Attachment
 	(*Message)(nil),               // 14: gochat.v1.Message
-	(*Reaction)(nil),              // 15: gochat.v1.Reaction
-	(*timestamppb.Timestamp)(nil), // 16: google.protobuf.Timestamp
+	(*VoiceState)(nil),            // 15: gochat.v1.VoiceState
+	(*VoiceChannelState)(nil),     // 16: gochat.v1.VoiceChannelState
+	(*Reaction)(nil),              // 17: gochat.v1.Reaction
+	(*timestamppb.Timestamp)(nil), // 18: google.protobuf.Timestamp
 }
 var file_gochat_v1_types_proto_depIdxs = []int32{
-	16, // 0: gochat.v1.CustomStatus.expires_at:type_name -> google.protobuf.Timestamp
+	18, // 0: gochat.v1.CustomStatus.expires_at:type_name -> google.protobuf.Timestamp
 	0,  // 1: gochat.v1.User.role:type_name -> gochat.v1.SystemRole
-	16, // 2: gochat.v1.User.created_at:type_name -> google.protobuf.Timestamp
+	18, // 2: gochat.v1.User.created_at:type_name -> google.protobuf.Timestamp
 	3,  // 3: gochat.v1.User.status:type_name -> gochat.v1.Status
-	16, // 4: gochat.v1.User.dnd_until:type_name -> google.protobuf.Timestamp
+	18, // 4: gochat.v1.User.dnd_until:type_name -> google.protobuf.Timestamp
 	5,  // 5: gochat.v1.User.custom_status:type_name -> gochat.v1.CustomStatus
-	16, // 6: gochat.v1.Session.expires_at:type_name -> google.protobuf.Timestamp
-	16, // 7: gochat.v1.SessionInfo.created_at:type_name -> google.protobuf.Timestamp
-	16, // 8: gochat.v1.SessionInfo.last_seen_at:type_name -> google.protobuf.Timestamp
-	16, // 9: gochat.v1.SessionInfo.expires_at:type_name -> google.protobuf.Timestamp
+	18, // 6: gochat.v1.Session.expires_at:type_name -> google.protobuf.Timestamp
+	18, // 7: gochat.v1.SessionInfo.created_at:type_name -> google.protobuf.Timestamp
+	18, // 8: gochat.v1.SessionInfo.last_seen_at:type_name -> google.protobuf.Timestamp
+	18, // 9: gochat.v1.SessionInfo.expires_at:type_name -> google.protobuf.Timestamp
 	1,  // 10: gochat.v1.Team.role:type_name -> gochat.v1.TeamRole
-	16, // 11: gochat.v1.Team.created_at:type_name -> google.protobuf.Timestamp
+	18, // 11: gochat.v1.Team.created_at:type_name -> google.protobuf.Timestamp
 	6,  // 12: gochat.v1.TeamMember.user:type_name -> gochat.v1.User
 	1,  // 13: gochat.v1.TeamMember.role:type_name -> gochat.v1.TeamRole
-	16, // 14: gochat.v1.TeamMember.joined_at:type_name -> google.protobuf.Timestamp
+	18, // 14: gochat.v1.TeamMember.joined_at:type_name -> google.protobuf.Timestamp
 	4,  // 15: gochat.v1.Channel.type:type_name -> gochat.v1.ChannelType
 	2,  // 16: gochat.v1.Channel.role:type_name -> gochat.v1.ChannelRole
 	6,  // 17: gochat.v1.Channel.peer:type_name -> gochat.v1.User
-	16, // 18: gochat.v1.Channel.created_at:type_name -> google.protobuf.Timestamp
+	18, // 18: gochat.v1.Channel.created_at:type_name -> google.protobuf.Timestamp
 	6,  // 19: gochat.v1.Channel.peers:type_name -> gochat.v1.User
-	16, // 20: gochat.v1.Channel.archived_at:type_name -> google.protobuf.Timestamp
+	18, // 20: gochat.v1.Channel.archived_at:type_name -> google.protobuf.Timestamp
 	6,  // 21: gochat.v1.ChannelMember.user:type_name -> gochat.v1.User
 	2,  // 22: gochat.v1.ChannelMember.role:type_name -> gochat.v1.ChannelRole
-	16, // 23: gochat.v1.ChannelMember.joined_at:type_name -> google.protobuf.Timestamp
+	18, // 23: gochat.v1.ChannelMember.joined_at:type_name -> google.protobuf.Timestamp
 	6,  // 24: gochat.v1.Message.author:type_name -> gochat.v1.User
 	13, // 25: gochat.v1.Message.attachments:type_name -> gochat.v1.Attachment
-	16, // 26: gochat.v1.Message.created_at:type_name -> google.protobuf.Timestamp
-	16, // 27: gochat.v1.Message.edited_at:type_name -> google.protobuf.Timestamp
-	16, // 28: gochat.v1.Message.last_reply_at:type_name -> google.protobuf.Timestamp
-	15, // 29: gochat.v1.Message.reactions:type_name -> gochat.v1.Reaction
-	30, // [30:30] is the sub-list for method output_type
-	30, // [30:30] is the sub-list for method input_type
-	30, // [30:30] is the sub-list for extension type_name
-	30, // [30:30] is the sub-list for extension extendee
-	0,  // [0:30] is the sub-list for field type_name
+	18, // 26: gochat.v1.Message.created_at:type_name -> google.protobuf.Timestamp
+	18, // 27: gochat.v1.Message.edited_at:type_name -> google.protobuf.Timestamp
+	18, // 28: gochat.v1.Message.last_reply_at:type_name -> google.protobuf.Timestamp
+	17, // 29: gochat.v1.Message.reactions:type_name -> gochat.v1.Reaction
+	6,  // 30: gochat.v1.VoiceState.user:type_name -> gochat.v1.User
+	15, // 31: gochat.v1.VoiceChannelState.states:type_name -> gochat.v1.VoiceState
+	32, // [32:32] is the sub-list for method output_type
+	32, // [32:32] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_gochat_v1_types_proto_init() }
@@ -1502,7 +1686,7 @@ func file_gochat_v1_types_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gochat_v1_types_proto_rawDesc), len(file_gochat_v1_types_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   11,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

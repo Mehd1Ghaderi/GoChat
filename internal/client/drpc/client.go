@@ -42,6 +42,7 @@ type Client struct {
 	Files    pb.DRPCFileServiceClient
 	Users    pb.DRPCUserServiceClient
 	Admin    pb.DRPCAdminServiceClient
+	Voice    pb.DRPCVoiceServiceClient
 }
 
 func New(cfg *Config) (*Client, error) {
@@ -65,6 +66,7 @@ func New(cfg *Config) (*Client, error) {
 	c.Files = pb.NewDRPCFileServiceClient(conn)
 	c.Users = pb.NewDRPCUserServiceClient(conn)
 	c.Admin = pb.NewDRPCAdminServiceClient(conn)
+	c.Voice = pb.NewDRPCVoiceServiceClient(conn)
 	return c, nil
 }
 

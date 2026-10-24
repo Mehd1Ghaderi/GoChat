@@ -104,6 +104,9 @@ func (w *worker) begin(ctx context.Context, msg BeginUpload) (*Upload, error) {
 	if acc.Role == "" {
 		return nil, ierrors.NotFound("channel not found")
 	}
+	if acc.Channel.Kind == models.ChannelVoice {
+		return nil, ierrors.FailedPrecondition("voice channels carry no messages")
+	}
 	if !w.Authz.Can(authz.ObjFile, authz.ActUpload, string(acc.Role), string(msg.P.Role)) {
 		return nil, ierrors.PermissionDenied()
 	}
@@ -114,14 +117,18 @@ func (w *worker) begin(ctx context.Context, msg BeginUpload) (*Upload, error) {
 	if room == 0 {
 		return nil, ErrQuota
 	}
-	id := ids.New()
-	return &Upload{
-		ID:        id,
-		ChannelID: channelID,
-		Name:      validate.Filename(msg.Name),
-		ObjectKey: "attachments/" + channelID.String() + "/" + id.String(),
-		Room:      room,
-	}, nil
+	up := &Upload{ID: ids.New(), ChannelID: channelID, Name: validate.Filename(msg.Name), Voice: msg.Voice, Room: room}
+	up.ObjectKey = "attachments/" + channelID.String() + "/" + up.ID.String()
+	if msg.Voice {
+		if acc.Channel.VoiceDisabled {
+			return nil, ierrors.FailedPrecondition("voice messages are turned off in this channel")
+		}
+		if time.Duration(msg.DurationMS)*time.Millisecond > w.Cfg.MaxVoiceDuration {
+			return nil, ierrors.InvalidArgument("the voice message is too long")
+		}
+		up.DurationMS = int(msg.DurationMS)
+	}
+	return up, nil
 }
 
 // room is how many more bytes userID may store, -1 for no limit.
@@ -151,6 +158,8 @@ func (w *worker) complete(ctx context.Context, msg CompleteUpload) (*pb.Attachme
 		ObjectKey:   u.ObjectKey,
 		CreatedAt:   time.Now().UTC(),
 		Counted:     true,
+		Voice:       u.Voice,
+		DurationMS:  u.DurationMS,
 	}
 	// Charged first, so uploads at once cannot pass the quota together.
 	ok, err := w.Repo.ChargeStorage(ctx, msg.P.UserID, msg.Size, w.Cfg.Quota)

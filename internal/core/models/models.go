@@ -35,6 +35,9 @@ const (
 	ChannelPrivate ChannelKind = "private"
 	ChannelDirect  ChannelKind = "direct"
 	ChannelGroup   ChannelKind = "group"
+	// ChannelVoice is a room to talk in. Everyone in its team may join the
+	// talk; it carries no messages.
+	ChannelVoice ChannelKind = "voice"
 )
 
 // Conversation reports whether channels of k belong to no team and have a
@@ -118,6 +121,9 @@ type Channel struct {
 	LastMessageID gocql.UUID  `db:"last_message_id"`
 	// ArchivedAt is set while the channel is archived: read only.
 	ArchivedAt time.Time `db:"archived_at"`
+	// VoiceDisabled stops members posting voice messages; channels allow
+	// them unless set.
+	VoiceDisabled bool `db:"voice_disabled"`
 }
 
 type ChannelMember struct {
@@ -157,6 +163,9 @@ type Attachment struct {
 	CreatedAt   time.Time  `db:"created_at"`
 	// Counted is set when Size is part of the uploader's storage usage.
 	Counted bool `db:"counted"`
+	// Voice marks a voice message, DurationMS its length as recorded.
+	Voice      bool `db:"voice"`
+	DurationMS int  `db:"duration_ms"`
 }
 
 type Invite struct {

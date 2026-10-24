@@ -1,6 +1,7 @@
 web:
-  # Overridden by WEB_PUBLIC_URL.
+  # Overridden by WEB_PUBLIC_URL and WEB_VOICE_ORIGINS.
   public_url: http://localhost:8080
+  voice_origins: [ws://localhost:8090]
 
 client:
   drpc:

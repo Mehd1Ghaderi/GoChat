@@ -1,0 +1,65 @@
+logging:
+  console:
+    enabled: true
+    level: info
+    format: json
+  file:
+    enabled: false
+    name: voice
+    level: debug
+    format: json
+    folder: .logs
+    max_size: 10
+    max_age: 7
+    max_backups: 10
+    compress: false
+  version: false
+
+voice:
+  id: ""
+  # The signaling websocket as browsers reach it.
+  public_url: wss://chat.example.com/rtc
+  # The web gateway's origin, whose pages may connect.
+  allowed_origins: [https://chat.example.com]
+  http:
+    address: "0.0.0.0:8090"
+    read_header_timeout: 5s
+    shutdown_timeout: 10s
+  ice:
+    # Every peer shares these ports. Browsers must reach them at public_ips.
+    # They sit below the ephemeral range, which outgoing connections borrow.
+    udp_port: 7882
+    tcp_port: 7882
+    public_ips: []
+    turn:
+      urls: []
+      secret: ""
+      ttl: 12h
+  max_peers_per_room: 25
+  identify_timeout: 10s
+  ping_interval: 15s
+  write_timeout: 10s
+  read_limit: 65536
+  send_queue: 128
+  max_unidentified: 256
+  message_rate: 50
+  message_burst: 200
+  reconnect_min: 500ms
+  reconnect_max: 15s
+
+client:
+  drpc:
+    address: localhost:7070
+    gateway_key: ""
+    tls:
+      enabled: false
+      ca_file: ""
+      cert_file: ""
+      key_file: ""
+      server_name: ""
+    dial_timeout: 5s
+    write_timeout: 30s
+    request_timeout: 15s
+    pool_capacity: 4
+    pool_expiration: 2m
+    max_message_size: 4194304

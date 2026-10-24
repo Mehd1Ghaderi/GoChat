@@ -14,7 +14,7 @@ import (
 	ierrors "github.com/ssenerg/gochat/internal/errors"
 )
 
-const channelColumns = "id, team_id, name, display_name, purpose, kind, created_by, created_at, last_message_id, archived_at"
+const channelColumns = "id, team_id, name, display_name, purpose, kind, created_by, created_at, last_message_id, archived_at, voice_disabled"
 
 // NoTeam is the team of direct channels, which belong to none.
 var NoTeam = gocql.UUID{}
@@ -42,8 +42,8 @@ func (r *Repository) CreateChannel(ctx context.Context, ch *models.Channel, crea
 		return ierrors.AlreadyExists("a channel with this name exists")
 	}
 	b := r.batch(ctx, true)
-	b.Query("INSERT INTO channels (id, team_id, name, display_name, purpose, kind, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		ch.ID, ch.TeamID, ch.Name, ch.DisplayName, ch.Purpose, string(ch.Kind), ch.CreatedBy, ch.CreatedAt)
+	b.Query("INSERT INTO channels (id, team_id, name, display_name, purpose, kind, created_by, created_at, voice_disabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		ch.ID, ch.TeamID, ch.Name, ch.DisplayName, ch.Purpose, string(ch.Kind), ch.CreatedBy, ch.CreatedAt, ch.VoiceDisabled)
 	b.Query("INSERT INTO team_channels (team_id, channel_id, kind) VALUES (?, ?, ?)", ch.TeamID, ch.ID, string(ch.Kind))
 	if creator != nil {
 		addMemberQueries(b, creator)
@@ -158,6 +158,12 @@ func (r *Repository) GetChannels(ctx context.Context, ids []gocql.UUID) ([]*mode
 	var out []*models.Channel
 	err := r.query(ctx, "SELECT "+channelColumns+" FROM channels WHERE id IN ?", ids).SelectRelease(&out)
 	return out, wrap(err)
+}
+
+// SetVoiceDisabled stops a channel's members posting voice messages, or with
+// false lets them again.
+func (r *Repository) SetVoiceDisabled(ctx context.Context, channelID gocql.UUID, disabled bool) error {
+	return wrap(r.query(ctx, "UPDATE channels SET voice_disabled = ? WHERE id = ?", disabled, channelID).ExecRelease())
 }
 
 func (r *Repository) ListTeamChannels(ctx context.Context, teamID gocql.UUID) ([]*TeamChannel, error) {

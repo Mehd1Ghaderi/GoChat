@@ -31,6 +31,7 @@ import (
 	"github.com/ssenerg/gochat/internal/services/hub"
 	"github.com/ssenerg/gochat/internal/services/invites"
 	"github.com/ssenerg/gochat/internal/services/users"
+	"github.com/ssenerg/gochat/internal/services/voice"
 )
 
 type Repo interface {
@@ -83,6 +84,8 @@ type Deps struct {
 	Authz  *authz.Authorizer
 	Engine *actor.Engine
 	Hub    *actor.PID
+	// Voice hears of revoked sessions too, which may talk in voice channels.
+	Voice  *actor.PID
 	sealer *secure.Sealer
 	// recoveryKey keys the hashes of recovery codes, which are too short to
 	// be stored under a plain hash.
@@ -622,6 +625,9 @@ func (w *worker) revoked(userID gocql.UUID, hashes [][]byte, all bool) {
 		idList[i] = secure.PublicID(h)
 	}
 	w.Engine.Send(w.Hub, hub.RevokeSessions{UserID: userID.String(), SessionIDs: idList, All: all})
+	if w.Voice != nil {
+		w.Engine.Send(w.Voice, voice.RevokeSessions{UserID: userID, SessionIDs: idList, All: all})
+	}
 }
 
 func (w *worker) verifyPassword(ctx context.Context, p *models.Principal, pass string) (*models.User, error) {

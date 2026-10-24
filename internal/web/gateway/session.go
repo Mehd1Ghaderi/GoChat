@@ -463,14 +463,20 @@ func (s *session) loadSidebar(c *actor.Context, oob bool) {
 		if t, err := s.Client.Messages.ListThreads(ctx, &pb.ListThreadsRequest{TeamId: teamID}); err == nil {
 			unread = int(t.UnreadCount)
 		}
-		channels, direct := render.Split(res.Channels)
+		channels, voice, direct := render.Split(res.Channels)
 		var status map[string]pb.Status
 		if peers := render.Peers(direct); len(peers) > 0 {
 			if p, err := s.Client.Users.GetPresence(ctx, &pb.GetPresenceRequest{UserIds: peers}); err == nil {
 				status = p.Statuses
 			}
 		}
-		return sidebarReady{teamID: teamID, lists: &render.Lists{Team: team, Channels: channels, DMs: direct, Status: status, ThreadsUnread: unread, OOB: oob}}
+		lists := &render.Lists{Team: team, Channels: channels, Voice: voice, DMs: direct, Status: status, ThreadsUnread: unread, OOB: oob}
+		if len(voice) > 0 {
+			if vs, err := s.Client.Voice.ListVoiceStates(ctx, &pb.ListVoiceStatesRequest{TeamId: teamID}); err == nil {
+				lists.VoiceStates = render.VoiceStates(vs.Channels)
+			}
+		}
+		return sidebarReady{teamID: teamID, lists: lists}
 	})
 }
 
@@ -758,6 +764,8 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 			}
 			s.fragment("channel-header", view)
 			s.fragment("composer-area", view)
+			// The thread's composer offers voice as the channel does.
+			s.fragment("voice-slot", map[string]any{"Channel": ch.Id, "Enabled": ch.VoiceEnabled, "OOB": true})
 		}
 	case *pb.Event_SavedChanged:
 		d := p.SavedChanged
@@ -785,6 +793,18 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 		s.muted[p.ChannelMuted.ChannelId] = p.ChannelMuted.Muted
 		if s.sidebar[p.ChannelMuted.ChannelId] {
 			s.loadSidebar(c, true)
+		}
+	case *pb.Event_VoiceChannelUpdate:
+		// The page keeps the newest version it was shown of each.
+		d := p.VoiceChannelUpdate
+		if d.TeamId != s.teamID || d.Channel == nil {
+			return
+		}
+		room := render.VoiceRoom{TeamName: s.teamName, ChannelID: d.Channel.ChannelId, State: d.Channel, MeID: me, OOB: true}
+		s.fragment("voice-members", room)
+		if d.Channel.ChannelId == s.channelID {
+			room.Moderator = s.moderator
+			s.fragment("voice-tiles", room)
 		}
 	case *pb.Event_ReactionsChanged:
 		d := p.ReactionsChanged

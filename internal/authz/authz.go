@@ -30,6 +30,8 @@ const (
 	ObjUser          Object = "user"
 	ObjSession       Object = "session"
 	ObjStorage       Object = "storage"
+	// ObjVoice is the talk in voice channels.
+	ObjVoice Object = "voice"
 )
 
 type Action string
@@ -55,7 +57,12 @@ const (
 	ActFind          Action = "find"
 	ActDeactivate    Action = "deactivate"
 	// ActManageAny acts on what belongs to another user.
-	ActManageAny Action = "manage_any"
+	ActManageAny   Action = "manage_any"
+	ActCreateVoice Action = "create_voice"
+	// ActConnect joins the talk of a voice channel; ActMove disconnects
+	// others from it.
+	ActConnect Action = "connect"
+	ActMove    Action = "move"
 )
 
 type Authorizer struct {

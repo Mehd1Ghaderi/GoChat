@@ -46,6 +46,8 @@ func Mux(sys *services.System, storage *minio.Storage, cfg *services.Config) (*d
 		func() error { return pb.DRPCRegisterUserService(mux, &userService{b}) },
 		func() error { return pb.DRPCRegisterGatewayService(mux, &gatewayService{b}) },
 		func() error { return pb.DRPCRegisterAdminService(mux, &adminService{b}) },
+		func() error { return pb.DRPCRegisterVoiceService(mux, &voiceService{b}) },
+		func() error { return pb.DRPCRegisterVoiceServerService(mux, &voiceServerService{b}) },
 	} {
 		if err := reg(); err != nil {
 			return nil, err
@@ -478,11 +480,14 @@ func (s *channelService) CreateChannel(ctx context.Context, req *pb.CreateChanne
 		kind = models.ChannelPublic
 	case pb.ChannelType_CHANNEL_TYPE_PRIVATE:
 		kind = models.ChannelPrivate
+	case pb.ChannelType_CHANNEL_TYPE_VOICE:
+		kind = models.ChannelVoice
 	default:
-		return nil, ierrors.InvalidArgument("channel type must be public or private")
+		return nil, ierrors.InvalidArgument("channel type must be public, private or voice")
 	}
 	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Directory, directory.CreateChannel{
 		P: p, TeamID: req.TeamId, Name: req.Name, DisplayName: req.DisplayName, Purpose: req.Purpose, Kind: kind,
+		VoiceDisabled: req.VoiceDisabled,
 	})
 	if err != nil {
 		return nil, err
@@ -646,6 +651,18 @@ func (s *channelService) SetChannelMuted(ctx context.Context, req *pb.SetChannel
 		return nil, err
 	}
 	return &pb.SetChannelMutedResponse{}, nil
+}
+
+func (s *channelService) SetChannelVoice(ctx context.Context, req *pb.SetChannelVoiceRequest) (*pb.SetChannelVoiceResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Channels, channels.SetVoice{Target: t, Enabled: req.Enabled})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.SetChannelVoiceResponse{Channel: ch}, nil
 }
 
 func (s *channelService) ListMutedChannels(ctx context.Context, _ *pb.ListMutedChannelsRequest) (*pb.ListMutedChannelsResponse, error) {

@@ -18,6 +18,10 @@ service FileService {
 message UploadHeader {
   string channel_id = 1;
   string name = 2;
+  // Set for a voice message, which only channels that allow voice take and
+  // which must be audio.
+  bool voice = 3;
+  uint32 duration_ms = 4;
 }
 
 message UploadRequest {
