@@ -62,7 +62,8 @@ func Run(parent context.Context, cfg *Config) error {
 		actor.WithMiddleware(actors.Recover(logger)))
 	deps := &gateway.Deps{
 		Logger: logger.Named("session"), Cfg: cfg.Gateway, Client: client, Render: renderer, Router: router,
-		Resyncs: rate.NewLimiter(rate.Limit(cfg.Gateway.ResyncRate), cfg.Gateway.ResyncBurst),
+		Resyncs:  rate.NewLimiter(rate.Limit(cfg.Gateway.ResyncRate), cfg.Gateway.ResyncBurst),
+		Sidebars: gateway.NewSidebars(),
 	}
 
 	handler := web.NewHandler(logger, cfg.Web, client, renderer, engine, deps)

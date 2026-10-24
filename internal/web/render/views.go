@@ -78,7 +78,9 @@ type Lists struct {
 	Status map[string]pb.Status
 	// ThreadsUnread counts the followed threads with unread replies.
 	ThreadsUnread int
-	OOB           bool
+	// Key hands the sidebar to the page's socket.
+	Key string
+	OOB bool
 }
 
 // Conversation reports whether ch is a direct or group conversation.

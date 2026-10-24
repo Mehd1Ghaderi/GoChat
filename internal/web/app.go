@@ -18,6 +18,7 @@ import (
 	"github.com/ssenerg/gochat/internal/client/drpc"
 	"github.com/ssenerg/gochat/internal/core/emoji"
 	ierrors "github.com/ssenerg/gochat/internal/errors"
+	"github.com/ssenerg/gochat/internal/web/gateway"
 	"github.com/ssenerg/gochat/internal/web/render"
 )
 
@@ -345,7 +346,7 @@ func (h *Handler) channelPage(w http.ResponseWriter, r *http.Request) {
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		var err error
-		lists, err = h.lists(gctx, team, chID)
+		lists, err = h.lists(gctx, u, team, chID)
 		return err
 	})
 	g.Go(func() error {
@@ -367,7 +368,9 @@ func (h *Handler) channelPage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) lists(ctx context.Context, team *pb.Team, active string) (*render.Lists, error) {
+// lists loads the sidebar of a page for u, and keeps it for the page's
+// socket.
+func (h *Handler) lists(ctx context.Context, u *pb.User, team *pb.Team, active string) (*render.Lists, error) {
 	res, err := h.client.Channels.ListChannels(ctx, &pb.ListChannelsRequest{TeamId: team.Id})
 	if err != nil {
 		return nil, err
@@ -389,6 +392,9 @@ func (h *Handler) lists(ctx context.Context, team *pb.Team, active string) (*ren
 		if vs, err := h.client.Voice.ListVoiceStates(ctx, &pb.ListVoiceStatesRequest{TeamId: team.Id}); err == nil {
 			lists.VoiceStates = render.VoiceStates(vs.Channels)
 		}
+	}
+	if h.gw.Sidebars != nil {
+		lists.Key = h.gw.Sidebars.Put(gateway.NewSidebar(u.Id, lists))
 	}
 	return lists, nil
 }

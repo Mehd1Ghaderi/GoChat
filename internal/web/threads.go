@@ -69,7 +69,7 @@ func (h *Handler) threadsPage(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	lists, err := h.lists(ctx, team, "threads")
+	lists, err := h.lists(ctx, u, team, "threads")
 	if err != nil {
 		h.fail(w, r, err)
 		return

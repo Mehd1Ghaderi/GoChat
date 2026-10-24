@@ -43,6 +43,8 @@ type Deps struct {
 	Router *actor.PID
 	// Resyncs paces the pages reloaded after their socket came back.
 	Resyncs *rate.Limiter
+	// Sidebars hands a page's sidebar to its socket; nil loads it again.
+	Sidebars *Sidebars
 }
 
 // Frame is one message a browser sent over its socket, admitted by the
@@ -274,7 +276,7 @@ func (s *session) Receive(c *actor.Context) {
 			}
 			s.fragment("channel-lists", msg.lists)
 		}
-		s.adopt(c, msg.lists, msg.lists.OOB)
+		s.adopt(c, NewSidebar(s.user.Id, msg.lists), msg.lists.OOB)
 	case railReady:
 		s.fragment("team-rail", msg.rail)
 	case mutedReady:
@@ -445,43 +447,33 @@ func (s *session) rpc(c *actor.Context, fn func(ctx context.Context) any) {
 	}()
 }
 
-// adopt takes the sidebar's state from lists. Their unread marks count only
-// when the page shows them.
-func (s *session) adopt(c *actor.Context, lists *render.Lists, shown bool) {
-	s.sidebar = make(map[string]bool, len(lists.Channels)+len(lists.DMs))
+// adopt takes the sidebar's state. Its unread marks count only when the
+// page shows them.
+func (s *session) adopt(c *actor.Context, sb *Sidebar, shown bool) {
+	s.sidebar = make(map[string]bool, len(sb.items))
 	s.mentions = make(map[string]int)
-	s.peers = make(map[string]bool, len(lists.DMs))
-	s.directs = make(map[string]bool, len(lists.DMs))
-	s.peerOf = make(map[string]string, len(lists.DMs))
+	s.peers = make(map[string]bool)
+	s.directs = make(map[string]bool)
+	s.peerOf = make(map[string]string)
 	if shown {
 		s.unread = make(map[string]bool)
 	}
-	for _, ch := range lists.Channels {
-		s.sidebar[ch.Id] = true
-		s.mentions[ch.Id] = int(ch.MentionCount)
-		s.names[ch.Id] = render.Title(ch)
-		s.muted[ch.Id] = ch.Muted
-	}
-	for _, ch := range lists.DMs {
-		s.sidebar[ch.Id] = true
-		s.directs[ch.Id] = true
-		if ch.Type == pb.ChannelType_CHANNEL_TYPE_GROUP {
-			s.names[ch.Id] = render.Title(ch)
+	for _, it := range sb.items {
+		s.sidebar[it.id] = true
+		s.mentions[it.id] = it.mentions
+		s.muted[it.id] = it.muted
+		if it.name != "" {
+			s.names[it.id] = it.name
 		}
-		s.mentions[ch.Id] = int(ch.MentionCount)
-		s.muted[ch.Id] = ch.Muted
-		if ch.Peer != nil {
-			s.peers[ch.Peer.Id] = true
-			s.peerOf[ch.Id] = ch.Peer.Id
+		if it.direct {
+			s.directs[it.id] = true
 		}
-	}
-	if shown {
-		for _, list := range [][]*pb.Channel{lists.Channels, lists.DMs} {
-			for _, ch := range list {
-				if render.Unread(ch) && ch.Id != lists.Active {
-					s.unread[ch.Id] = true
-				}
-			}
+		if it.peer != "" {
+			s.peers[it.peer] = true
+			s.peerOf[it.id] = it.peer
+		}
+		if shown && it.unread {
+			s.unread[it.id] = true
 		}
 	}
 	c.Send(s.Router, watching{connID: s.connID, users: slices.Collect(maps.Keys(s.peers))})
@@ -539,6 +531,8 @@ type clientFrame struct {
 	RootID     string          `json:"root_id"`
 	Content    string          `json:"content"`
 	Attachment json.RawMessage `json:"attachment"`
+	// Sidebar is the key of the sidebar the page came with.
+	Sidebar string `json:"sidebar"`
 }
 
 func (f *clientFrame) attachments() []string {
@@ -622,7 +616,11 @@ func (s *session) view(c *actor.Context, f *clientFrame) {
 	s.typingSeq++
 	s.typer, s.shown = "", ""
 	if teamChanged {
-		s.loadSidebar(c, false)
+		if sb := s.Sidebars.take(f.Sidebar, s.user.Id, f.TeamID); sb != nil {
+			s.adopt(c, sb, true)
+		} else {
+			s.loadSidebar(c, false)
+		}
 	}
 	if s.inThreads {
 		return
