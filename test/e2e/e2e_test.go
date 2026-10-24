@@ -548,6 +548,13 @@ func TestEndToEnd(t *testing.T) {
 			_ = mw.Close()
 			return c.do(http.MethodPost, "/upload?channel="+town+"&voice=1&duration="+duration, &buf, mw.FormDataContentType(), true)
 		}
+		// Whatever an earlier run left, the channel starts with voice on.
+		settings := "/t/" + teamName + "/ch/" + town + "/voice"
+		if res, _ := admin.hx(settings, url.Values{"enabled": {"1"}}); res.StatusCode != http.StatusOK {
+			t.Fatalf("turn voice on: %d", res.StatusCode)
+		}
+		// Drop the update that may have caused, so it cannot pass for a later one.
+		bobWS.collect(500 * time.Millisecond)
 		res, body := upload(bob, webm, "2500")
 		m := attRe.FindStringSubmatch(body)
 		if res.StatusCode != http.StatusOK || m == nil || !strings.Contains(body, "Voice message") {
@@ -564,7 +571,6 @@ func TestEndToEnd(t *testing.T) {
 			t.Fatalf("a voice message that is no recording: %d", res.StatusCode)
 		}
 
-		settings := "/t/" + teamName + "/ch/" + town + "/voice"
 		if res, _ := bob.hx(settings, url.Values{"enabled": {"0"}}); res.StatusCode != http.StatusForbidden {
 			t.Fatalf("a member turned voice off: %d", res.StatusCode)
 		}
