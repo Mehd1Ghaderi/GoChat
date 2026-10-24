@@ -8,6 +8,7 @@ import (
 	"github.com/ssenerg/gochat/cmd/migrate"
 	"github.com/ssenerg/gochat/cmd/serve"
 	"github.com/ssenerg/gochat/cmd/version"
+	"github.com/ssenerg/gochat/cmd/voice"
 	"github.com/ssenerg/gochat/cmd/web"
 	"github.com/ssenerg/gochat/internal"
 )
@@ -25,6 +26,7 @@ func init() {
 	root.AddCommand(migrate.Cmd)
 	root.AddCommand(serve.Cmd)
 	root.AddCommand(web.Cmd)
+	root.AddCommand(voice.Cmd)
 }
 
 func main() {
