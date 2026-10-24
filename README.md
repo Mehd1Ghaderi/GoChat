@@ -295,9 +295,9 @@ voice server:
    `WEB_VOICE_ORIGINS=wss://voice.example.com`.
 
 2. **The media port** directly, without any proxy: `VOICE_MEDIA_PORT`
-   (50000), on UDP and on TCP. Set `VOICE_PUBLIC_IP` to the server's public
+   (7882), on UDP and on TCP. Set `VOICE_PUBLIC_IP` to the server's public
    address and open the port in the firewall, e.g.
-   `ufw allow 50000/udp && ufw allow 50000/tcp`, or in the cloud provider's
+   `ufw allow 7882/udp && ufw allow 7882/tcp`, or in the cloud provider's
    security group. A Cloudflare Tunnel or HTTP proxy cannot carry it.
 
 Browsers use UDP, and fall back to TCP on networks that block UDP. For
