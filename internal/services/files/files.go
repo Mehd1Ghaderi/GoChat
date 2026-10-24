@@ -46,11 +46,13 @@ type Deps struct {
 }
 
 // BeginUpload replies with an *Upload when the caller may upload to the
-// channel.
+// channel. A voice message needs a channel that allows voice.
 type BeginUpload struct {
-	P         *models.Principal
-	ChannelID string
-	Name      string
+	P          *models.Principal
+	ChannelID  string
+	Name       string
+	Voice      bool
+	DurationMS uint32
 }
 
 type Upload struct {
@@ -58,6 +60,9 @@ type Upload struct {
 	ChannelID gocql.UUID
 	Name      string
 	ObjectKey string
+	// Voice uploads must be audio, which the transport checks.
+	Voice      bool
+	DurationMS int
 }
 
 // CompleteUpload records a stored upload and replies with its *pb.Attachment.
@@ -127,13 +132,18 @@ func (w *worker) begin(ctx context.Context, msg BeginUpload) (*Upload, error) {
 	if !w.Authz.Can(authz.ObjFile, authz.ActUpload, string(acc.Role), string(msg.P.Role)) {
 		return nil, ierrors.PermissionDenied()
 	}
-	id := ids.New()
-	return &Upload{
-		ID:        id,
-		ChannelID: channelID,
-		Name:      validate.Filename(msg.Name),
-		ObjectKey: "attachments/" + channelID.String() + "/" + id.String(),
-	}, nil
+	up := &Upload{ID: ids.New(), ChannelID: channelID, Name: validate.Filename(msg.Name), Voice: msg.Voice}
+	up.ObjectKey = "attachments/" + channelID.String() + "/" + up.ID.String()
+	if msg.Voice {
+		if acc.Channel.VoiceDisabled {
+			return nil, ierrors.FailedPrecondition("voice messages are turned off in this channel")
+		}
+		if time.Duration(msg.DurationMS)*time.Millisecond > w.Cfg.MaxVoiceDuration {
+			return nil, ierrors.InvalidArgument("the voice message is too long")
+		}
+		up.DurationMS = int(msg.DurationMS)
+	}
+	return up, nil
 }
 
 func (w *worker) complete(ctx context.Context, msg CompleteUpload) (*pb.Attachment, error) {
@@ -147,6 +157,8 @@ func (w *worker) complete(ctx context.Context, msg CompleteUpload) (*pb.Attachme
 		Size:        msg.Size,
 		ObjectKey:   u.ObjectKey,
 		CreatedAt:   time.Now().UTC(),
+		Voice:       u.Voice,
+		DurationMS:  u.DurationMS,
 	}
 	if err := w.Repo.InsertAttachment(ctx, att); err != nil {
 		return nil, err

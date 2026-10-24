@@ -80,7 +80,14 @@ message Event {
     TeamLeft team_left = 11;
     ReactionsChanged reactions_changed = 12;
     ChannelMuted channel_muted = 13;
+    ChannelUpdated channel_updated = 14;
   }
+}
+
+// ChannelUpdated carries a channel's settings that every member shares.
+message ChannelUpdated {
+  string channel_id = 1;
+  bool voice_enabled = 2;
 }
 
 message ChannelMuted {

@@ -846,7 +846,7 @@ func (w *worker) createChannel(ctx context.Context, msg CreateChannel) (*pb.Chan
 	now := time.Now().UTC()
 	ch := &models.Channel{
 		ID: ids.New(), TeamID: teamID, Name: name, DisplayName: display, Purpose: purpose,
-		Kind: msg.Kind, CreatedBy: msg.P.UserID, CreatedAt: now,
+		Kind: msg.Kind, CreatedBy: msg.P.UserID, CreatedAt: now, VoiceDisabled: msg.VoiceDisabled,
 	}
 	cm := &models.ChannelMember{ChannelID: ch.ID, UserID: msg.P.UserID, TeamID: teamID, Role: models.ChannelRoleAdmin, JoinedAt: now}
 	if err := w.Repo.CreateChannel(ctx, ch, cm); err != nil {

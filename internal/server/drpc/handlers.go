@@ -407,6 +407,7 @@ func (s *channelService) CreateChannel(ctx context.Context, req *pb.CreateChanne
 	}
 	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Directory, directory.CreateChannel{
 		P: p, TeamID: req.TeamId, Name: req.Name, DisplayName: req.DisplayName, Purpose: req.Purpose, Kind: kind,
+		VoiceDisabled: req.VoiceDisabled,
 	})
 	if err != nil {
 		return nil, err
@@ -519,6 +520,18 @@ func (s *channelService) SetChannelMuted(ctx context.Context, req *pb.SetChannel
 		return nil, err
 	}
 	return &pb.SetChannelMutedResponse{}, nil
+}
+
+func (s *channelService) SetChannelVoice(ctx context.Context, req *pb.SetChannelVoiceRequest) (*pb.SetChannelVoiceResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Channels, channels.SetVoice{Target: t, Enabled: req.Enabled})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.SetChannelVoiceResponse{Channel: ch}, nil
 }
 
 func (s *channelService) ListMutedChannels(ctx context.Context, _ *pb.ListMutedChannelsRequest) (*pb.ListMutedChannelsResponse, error) {

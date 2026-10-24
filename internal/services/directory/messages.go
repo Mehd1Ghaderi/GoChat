@@ -94,6 +94,7 @@ type CreateChannel struct {
 	P                                  *models.Principal
 	TeamID, Name, DisplayName, Purpose string
 	Kind                               models.ChannelKind
+	VoiceDisabled                      bool
 }
 
 type OpenDirect struct {

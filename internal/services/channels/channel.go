@@ -183,6 +183,8 @@ func (a *channel) handle(c *actor.Context, req Request) {
 		out, err = a.react(msg)
 	case Mute:
 		out, err = a.mute(msg)
+	case SetVoice:
+		out, err = a.setVoice(msg)
 	case MarkRead:
 		err = a.markRead(c, msg)
 	case Join:
@@ -278,6 +280,37 @@ func (a *channel) mute(msg Mute) (Done, error) {
 	return Done{}, nil
 }
 
+// setVoice changes whether members may post voice messages. Messages posted
+// before stay as they are.
+func (a *channel) setVoice(msg SetVoice) (*pb.Channel, error) {
+	role, err := a.member(msg.P)
+	if err != nil {
+		return nil, err
+	}
+	if a.ch.Kind == models.ChannelDirect {
+		return nil, ierrors.FailedPrecondition("direct conversations always allow voice messages")
+	}
+	ctx, cancel := a.ctx()
+	defer cancel()
+	tr, err := a.teamRole(ctx, msg.P.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if !a.Authz.Can(authz.ObjChannel, authz.ActUpdate, string(role), string(tr), string(msg.P.Role)) {
+		return nil, ierrors.PermissionDenied()
+	}
+	if disabled := !msg.Enabled; disabled != a.ch.VoiceDisabled {
+		if err := a.Repo.SetVoiceDisabled(ctx, a.id, disabled); err != nil {
+			return nil, err
+		}
+		a.ch.VoiceDisabled = disabled
+		a.deliver(a.memberIDs, &pb.Event{Payload: &pb.Event_ChannelUpdated{ChannelUpdated: &pb.ChannelUpdated{
+			ChannelId: a.id.String(), VoiceEnabled: msg.Enabled,
+		}}})
+	}
+	return a.channelFor(msg.P.UserID, role)
+}
+
 // channelFor renders the channel as userID sees it.
 func (a *channel) channelFor(userID gocql.UUID, role models.ChannelRole) (*pb.Channel, error) {
 	var peer *pb.User
@@ -364,6 +397,9 @@ func (a *channel) post(msg Post) (*pb.Message, error) {
 	}
 	atts, err := a.ownAttachments(ctx, msg.P.UserID, attIDs)
 	if err != nil {
+		return nil, err
+	}
+	if err := a.checkVoice(atts); err != nil {
 		return nil, err
 	}
 	id := ids.NewTime()
@@ -543,6 +579,24 @@ func (a *channel) ownAttachments(ctx context.Context, userID gocql.UUID, attIDs 
 		out = append(out, att)
 	}
 	return out, nil
+}
+
+// checkVoice refuses voice messages where the channel stopped them since
+// they were recorded, and more than one in a message.
+func (a *channel) checkVoice(atts []*models.Attachment) error {
+	voices := 0
+	for _, att := range atts {
+		if att.Voice {
+			voices++
+		}
+	}
+	switch {
+	case voices > 0 && a.ch.VoiceDisabled:
+		return ierrors.FailedPrecondition("voice messages are turned off in this channel")
+	case voices > 1:
+		return ierrors.InvalidArgument("a message carries one voice message at most")
+	}
+	return nil
 }
 
 // messageOf finds a message, or with rawRoot a reply in that thread.

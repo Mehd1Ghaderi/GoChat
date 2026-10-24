@@ -83,6 +83,9 @@ message Channel {
   // direct conversation.
   int32 mention_count = 12;
   bool muted = 13;
+  // Whether members may post voice messages. Direct channels always allow
+  // them.
+  bool voice_enabled = 14;
 }
 
 message ChannelMember {
@@ -96,6 +99,10 @@ message Attachment {
   string name = 2;
   string content_type = 3;
   int64 size = 4;
+  // A voice message recorded in the browser, played in place.
+  bool voice = 5;
+  // The length of a voice message, as its recorder measured it.
+  uint32 duration_ms = 6;
 }
 
 message Message {
