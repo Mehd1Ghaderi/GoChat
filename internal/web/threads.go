@@ -55,13 +55,13 @@ func (h *Handler) threadsPage(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case q.Has("offset"):
-		h.fragment(w, http.StatusOK, "threads-page", view)
+		h.fragment(w, r, http.StatusOK, "threads-page", view)
 		return
 	case q.Get("list") == "1":
-		h.fragment(w, http.StatusOK, "threads-list", view)
+		h.fragment(w, r, http.StatusOK, "threads-list", view)
 		return
 	case isHTMX(r) && r.Header.Get("HX-Target") == "main" && r.Header.Get("HX-History-Restore-Request") != "true":
-		h.fragment(w, http.StatusOK, "threads", view)
+		h.fragment(w, r, http.StatusOK, "threads", view)
 		return
 	}
 	res, err := h.client.Teams.ListTeams(ctx, &pb.ListTeamsRequest{})
@@ -101,5 +101,5 @@ func (h *Handler) followThread(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "follow-button", map[string]any{"Channel": chID, "Root": rootID, "Following": follow})
+	h.fragment(w, r, http.StatusOK, "follow-button", map[string]any{"Channel": chID, "Root": rootID, "Following": follow})
 }

@@ -1,11 +1,15 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"io/fs"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
+	"path"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -44,6 +48,9 @@ type Handler struct {
 	photoWork  chan struct{}
 	connSeq    atomic.Uint64
 	csp        string
+	zipper     *zipper
+	// zipped holds the static files gzipped, by name.
+	zipped map[string][]byte
 }
 
 func NewHandler(logger *zap.Logger, cfg *Config, client *drpc.Client, r *render.Renderer, engine *actor.Engine, gw *gateway.Deps) *Handler {
@@ -63,7 +70,10 @@ func NewHandler(logger *zap.Logger, cfg *Config, client *drpc.Client, r *render.
 
 		photoReads: make(chan struct{}, photoReaders),
 		photoWork:  make(chan struct{}, photoDecoders),
+		zipper:     newZipper(2 * runtime.GOMAXPROCS(0)),
 	}
+	static, _ := fs.Sub(views.Files, "static")
+	h.zipped, _ = gzipAll(static)
 	wsScheme := "ws"
 	if h.secure {
 		wsScheme = "wss"
@@ -217,7 +227,16 @@ func (h *Handler) staticFiles(next http.Handler) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		hd := w.Header()
+		hd.Set("Cache-Control", "public, max-age=31536000, immutable")
+		hd.Add("Vary", "Accept-Encoding")
+		name := strings.TrimPrefix(r.URL.Path, h.render.StaticPrefix)
+		if zipped, ok := h.zipped[name]; ok && acceptsGzip(r) {
+			hd.Set("Content-Type", mime.TypeByExtension(path.Ext(name)))
+			hd.Set("Content-Encoding", "gzip")
+			http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(zipped))
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }

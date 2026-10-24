@@ -115,6 +115,10 @@ func (h *Handler) guard(next http.Handler, multipart bool) http.Handler {
 		if sent == "" && strings.HasPrefix(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
 			sent = r.PostFormValue(csrfField)
 		}
+		// Pages carry the token masked.
+		if token, ok := secure.UnmaskToken(sent); ok {
+			sent = token
+		}
 		if !secure.Equal(sent, c.Value) {
 			h.refuseCSRF(w, r)
 			return
@@ -171,16 +175,17 @@ func (h *Handler) clearCookie(w http.ResponseWriter, name string) {
 	})
 }
 
-// csrfToken returns the request's CSRF token, issuing one when missing.
+// csrfToken returns the request's CSRF token for a page, masked, issuing
+// one when missing.
 func (h *Handler) csrfToken(w http.ResponseWriter, r *http.Request) string {
 	if c, err := r.Cookie(h.cookieName("csrf")); err == nil && secure.ValidToken(c.Value) {
-		return c.Value
+		return secure.MaskToken(c.Value)
 	}
 	// Lax: a visit from another site does not see a Strict cookie, and the
 	// new token it got would break every other open tab.
 	token := secure.Token()
 	h.setCookie(w, "csrf", token, 0, http.SameSiteLaxMode)
-	return token
+	return secure.MaskToken(token)
 }
 
 func (h *Handler) sessionToken(r *http.Request) string {

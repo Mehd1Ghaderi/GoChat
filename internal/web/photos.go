@@ -135,7 +135,7 @@ func (h *Handler) setPhoto(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		field.Error = h.photoError(err)
 	}
-	h.fragment(w, http.StatusOK, "photo-field", field)
+	h.fragment(w, r, http.StatusOK, "photo-field", field)
 }
 
 func (h *Handler) teamSettings(w http.ResponseWriter, r *http.Request) {
@@ -148,7 +148,7 @@ func (h *Handler) teamSettings(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, ierrors.PermissionDenied())
 		return
 	}
-	h.fragment(w, http.StatusOK, "team-settings", photoField{ID: "team-photo", URL: "/t/" + team.Name + "/photo", Team: team})
+	h.fragment(w, r, http.StatusOK, "team-settings", photoField{ID: "team-photo", URL: "/t/" + team.Name + "/photo", Team: team})
 }
 
 // setTeamPhoto answers with the photo field and the refreshed team rail.

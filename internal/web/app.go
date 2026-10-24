@@ -318,7 +318,7 @@ func (h *Handler) channelPage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		view.OpenThread = threadParam(r)
-		h.fragment(w, http.StatusOK, "channel", view)
+		h.fragment(w, r, http.StatusOK, "channel", view)
 		return
 	}
 
@@ -439,7 +439,7 @@ func (h *Handler) olderMessages(w http.ResponseWriter, r *http.Request) {
 	if n := len(msgs.Messages); n > 0 {
 		view.Oldest = msgs.Messages[n-1].Id
 	}
-	h.fragment(w, http.StatusOK, "older-page", view)
+	h.fragment(w, r, http.StatusOK, "older-page", view)
 }
 
 func (h *Handler) teamFor(w http.ResponseWriter, r *http.Request) (*pb.User, *pb.Team, context.Context, context.CancelFunc) {
@@ -463,7 +463,7 @@ func (h *Handler) newChannelModal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer cancel()
-	h.fragment(w, http.StatusOK, "new-channel", struct {
+	h.fragment(w, r, http.StatusOK, "new-channel", struct {
 		Team  *pb.Team
 		Voice bool
 	}{team, r.URL.Query().Get("type") == "voice"})
@@ -488,7 +488,7 @@ func (h *Handler) createChannel(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if msg, ok := formError(err); ok {
-			h.text(w, http.StatusOK, "error", msg)
+			h.text(w, r, http.StatusOK, "error", msg)
 			return
 		}
 		h.fail(w, r, err)
@@ -508,7 +508,7 @@ func (h *Handler) browseModal(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "browse", struct {
+	h.fragment(w, r, http.StatusOK, "browse", struct {
 		Team               *pb.Team
 		Channels, Archived []*pb.Channel
 	}{team, res.Channels, res.Archived})
@@ -598,7 +598,7 @@ func (h *Handler) peopleModal(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "dm-picker", peopleData{SearchURL: "/t/" + team.Name + "/people/search", ActionURL: "/t/" + team.Name + "/dm", Members: members})
+	h.fragment(w, r, http.StatusOK, "dm-picker", peopleData{SearchURL: "/t/" + team.Name + "/people/search", ActionURL: "/t/" + team.Name + "/dm", Members: members})
 }
 
 func (h *Handler) peopleSearch(w http.ResponseWriter, r *http.Request) {
@@ -612,7 +612,7 @@ func (h *Handler) peopleSearch(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "dm-results", peopleData{Members: members})
+	h.fragment(w, r, http.StatusOK, "dm-results", peopleData{Members: members})
 }
 
 // maxPicked bounds the people a conversation is started with.
@@ -671,7 +671,7 @@ func (h *Handler) moreInvites(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "invite-rows", data)
+	h.fragment(w, r, http.StatusOK, "invite-rows", data)
 }
 
 func (h *Handler) inviteModal(w http.ResponseWriter, r *http.Request) {
@@ -685,7 +685,7 @@ func (h *Handler) inviteModal(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "invite", data)
+	h.fragment(w, r, http.StatusOK, "invite", data)
 }
 
 // createInvite shows the new link, once, and refreshes the open invites.
@@ -800,7 +800,7 @@ func (h *Handler) renderTeamMembers(w http.ResponseWriter, r *http.Request, ctx 
 	if after != "" {
 		name = "team-member-rows"
 	}
-	h.fragment(w, http.StatusOK, name, data)
+	h.fragment(w, r, http.StatusOK, name, data)
 }
 
 func (h *Handler) teamMembers(w http.ResponseWriter, r *http.Request) {
@@ -879,7 +879,7 @@ func (h *Handler) renderChannelMembers(w http.ResponseWriter, r *http.Request, c
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "channel-members", channelMembersData{
+	h.fragment(w, r, http.StatusOK, "channel-members", channelMembersData{
 		Team: team, ChannelID: chID, Members: members,
 		CanAdd:    !render.Conversation(ch),
 		CanRemove: !render.Conversation(ch) && moderator(u, team, ch),
@@ -915,7 +915,7 @@ func (h *Handler) addMemberModal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	base := "/t/" + team.Name + "/ch/" + chID
-	h.fragment(w, http.StatusOK, "people", peopleData{
+	h.fragment(w, r, http.StatusOK, "people", peopleData{
 		Heading: "Add people", SearchURL: base + "/add/search", ActionURL: base + "/members", ActionLabel: "Add", Members: members,
 	})
 }
@@ -935,7 +935,7 @@ func (h *Handler) addMemberSearch(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "people-results", peopleData{
+	h.fragment(w, r, http.StatusOK, "people-results", peopleData{
 		ActionURL: "/t/" + team.Name + "/ch/" + chID + "/members", ActionLabel: "Add", Members: members,
 	})
 }
@@ -1011,7 +1011,7 @@ func (h *Handler) messageFragment(w http.ResponseWriter, r *http.Request) {
 	if m == nil {
 		return
 	}
-	h.fragment(w, http.StatusOK, "message", h.render.Message(m, u, false))
+	h.fragment(w, r, http.StatusOK, "message", h.render.Message(m, u, false))
 }
 
 func (h *Handler) editMessageForm(w http.ResponseWriter, r *http.Request) {
@@ -1023,7 +1023,7 @@ func (h *Handler) editMessageForm(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, ierrors.PermissionDenied())
 		return
 	}
-	h.fragment(w, http.StatusOK, "message-edit", m)
+	h.fragment(w, r, http.StatusOK, "message-edit", m)
 }
 
 func (h *Handler) editMessage(w http.ResponseWriter, r *http.Request) {
@@ -1042,7 +1042,7 @@ func (h *Handler) editMessage(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "message", h.render.Message(res.Message, u, false))
+	h.fragment(w, r, http.StatusOK, "message", h.render.Message(res.Message, u, false))
 }
 
 func (h *Handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
@@ -1129,7 +1129,7 @@ func (h *Handler) threadPanel(w http.ResponseWriter, r *http.Request) {
 		view.Oldest = thread.Replies[0].Id
 	}
 	if before != "" {
-		h.fragment(w, http.StatusOK, "older-replies-page", view)
+		h.fragment(w, r, http.StatusOK, "older-replies-page", view)
 		return
 	}
 	if thread.Following {
@@ -1137,7 +1137,7 @@ func (h *Handler) threadPanel(w http.ResponseWriter, r *http.Request) {
 			h.logger.Debug("failed to mark a thread read", zap.Error(err))
 		}
 	}
-	h.fragment(w, http.StatusOK, "thread", view)
+	h.fragment(w, r, http.StatusOK, "thread", view)
 }
 
 type suggestion struct {
@@ -1213,7 +1213,7 @@ func (h *Handler) mentionSuggestions(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	h.fragment(w, http.StatusOK, "suggest", items)
+	h.fragment(w, r, http.StatusOK, "suggest", items)
 }
 
 func (h *Handler) reactionPicker(w http.ResponseWriter, r *http.Request) {
@@ -1224,7 +1224,7 @@ func (h *Handler) reactionPicker(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	h.fragment(w, http.StatusOK, "emoji-picker", struct {
+	h.fragment(w, r, http.StatusOK, "emoji-picker", struct {
 		URL   string
 		Emoji []emoji.Emoji
 	}{render.ReactURL(chID, msgID, rootID), emoji.All})
@@ -1253,7 +1253,7 @@ func (h *Handler) react(w http.ResponseWriter, r *http.Request) {
 	if r.PostFormValue("picker") == "1" {
 		w.Header().Set("HX-Trigger", "closeModal")
 	}
-	h.fragment(w, http.StatusOK, "reactions", render.Reactions(chID, msgID, rootID, res.Reactions, u, true))
+	h.fragment(w, r, http.StatusOK, "reactions", render.Reactions(chID, msgID, rootID, res.Reactions, u, true))
 }
 
 // threadParam is the valid ?thread of a request, or empty.
@@ -1325,5 +1325,5 @@ func (h *Handler) muteChannel(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "mute-button", map[string]any{"Team": team.Name, "Channel": chID, "Muted": muted})
+	h.fragment(w, r, http.StatusOK, "mute-button", map[string]any{"Team": team.Name, "Channel": chID, "Muted": muted})
 }

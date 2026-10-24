@@ -96,7 +96,7 @@ func (h *Handler) sessionsFragment(w http.ResponseWriter, r *http.Request, err e
 	} else {
 		d.Status = ok
 	}
-	h.fragment(w, http.StatusOK, "sessions", d)
+	h.fragment(w, r, http.StatusOK, "sessions", d)
 }
 
 func (h *Handler) revokeSession(w http.ResponseWriter, r *http.Request) {
@@ -124,12 +124,12 @@ func (h *Handler) revokeOtherSessions(w http.ResponseWriter, r *http.Request) {
 	h.sessionsFragment(w, r, err, "Every other session was signed out.")
 }
 
-func (h *Handler) status(w http.ResponseWriter, err error, ok string) {
+func (h *Handler) status(w http.ResponseWriter, r *http.Request, err error, ok string) {
 	if err != nil {
-		h.text(w, http.StatusOK, "error", drpc.Err(err).Message)
+		h.text(w, r, http.StatusOK, "error", drpc.Err(err).Message)
 		return
 	}
-	h.text(w, http.StatusOK, "ok", ok)
+	h.text(w, r, http.StatusOK, "ok", ok)
 }
 
 func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
@@ -140,7 +140,7 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	_, err := h.client.Users.UpdateProfile(ctx, &pb.UpdateProfileRequest{DisplayName: r.PostFormValue("display_name")})
 	h.me.Delete(h.sessionToken(r))
-	h.status(w, err, "Saved.")
+	h.status(w, r, err, "Saved.")
 }
 
 func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
@@ -148,13 +148,13 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.PostFormValue("new") != r.PostFormValue("confirm") {
-		h.text(w, http.StatusOK, "error", "The new passwords do not match.")
+		h.text(w, r, http.StatusOK, "error", "The new passwords do not match.")
 		return
 	}
 	ctx, cancel := h.ctx(r)
 	defer cancel()
 	_, err := h.client.Auth.ChangePassword(ctx, &pb.ChangePasswordRequest{CurrentPassword: r.PostFormValue("current"), NewPassword: r.PostFormValue("new")})
-	h.status(w, err, "Password changed. Other sessions were signed out.")
+	h.status(w, r, err, "Password changed. Other sessions were signed out.")
 }
 
 func qrCode(url string) (template.URL, error) {
@@ -182,7 +182,7 @@ func (h *Handler) totpFragment(w http.ResponseWriter, r *http.Request, errMsg st
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "totp", totpData{User: me.User, Error: errMsg})
+	h.fragment(w, r, http.StatusOK, "totp", totpData{User: me.User, Error: errMsg})
 }
 
 func (h *Handler) beginTOTP(w http.ResponseWriter, r *http.Request) {
@@ -201,7 +201,7 @@ func (h *Handler) beginTOTP(w http.ResponseWriter, r *http.Request) {
 		h.totpFragment(w, r, "Could not draw the QR code; type the key instead.")
 		return
 	}
-	h.fragment(w, http.StatusOK, "totp-setup", totpSetupData{Secret: res.Secret, URL: res.Url, QR: qr})
+	h.fragment(w, r, http.StatusOK, "totp-setup", totpSetupData{Secret: res.Secret, URL: res.Url, QR: qr})
 }
 
 func (h *Handler) confirmTOTP(w http.ResponseWriter, r *http.Request) {
@@ -223,11 +223,11 @@ func (h *Handler) confirmTOTP(w http.ResponseWriter, r *http.Request) {
 			h.totpFragment(w, r, data.Error)
 			return
 		}
-		h.fragment(w, http.StatusOK, "totp-setup", data)
+		h.fragment(w, r, http.StatusOK, "totp-setup", data)
 		return
 	}
 	h.me.Delete(h.sessionToken(r))
-	h.fragment(w, http.StatusOK, "totp-codes", res.RecoveryCodes)
+	h.fragment(w, r, http.StatusOK, "totp-codes", res.RecoveryCodes)
 }
 
 func (h *Handler) disableTOTP(w http.ResponseWriter, r *http.Request) {
