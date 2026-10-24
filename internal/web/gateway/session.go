@@ -10,7 +10,6 @@ import (
 	"github.com/anthdm/hollywood/actor"
 	"github.com/coder/websocket"
 	"go.uber.org/zap"
-	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
@@ -41,14 +40,9 @@ type Deps struct {
 	Router *actor.PID
 }
 
-// Frame is one message a browser sent over its socket.
+// Frame is one message a browser sent over its socket, admitted by the
+// session's Inflow.
 type Frame struct{ Data []byte }
-
-type outMsg struct {
-	data  []byte
-	code  websocket.StatusCode
-	close bool
-}
 
 type (
 	clearTyping struct {
@@ -78,8 +72,8 @@ type session struct {
 	connID    uint64
 	call      drpc.Call
 	ws        *websocket.Conn
-	out       chan outMsg
-	limiter   *rate.Limiter
+	out       *outbox
+	in        *Inflow
 	user      *pb.User
 	sessionID string
 	teamID    string
@@ -126,15 +120,15 @@ type session struct {
 	early [][]byte
 }
 
-func NewSession(d *Deps, connID uint64, call drpc.Call, ws *websocket.Conn) actor.Producer {
+func NewSession(d *Deps, connID uint64, call drpc.Call, ws *websocket.Conn, in *Inflow) actor.Producer {
 	return func() actor.Receiver {
 		return &session{
 			Deps:     d,
 			connID:   connID,
 			call:     call,
 			ws:       ws,
-			out:      make(chan outMsg, d.Cfg.SendQueue),
-			limiter:  rate.NewLimiter(rate.Limit(d.Cfg.FrameRate), d.Cfg.FrameBurst),
+			out:      newOutbox(d.Cfg.SendBuffer),
+			in:       in,
 			sidebar:  make(map[string]bool),
 			mentions: make(map[string]int),
 			muted:    make(map[string]bool),
@@ -165,10 +159,8 @@ func (s *session) Receive(c *actor.Context) {
 		if s.expiry != nil {
 			s.expiry.Stop()
 		}
-		if !s.closing {
-			s.closing = true
-			close(s.out)
-		}
+		s.closing = true
+		s.out.close(websocket.StatusNormalClosure)
 	case Ready:
 		s.user, s.sessionID = msg.User, msg.SessionID
 		s.dnd = render.Chosen(msg.User) == pb.Status_STATUS_DND
@@ -182,6 +174,7 @@ func (s *session) Receive(c *actor.Context) {
 		}
 		for _, data := range s.early {
 			s.frame(c, data)
+			s.in.done(len(data))
 		}
 		s.early = nil
 		if msg.Again {
@@ -219,15 +212,14 @@ func (s *session) Receive(c *actor.Context) {
 			s.event(c, msg.Event)
 		}
 	case Frame:
-		if !s.limiter.Allow() {
-			s.close(websocket.StatusPolicyViolation)
-			return
-		}
-		if s.user != nil {
+		switch {
+		case s.user != nil:
 			s.frame(c, msg.Data)
-		} else if len(s.early) < earlyFrames {
+			s.in.done(len(msg.Data))
+		case len(s.early) < earlyFrames:
 			s.early = append(s.early, msg.Data)
-		} else {
+		default:
+			s.in.done(len(msg.Data))
 			s.toast("error", "Some messages could not be sent: reload and try again.")
 		}
 	case clearTyping:
@@ -315,26 +307,27 @@ func (s *session) Receive(c *actor.Context) {
 
 // write owns the socket's sending side.
 func (s *session) write() {
-	for m := range s.out {
-		if m.close {
-			_ = s.ws.Close(m.code, "")
-			s.drain()
+	for {
+		items, done, code := s.out.take()
+		for _, b := range items {
+			ctx, cancel := context.WithTimeout(context.Background(), s.Cfg.WriteTimeout)
+			err := s.ws.Write(ctx, websocket.MessageText, b)
+			cancel()
+			s.out.sent(len(b))
+			if err != nil {
+				s.out.close(0)
+				_ = s.ws.CloseNow()
+				return
+			}
+		}
+		if done {
+			if code != 0 {
+				_ = s.ws.Close(code, "")
+			} else {
+				_ = s.ws.CloseNow()
+			}
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), s.Cfg.WriteTimeout)
-		err := s.ws.Write(ctx, websocket.MessageText, m.data)
-		cancel()
-		if err != nil {
-			_ = s.ws.CloseNow()
-			s.drain()
-			return
-		}
-	}
-	_ = s.ws.Close(websocket.StatusNormalClosure, "")
-}
-
-func (s *session) drain() {
-	for range s.out {
 	}
 }
 
@@ -362,27 +355,20 @@ func (s *session) send(data []byte) {
 	if s.closing {
 		return
 	}
-	select {
-	case s.out <- outMsg{data: data}:
-	default:
+	if !s.out.push(data) {
 		s.Logger.Debug("browser too slow, closing its socket", zap.Uint64("conn", s.connID))
-		_ = s.ws.CloseNow()
 		s.closing = true
-		close(s.out)
+		s.out.close(0)
+		_ = s.ws.CloseNow()
 	}
 }
 
+// close closes the socket with code once what is queued is written.
 func (s *session) close(code websocket.StatusCode) {
-	if s.closing {
-		return
+	if !s.closing {
+		s.closing = true
+		s.out.close(code)
 	}
-	select {
-	case s.out <- outMsg{close: true, code: code}:
-	default:
-		_ = s.ws.CloseNow()
-	}
-	s.closing = true
-	close(s.out)
 }
 
 func (s *session) fragment(name string, data any) {
