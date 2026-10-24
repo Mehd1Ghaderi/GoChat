@@ -158,6 +158,8 @@ func (c *client) socket(origin string) (*socket, *http.Response, error) {
 	if err != nil {
 		return nil, res, err
 	}
+	// A sidebar of many channels outgrows the library's 32KiB default.
+	conn.SetReadLimit(4 << 20)
 	s := &socket{t: c.t, conn: conn, in: make(chan string, 256)}
 	go func() {
 		for {
@@ -587,6 +589,10 @@ func TestEndToEnd(t *testing.T) {
 			t.Fatalf("turn voice on: %d", res.StatusCode)
 		}
 		bobWS.expect(5*time.Second, `data-voice-for="`+town+`"`, "voice-record")
+	})
+
+	t.Run("voice channels: talk, mute, moderators and refusals", func(t *testing.T) {
+		testVoiceChannels(t, admin, bob, adminWS, bobWS)
 	})
 
 	t.Run("private channels stay private", func(t *testing.T) {
