@@ -192,6 +192,7 @@ services:
       CLIENT_DRPC_GATEWAY_KEY: ${GATEWAY_KEY}
       WEB_PUBLIC_URL: ${WEB_PUBLIC_URL:-http://localhost:8080}
       WEB_TRUSTED_PROXIES: ${WEB_TRUSTED_PROXIES:-}
+      WEB_VOICE_ORIGINS: ${WEB_VOICE_ORIGINS:-ws://localhost:8090}
     # The default only accepts connections from this machine, such as a
     # TLS-terminating proxy or tunnel there.
     ports:
@@ -209,6 +210,45 @@ services:
       server:
         condition: service_healthy
     # The gateway reaches the server and nothing else behind it.
+    networks:
+      - gateway
+      - frontend
+
+  # The voice server: browsers send it their voice and get everyone else's.
+  # Its signaling websocket sits behind the proxy like the web gateway; the
+  # media port must be reachable from the internet, on UDP and TCP, at
+  # VOICE_PUBLIC_IP.
+  voice:
+    image: gochat:latest
+    container_name: gochat-voice
+    restart: unless-stopped
+    command: ["voice", "--config-path", "/app/config", "--config-name", "voice"]
+    environment:
+      CLIENT_DRPC_GATEWAY_KEY: ${GATEWAY_KEY}
+      VOICE_PUBLIC_URL: ${VOICE_PUBLIC_URL:-ws://localhost:8090/rtc}
+      VOICE_ALLOWED_ORIGINS: ${WEB_PUBLIC_URL:-http://localhost:8080}
+      VOICE_ICE_PUBLIC_IPS: ${VOICE_PUBLIC_IP:-}
+      VOICE_ICE_UDP_PORT: ${VOICE_MEDIA_PORT:-50000}
+      VOICE_ICE_TCP_PORT: ${VOICE_MEDIA_PORT:-50000}
+      VOICE_ICE_TURN_URLS: ${VOICE_TURN_URLS:-}
+      VOICE_ICE_TURN_SECRET: ${VOICE_TURN_SECRET:-}
+    ports:
+      - "${VOICE_BIND:-127.0.0.1}:${VOICE_PORT:-8090}:8090"
+      # The same port inside and out: it is the port the server announces.
+      - "${VOICE_MEDIA_PORT:-50000}:${VOICE_MEDIA_PORT:-50000}/udp"
+      - "${VOICE_MEDIA_PORT:-50000}:${VOICE_MEDIA_PORT:-50000}/tcp"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 1024
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    depends_on:
+      server:
+        condition: service_healthy
     networks:
       - gateway
       - frontend

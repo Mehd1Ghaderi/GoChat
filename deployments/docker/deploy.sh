@@ -1,6 +1,6 @@
 #!/bin/sh
 # Deploys GoChat on this server: pulls IMAGE@DIGEST, applies the migrations
-# and restarts the server and the web gateway with it. This script's
+# and restarts the server, the web gateway and the voice server with it. This script's
 # directory holds docker-compose.yml and .env. If they do not come up
 # healthy, the image that ran before comes back and the script fails.
 #
@@ -12,7 +12,7 @@
 #   restrict,command="/opt/apps/gochat/deploy.sh ghcr.io/OWNER/gochat" ssh-ed25519 ...
 #
 # What it prints may end up in public CI logs, so the output of the
-# migrations, the server and the web gateway, which can name clients and
+# migrations, the server, the web gateway and the voice server, which can name clients and
 # users, goes to the journal: journalctl -t gochat-deploy
 set -eu
 cd "$(dirname "$0")"
@@ -58,7 +58,8 @@ started() {
 	}
 	printf '%s\n' "$out" | journal
 	compose up --detach --no-build --no-deps --force-recreate --wait --wait-timeout 180 server || return 1
-	compose up --detach --no-build --no-deps --force-recreate --wait --wait-timeout 120 web
+	compose up --detach --no-build --no-deps --force-recreate --wait --wait-timeout 120 web || return 1
+	compose up --detach --no-build --no-deps --force-recreate --wait --wait-timeout 120 voice
 }
 
 if started; then
@@ -68,11 +69,11 @@ if started; then
 	exit 0
 fi
 
-compose logs --no-color --tail 100 server web 2>&1 | journal || true
+compose logs --no-color --tail 100 server web voice 2>&1 | journal || true
 logs="Their logs are on the server: journalctl -t gochat-deploy"
 [ -n "$running" ] || fail "gochat did not come up healthy. $logs"
 docker image tag gochat:previous gochat:latest
-if compose up --detach --no-build --no-deps --force-recreate --wait --wait-timeout 180 server web >/dev/null 2>&1; then
+if compose up --detach --no-build --no-deps --force-recreate --wait --wait-timeout 180 server web voice >/dev/null 2>&1; then
 	fail "gochat did not come up healthy, so the image that ran before is back. $logs"
 fi
 fail "gochat did not come up healthy, and neither did the image that ran before. $logs"

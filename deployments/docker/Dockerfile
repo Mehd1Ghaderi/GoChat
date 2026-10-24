@@ -28,6 +28,7 @@ COPY migrations ./migrations
 COPY config/docker.server.yaml config/server.yaml
 COPY config/docker.web.yaml config/web.yaml
 COPY config/docker.migrate.yaml config/migrate.yaml
+COPY config/docker.voice.yaml config/voice.yaml
 
 USER 10001:10001
 
