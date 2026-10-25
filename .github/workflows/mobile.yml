@@ -1,0 +1,54 @@
+name: Mobile
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "mobile/**"
+      - "api/protobuf/proto/**"
+      - ".github/workflows/mobile.yml"
+  pull_request:
+    paths:
+      - "mobile/**"
+      - "api/protobuf/proto/**"
+      - ".github/workflows/mobile.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: mobile
+
+# The runners carry a JDK, the Android SDK and Xcode.
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Core tests
+        run: ./gradlew --no-daemon :core:jvmTest
+      - name: Android app
+        run: ./gradlew --no-daemon :androidApp:assembleDebug
+
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Core on iOS
+        run: ./gradlew --no-daemon :core:iosSimulatorArm64Test
+      - name: iOS app
+        # The Xcode project builds the Kotlin framework itself.
+        run: >
+          xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp -configuration Debug
+          -sdk iphonesimulator -destination "generic/platform=iOS Simulator"
+          CODE_SIGNING_ALLOWED=NO build

@@ -6,7 +6,8 @@ invite links, attachments, voice messages, presence and typing indicators,
 all delivered in real time. The whole application runs on
 the [hollywood](https://github.com/anthdm/hollywood) actor engine, on both the
 server and the web gateway, and the browser UI is server-rendered HTML driven
-by [htmx](https://htmx.org) over a WebSocket.
+by [htmx](https://htmx.org) over a WebSocket. Native apps for Android and iOS,
+in Kotlin, live in [mobile](mobile).
 
 ## Architecture
 
@@ -411,5 +412,6 @@ internal/services  hub, accounts, directory, channels, files, voice
 internal/voiceserver  the voice server: signaling, rooms, media
 internal/web       HTTP handlers, gateway actors, templates and static assets
 migrations/scylla  CQL migrations
+mobile/            the Android and iOS apps (Kotlin Multiplatform, Compose)
 test/e2e           end-to-end tests
 ```

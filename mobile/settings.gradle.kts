@@ -17,4 +17,5 @@ dependencyResolutionManagement {
 
 // core: the protocol, the API client and the app's state, in plain Kotlin.
 // ui: the Compose Multiplatform screens, shared by Android and iOS.
-include(":core", ":ui")
+// androidApp: the Android app around them; iosApp is the Xcode project.
+include(":core", ":ui", ":androidApp")

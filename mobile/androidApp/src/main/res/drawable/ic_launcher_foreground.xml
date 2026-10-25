@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Two speech bubbles, inside the adaptive icon's 66dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M34,36h28a6,6 0,0 1,6 6v16a6,6 0,0 1,-6 6H46l-9,8v-8h-3a6,6 0,0 1,-6 -6V42a6,6 0,0 1,6 -6z" />
+    <path
+        android:fillColor="#DCDFFD"
+        android:pathData="M72,48h2a6,6 0,0 1,6 6v14a6,6 0,0 1,-6 6h-2v7l-8,-7H54a6,6 0,0 1,-6 -6v-1h14a10,10 0,0 0,10 -10z" />
+</vector>
