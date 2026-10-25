@@ -1,0 +1,259 @@
+package io.github.ssenerg.gochat.ui
+
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import com.russhwolf.settings.KeychainSettings
+import io.github.ssenerg.gochat.core.state.KeyValueStore
+import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.convert
+import kotlinx.cinterop.usePinned
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import platform.AVFAudio.AVAudioPlayer
+import platform.AVFAudio.AVAudioRecorder
+import platform.AVFAudio.AVAudioSession
+import platform.AVFAudio.AVAudioSessionCategoryPlayAndRecord
+import platform.AVFAudio.AVAudioSessionCategoryPlayback
+import platform.AVFAudio.AVEncoderBitRateKey
+import platform.AVFAudio.AVFormatIDKey
+import platform.AVFAudio.AVNumberOfChannelsKey
+import platform.AVFAudio.AVSampleRateKey
+import platform.CoreAudioTypes.kAudioFormatMPEG4AAC
+import platform.Foundation.NSData
+import platform.Foundation.NSFileManager
+import platform.Foundation.NSNumber
+import platform.Foundation.NSTemporaryDirectory
+import platform.Foundation.NSURL
+import platform.Foundation.create
+import platform.Foundation.dataWithContentsOfFile
+import platform.Foundation.dataWithContentsOfURL
+import platform.Foundation.writeToFile
+import platform.UIKit.UIActivityViewController
+import platform.UIKit.UIApplication
+import platform.UIKit.UIDocumentPickerDelegateProtocol
+import platform.UIKit.UIDocumentPickerViewController
+import platform.UIKit.UIPasteboard
+import platform.UIKit.UIViewController
+import platform.UniformTypeIdentifiers.UTTypeItem
+import platform.darwin.NSObject
+import platform.posix.memcpy
+import kotlin.coroutines.resume
+import kotlin.math.pow
+
+/** iOS's side of the app. */
+class IosPlatform(scope: CoroutineScope) : Platform {
+    override val store: KeyValueStore = KeychainStore()
+    override val player: AudioPlayer = IosAudioPlayer(scope)
+
+    override fun openFile(name: String, mimeType: String, bytes: ByteArray) {
+        val safe = name.substringAfterLast('/').ifBlank { "file" }
+        val path = NSTemporaryDirectory() + safe
+        bytes.toNSData().writeToFile(path, atomically = true)
+        present(listOf(NSURL.fileURLWithPath(path)))
+    }
+
+    override fun share(text: String) = present(listOf(text))
+
+    override fun copy(text: String) {
+        UIPasteboard.generalPasteboard.string = text
+    }
+
+    private fun present(items: List<Any>) {
+        val top = topController() ?: return
+        val sheet = UIActivityViewController(activityItems = items, applicationActivities = null)
+        // On iPad the sheet is a popover and needs an anchor.
+        sheet.popoverPresentationController?.sourceView = top.view
+        top.presentViewController(sheet, animated = true, completion = null)
+    }
+}
+
+internal fun topController(): UIViewController? {
+    var c = UIApplication.sharedApplication.keyWindow?.rootViewController
+    while (c?.presentedViewController != null) c = c.presentedViewController
+    return c
+}
+
+/** The Keychain: the session token stays encrypted on the device. */
+private class KeychainStore : KeyValueStore {
+    private val keychain = KeychainSettings(service = "io.github.ssenerg.gochat")
+
+    override fun get(key: String): String? = keychain.getStringOrNull(key)
+
+    override fun put(key: String, value: String?) {
+        if (value == null) keychain.remove(key) else keychain.putString(key, value)
+    }
+}
+
+internal fun ByteArray.toNSData(): NSData =
+    if (isEmpty()) NSData() else usePinned { NSData.create(bytes = it.addressOf(0), length = size.convert()) }
+
+internal fun NSData.toByteArray(): ByteArray {
+    val out = ByteArray(length.toInt())
+    if (out.isNotEmpty()) out.usePinned { memcpy(it.addressOf(0), bytes, length) }
+    return out
+}
+
+private class IosAudioPlayer(private val scope: CoroutineScope) : AudioPlayer {
+    private val _state = MutableStateFlow(PlayerState())
+    override val state: StateFlow<PlayerState> = _state.asStateFlow()
+    private var player: AVAudioPlayer? = null
+    private var ticker: Job? = null
+
+    override fun play(id: String, bytes: ByteArray, mimeType: String) {
+        stop()
+        AVAudioSession.sharedInstance().setCategory(AVAudioSessionCategoryPlayback, null)
+        AVAudioSession.sharedInstance().setActive(true, null)
+        // AVAudioPlayer plays the MP4 recordings of the apps and Safari; the
+        // WebM of other browsers it does not.
+        val p = runCatching { AVAudioPlayer(data = bytes.toNSData(), error = null) }.getOrNull()
+        if (p == null || !p.prepareToPlay() || !p.play()) {
+            _state.value = PlayerState(
+                id = id,
+                error = if ("webm" in mimeType) "Voice messages recorded in this browser format cannot play on iOS yet." else "This voice message cannot play.",
+            )
+            return
+        }
+        player = p
+        _state.value = PlayerState(id = id, playing = true, durationMs = (p.duration * 1000).toLong())
+        tick()
+    }
+
+    private fun tick() {
+        ticker?.cancel()
+        ticker = scope.launch {
+            while (isActive) {
+                val p = player ?: break
+                if (p.playing) {
+                    _state.value = _state.value.copy(positionMs = (p.currentTime * 1000).toLong())
+                } else if (_state.value.playing) {
+                    // It reached the end.
+                    _state.value = _state.value.copy(playing = false, positionMs = 0)
+                    break
+                }
+                delay(200)
+            }
+        }
+    }
+
+    override fun pause() {
+        player?.pause()
+        ticker?.cancel()
+        _state.value = _state.value.copy(playing = false)
+    }
+
+    override fun resume() {
+        val p = player ?: return
+        p.play()
+        _state.value = _state.value.copy(playing = true)
+        tick()
+    }
+
+    override fun seek(positionMs: Long) {
+        player?.currentTime = positionMs / 1000.0
+        _state.value = _state.value.copy(positionMs = positionMs)
+    }
+
+    override fun stop() {
+        ticker?.cancel()
+        player?.stop()
+        player = null
+        _state.value = PlayerState()
+    }
+}
+
+private class IosVoiceRecorder : VoiceRecorder {
+    private var recorder: AVAudioRecorder? = null
+    private val path = NSTemporaryDirectory() + "voice-message.m4a"
+
+    override suspend fun start(): Boolean {
+        val session = AVAudioSession.sharedInstance()
+        val granted = suspendCancellableCoroutine { c -> session.requestRecordPermission { ok -> c.resume(ok) } }
+        if (!granted) return false
+        cancel()
+        session.setCategory(AVAudioSessionCategoryPlayAndRecord, null)
+        session.setActive(true, null)
+        // AAC in MP4, as Android records: the server takes it, everyone plays it.
+        val settings = mapOf<Any?, Any?>(
+            AVFormatIDKey to NSNumber(unsignedInt = kAudioFormatMPEG4AAC),
+            AVSampleRateKey to NSNumber(double = 44_100.0),
+            AVNumberOfChannelsKey to NSNumber(int = 1),
+            AVEncoderBitRateKey to NSNumber(int = 64_000),
+        )
+        val r = runCatching { AVAudioRecorder(uRL = NSURL.fileURLWithPath(path), settings = settings, error = null) }.getOrNull() ?: return false
+        r.meteringEnabled = true
+        if (!r.record()) return false
+        recorder = r
+        return true
+    }
+
+    override suspend fun stop(): Recording? {
+        val r = recorder ?: return null
+        recorder = null
+        val durationMs = (r.currentTime * 1000).toLong()
+        r.stop()
+        val data = NSData.dataWithContentsOfFile(path)
+        NSFileManager.defaultManager.removeItemAtPath(path, null)
+        if (data == null || durationMs < 500) return null
+        return Recording(data.toByteArray(), "voice-message.m4a", durationMs)
+    }
+
+    override fun cancel() {
+        recorder?.let {
+            it.stop()
+            it.deleteRecording()
+        }
+        recorder = null
+    }
+
+    override fun level(): Float {
+        val r = recorder ?: return 0f
+        r.updateMeters()
+        val db = r.averagePowerForChannel(0uL)
+        return 10.0.pow(db / 20.0).toFloat().coerceIn(0f, 1f)
+    }
+}
+
+@Composable
+actual fun rememberVoiceRecorder(): VoiceRecorder = remember { IosVoiceRecorder() }
+
+private class PickerDelegate(private val onPicked: (NSURL) -> Unit) : NSObject(), UIDocumentPickerDelegateProtocol {
+    override fun documentPicker(controller: UIDocumentPickerViewController, didPickDocumentsAtURLs: List<*>) {
+        (didPickDocumentsAtURLs.firstOrNull() as? NSURL)?.let(onPicked)
+    }
+}
+
+@Composable
+actual fun rememberFilePicker(onPicked: (PickedFile) -> Unit, onError: (String) -> Unit): () -> Unit {
+    val picked by rememberUpdatedState(onPicked)
+    val failed by rememberUpdatedState(onError)
+    // The picker holds its delegate weakly: this keeps it.
+    val delegate = remember {
+        PickerDelegate { url ->
+            val data = NSData.dataWithContentsOfURL(url)
+            when {
+                data == null -> failed("Could not read the file.")
+                data.length.toLong() > MAX_PICKED_BYTES -> failed("The file is too large to send.")
+                else -> picked(PickedFile(url.lastPathComponent ?: "file", "application/octet-stream", data.toByteArray()))
+            }
+        }
+    }
+    return {
+        val picker = UIDocumentPickerViewController(forOpeningContentTypes = listOf(UTTypeItem), asCopy = true)
+        picker.delegate = delegate
+        topController()?.presentViewController(picker, animated = true, completion = null)
+    }
+}
+
+@Composable
+actual fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit) {
+    // iOS has no system back button: every screen shows its own.
+}

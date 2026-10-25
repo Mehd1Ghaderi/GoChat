@@ -4,6 +4,7 @@ import gochat.v1.Message
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Clock
 import kotlin.time.Instant
 
 /** How times, lengths and sizes read in the apps. */
@@ -13,6 +14,9 @@ object Format {
         "July", "August", "September", "October", "November", "December",
     )
     private val weekdays = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+    /** Now, in milliseconds since 1970. */
+    fun nowMillis(): Long = Clock.System.now().toEpochMilliseconds()
 
     private fun date(ms: Long, tz: TimeZone): LocalDate = Instant.fromEpochMilliseconds(ms).toLocalDateTime(tz).date
 
