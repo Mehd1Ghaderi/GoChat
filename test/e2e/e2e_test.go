@@ -1036,6 +1036,101 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
+	run("a direct conversation is deleted for one or for both", func(t *testing.T) {
+		one, oneName, _ := join(t, admin, "del-one")
+		two, twoName, _ := join(t, admin, "del-two")
+		oneID, twoID := userIDOf(t, two, oneName), userIDOf(t, one, twoName)
+		open := func(c *client, peer string) string {
+			t.Helper()
+			res, body := c.hx("/t/"+teamName+"/dm", url.Values{"user_id": {peer}})
+			m := channelRe.FindStringSubmatch(res.Header.Get("HX-Location"))
+			if m == nil {
+				t.Fatalf("open a conversation: %d %s", res.StatusCode, body)
+			}
+			return m[1]
+		}
+		dm := open(one, twoID)
+		oneWS, _, err := one.socket(baseURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		twoWS, _, err := two.socket(baseURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		view(oneWS, dm)
+		view(twoWS, town)
+		word := "zq" + random(4)
+		say := func(s *socket, text string) {
+			t.Helper()
+			s.send(map[string]string{"op": "post", "channel_id": dm, "content": text})
+			s.expect(5*time.Second, text)
+		}
+		say(oneWS, word+" before")
+		search := func(c *client) string {
+			t.Helper()
+			_, body := c.do(http.MethodGet, "/t/"+teamName+"/search?q="+url.QueryEscape(word), nil, "", true)
+			_, body, _ = strings.Cut(body, `id="search-results"`)
+			return body
+		}
+		for deadline := time.Now().Add(10 * time.Second); !strings.Contains(search(two), word); time.Sleep(500 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatal("search did not find the message")
+			}
+		}
+		if _, modal := one.do(http.MethodGet, "/t/"+teamName+"/ch/"+dm+"/delete", nil, "", true); !strings.Contains(modal, `name="everyone"`) {
+			t.Fatalf("the delete dialog: %s", modal)
+		}
+
+		// For one: gone from one's sidebar, history and search, not from two's.
+		if res, body := one.hx("/t/"+teamName+"/ch/"+dm+"/delete", url.Values{}); res.StatusCode >= 300 {
+			t.Fatalf("delete for one: %d %s", res.StatusCode, body)
+		}
+		if _, page := one.get("/t/" + teamName + "/ch/" + town); strings.Contains(page, dm) {
+			t.Fatal("the cleared conversation is still in its sidebar")
+		}
+		if _, page := one.get("/t/" + teamName + "/ch/" + dm); strings.Contains(page, word+" before") {
+			t.Fatal("the cleared conversation still shows its messages")
+		}
+		if body := search(one); strings.Contains(body, word) {
+			t.Fatalf("search finds a cleared message: %s", body)
+		}
+		if _, page := two.get("/t/" + teamName + "/ch/" + dm); !strings.Contains(page, word+" before") {
+			t.Fatal("clearing for one took the other's messages")
+		}
+		// The next message brings it back with only what is new.
+		view(twoWS, dm)
+		view(oneWS, town)
+		say(twoWS, word+" after")
+		oneWS.expect(5*time.Second, `id="channel-lists"`, dm)
+		if _, page := one.get("/t/" + teamName + "/ch/" + dm); !strings.Contains(page, word+" after") || strings.Contains(page, word+" before") {
+			t.Fatalf("the conversation came back with: %s", page)
+		}
+
+		// For both: gone for each, the other told, and opening it again
+		// starts afresh.
+		view(oneWS, dm)
+		if res, body := two.hx("/t/"+teamName+"/ch/"+dm+"/delete", url.Values{"everyone": {"1"}}); res.StatusCode >= 300 {
+			t.Fatalf("delete for both: %d %s", res.StatusCode, body)
+		}
+		oneWS.expect(5*time.Second, "This conversation was deleted.")
+		for _, c := range []*client{one, two} {
+			if res, _ := c.get("/t/" + teamName + "/ch/" + dm); res.StatusCode != http.StatusNotFound {
+				t.Fatalf("a deleted conversation opened: %d", res.StatusCode)
+			}
+			if body := search(c); strings.Contains(body, word) {
+				t.Fatalf("search finds a deleted message: %s", body)
+			}
+		}
+		again := open(one, twoID)
+		if again == dm {
+			t.Fatal("the deleted conversation opened again")
+		}
+		if _, page := two.get("/t/" + teamName + "/ch/" + open(two, oneID)); strings.Contains(page, word) {
+			t.Fatalf("the new conversation shows deleted messages: %s", page)
+		}
+	})
+
 	run("channel settings, privacy and archiving", func(t *testing.T) {
 		res, _ := admin.hx("/t/"+teamName+"/channels", url.Values{"name": {"proj-" + random(3)}, "display_name": {"Project"}, "type": {"public"}})
 		proj := channelRe.FindStringSubmatch(res.Header.Get("HX-Location"))[1]

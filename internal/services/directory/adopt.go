@@ -14,6 +14,7 @@ import (
 	"github.com/ssenerg/gochat/internal/actors"
 	"github.com/ssenerg/gochat/internal/core/ids"
 	"github.com/ssenerg/gochat/internal/core/models"
+	"github.com/ssenerg/gochat/internal/repos/scylla"
 	"github.com/ssenerg/gochat/internal/services/channels"
 )
 
@@ -131,7 +132,7 @@ func (a *adopter) adopt(ctx context.Context, ch *models.Channel) error {
 		}
 	}
 	for _, teamID := range homeTeams(people) {
-		holder, err := a.Repo.ClaimDirectKey(octx, conversationKey(teamID, ch.Name), ch.ID)
+		holder, err := a.Repo.ClaimDirectKey(octx, scylla.ConversationKey(teamID, ch.Name), ch.ID)
 		if err != nil {
 			return err
 		}

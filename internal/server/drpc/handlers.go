@@ -608,6 +608,17 @@ func (s *channelService) ArchiveChannel(ctx context.Context, req *pb.ArchiveChan
 	return &pb.ArchiveChannelResponse{Channel: ch}, nil
 }
 
+func (s *channelService) DeleteConversation(ctx context.Context, req *pb.DeleteConversationRequest) (*pb.DeleteConversationResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := actors.Ask[channels.Done](ctx, s.sys.Engine, s.sys.Channels, channels.DeleteConversation{Target: t, Everyone: req.Everyone}); err != nil {
+		return nil, err
+	}
+	return &pb.DeleteConversationResponse{}, nil
+}
+
 func (s *channelService) OpenGroupChannel(ctx context.Context, req *pb.OpenGroupChannelRequest) (*pb.OpenGroupChannelResponse, error) {
 	p, err := Principal(ctx)
 	if err != nil {

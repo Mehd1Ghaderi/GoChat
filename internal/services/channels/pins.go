@@ -99,7 +99,7 @@ func (a *channel) listPins(c *actor.Context, msg Pins) error {
 	if err := a.canRead(msg.P); err != nil {
 		return err
 	}
-	userID := msg.P.UserID
+	userID, cleared := msg.P.UserID, a.cleared[msg.P.UserID]
 	a.async(c, func(ctx context.Context) (any, error) {
 		pins, err := a.Repo.ListPins(ctx, a.id, maxPins)
 		if err != nil {
@@ -121,7 +121,7 @@ func (a *channel) listPins(c *actor.Context, msg Pins) error {
 		if err := g.Wait(); err != nil {
 			return nil, err
 		}
-		list := slices.DeleteFunc(found, func(m *models.Message) bool { return m == nil })
+		list := slices.DeleteFunc(found, func(m *models.Message) bool { return m == nil || !shown(m, cleared) })
 		out, err := a.render(ctx, list)
 		if err != nil {
 			return nil, err

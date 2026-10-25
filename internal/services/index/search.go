@@ -132,6 +132,9 @@ type run struct {
 	q       *search.Query
 	limit   int
 	allowed map[gocql.UUID]bool
+	// cleared holds up to which message the searcher cleared each
+	// conversation.
+	cleared map[gocql.UUID]gocql.UUID
 	only    gocql.UUID
 	from    gocql.UUID
 	scopes  []gocql.UUID
@@ -153,6 +156,9 @@ func (r *run) prepare(ctx context.Context, p *models.Principal, teamID gocql.UUI
 	r.allowed = make(map[gocql.UUID]bool, len(mine))
 	for _, m := range mine {
 		r.allowed[m.ChannelID] = true
+	}
+	if r.cleared, err = r.Repo.ListCleared(ctx, p.UserID); err != nil {
+		return err
 	}
 	// Conversations are filed by person across teams; allowed keeps this
 	// team's.
@@ -206,6 +212,9 @@ func (r *run) prepare(ctx context.Context, p *models.Principal, teamID gocql.UUI
 // keep reports whether a message may be shown and passes the filters.
 func (r *run) keep(channelID, userID, id gocql.UUID) bool {
 	if !r.allowed[channelID] || (!ids.IsZero(r.only) && channelID != r.only) || (!ids.IsZero(r.from) && userID != r.from) {
+		return false
+	}
+	if c, ok := r.cleared[channelID]; ok && !ids.After(id, c) {
 		return false
 	}
 	t := id.Time()

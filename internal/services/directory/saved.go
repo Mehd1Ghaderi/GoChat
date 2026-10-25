@@ -50,8 +50,19 @@ func (w *worker) listSaved(ctx context.Context, msg ListSaved) (*SavedResult, er
 	for _, m := range mine {
 		member[m.ChannelID] = true
 	}
+	cleared, err := w.Repo.ListCleared(ctx, msg.P.UserID)
+	if err != nil {
+		return nil, err
+	}
 	var page []*scylla.Saved
 	for _, s := range saves {
+		root := s.MessageID
+		if !ids.IsZero(s.RootID) {
+			root = s.RootID
+		}
+		if c, ok := cleared[s.ChannelID]; ok && !ids.After(root, c) {
+			continue
+		}
 		// Saves from before a conversation joined its team carry none.
 		if member[s.ChannelID] && (s.TeamID == teamID || s.TeamID == scylla.NoTeam) {
 			if page = append(page, s); len(page) == maxSavedShow {

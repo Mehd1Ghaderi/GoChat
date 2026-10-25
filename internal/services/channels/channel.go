@@ -36,6 +36,9 @@ type channel struct {
 	id      gocql.UUID
 	ch      *models.Channel
 	members map[gocql.UUID]models.ChannelRole
+	// cleared holds up to which message each person of a direct
+	// conversation cleared it.
+	cleared map[gocql.UUID]gocql.UUID
 	// recipients is who the channel's events go to.
 	recipients hub.Members
 	bucket     int32
@@ -146,6 +149,20 @@ func (a *channel) load() {
 	for _, m := range members {
 		a.members[m.UserID] = m.Role
 	}
+	a.cleared = make(map[gocql.UUID]gocql.UUID)
+	if ch.Kind == models.ChannelDirect {
+		for _, m := range members {
+			id, err := a.Repo.GetCleared(ctx, m.UserID, a.id)
+			if err != nil {
+				a.Logger.Error("failed to load a conversation's clears", zap.String("channel", a.id.String()), zap.Error(err))
+				a.loadErr = ierrors.Unavailable("channel is unavailable, try again")
+				return
+			}
+			if !ids.IsZero(id) {
+				a.cleared[m.UserID] = id
+			}
+		}
+	}
 	a.snapshot()
 }
 
@@ -240,6 +257,8 @@ func (a *channel) handle(c *actor.Context, req Request) {
 		out, err = a.rejoin(msg)
 	case Move:
 		out, err = a.move(msg)
+	case DeleteConversation:
+		out, err = a.deleteConversation(msg)
 	default:
 		return
 	}
@@ -492,10 +511,12 @@ func (a *channel) post(msg Post) (*pb.Message, error) {
 		return nil, err
 	}
 	a.bucket, a.hasBucket = m.Bucket, true
+	prev := a.ch.LastMessageID
 	a.ch.LastMessageID = id
 	if err := a.Repo.SetLastMessage(ctx, a.id, id); err != nil {
 		a.Logger.Warn("failed to record the last message", zap.String("channel", a.id.String()), zap.Error(err))
 	}
+	a.reappear(prev)
 	if err := a.Repo.SetLastRead(ctx, msg.P.UserID, a.id, id); err != nil {
 		a.Logger.Warn("failed to mark own message read", zap.Error(err))
 	}
@@ -1057,7 +1078,7 @@ func (a *channel) history(c *actor.Context, msg History) error {
 	if limit <= 0 || limit > a.Cfg.HistoryLimit {
 		limit = a.Cfg.HistoryLimit
 	}
-	userID := msg.P.UserID
+	userID, cleared := msg.P.UserID, a.cleared[msg.P.UserID]
 	a.async(c, func(ctx context.Context) (any, error) {
 		var (
 			list []*models.Message
@@ -1072,6 +1093,12 @@ func (a *channel) history(c *actor.Context, msg History) error {
 		if err != nil {
 			return nil, err
 		}
+		// What the caller cleared ends their history.
+		if n := len(list); !ids.IsZero(cleared) {
+			if list = slices.DeleteFunc(list, func(m *models.Message) bool { return !ids.After(m.ID, cleared) }); len(list) < n && ids.IsZero(after) {
+				more = false
+			}
+		}
 		out, err := a.render(ctx, list)
 		if err != nil {
 			return nil, err
@@ -1085,10 +1112,14 @@ func (a *channel) getMessage(c *actor.Context, msg GetMessage) error {
 	if err := a.canRead(msg.P); err != nil {
 		return err
 	}
+	cleared := a.cleared[msg.P.UserID]
 	a.async(c, func(ctx context.Context) (any, error) {
 		m, err := a.messageOf(ctx, msg.MessageID, msg.RootID)
 		if err != nil {
 			return nil, err
+		}
+		if !shown(m, cleared) {
+			return nil, ierrors.NotFound("message not found")
 		}
 		out, err := a.render(ctx, []*models.Message{m})
 		if err != nil {
@@ -1115,10 +1146,14 @@ func (a *channel) thread(c *actor.Context, msg Thread) error {
 	if limit <= 0 || limit > a.Cfg.HistoryLimit {
 		limit = a.Cfg.HistoryLimit
 	}
+	cleared := a.cleared[msg.P.UserID]
 	a.async(c, func(ctx context.Context) (any, error) {
 		root, err := a.messageOf(ctx, msg.RootID, "")
 		if err != nil {
 			return nil, err
+		}
+		if !shown(root, cleared) {
+			return nil, ierrors.NotFound("message not found")
 		}
 		replies, more, err := a.Repo.ListReplies(ctx, a.id, root.ID, before, limit)
 		if err != nil {

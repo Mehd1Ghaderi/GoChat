@@ -59,6 +59,17 @@
 {{template "modal-end"}}
 {{end}}
 
+{{define "delete-conversation"}}
+{{template "modal-start" "Delete conversation"}}
+<form class="stack" hx-post="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/delete">
+  <p>Delete your conversation with {{name .Channel.Peer}}? You stop seeing its messages; it comes back, with only new ones, when someone writes in it.</p>
+  <label class="inline"><input type="checkbox" name="everyone" value="1"> Also delete it for {{name .Channel.Peer}}</label>
+  <p class="muted">Ticked, its messages, replies, reactions, pins and files are deleted for good, for both of you.</p>
+  <div class="row"><button class="btn danger" type="submit">Delete</button></div>
+</form>
+{{template "modal-end"}}
+{{end}}
+
 {{define "channel-settings"}}
 {{template "modal-start" "Channel settings"}}
 <form class="stack" hx-post="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/settings" hx-target="#modal">
