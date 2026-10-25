@@ -285,6 +285,62 @@ func testClientAPI(t *testing.T, bobName, bobPass, town string) {
 		bob.must("gochat.v1.UserService/RemovePhoto", &pb.RemovePhotoRequest{}, &pb.RemovePhotoResponse{})
 	})
 
+	t.Run("apps talk in voice channels", func(t *testing.T) {
+		teams := &pb.ListTeamsResponse{}
+		admin.must("gochat.v1.TeamService/ListTeams", &pb.ListTeamsRequest{}, teams)
+		var teamID string
+		for _, tm := range teams.Teams {
+			if tm.Name == teamName {
+				teamID = tm.Id
+			}
+		}
+		created := &pb.CreateChannelResponse{}
+		admin.must("gochat.v1.ChannelService/CreateChannel", &pb.CreateChannelRequest{
+			TeamId: teamID, Name: "app-talk-" + random(3), DisplayName: "App talk", Type: pb.ChannelType_CHANNEL_TYPE_VOICE,
+		}, created)
+		room := created.Channel.Id
+		ticket := func(a *app) voiceTicket {
+			res := &pb.JoinVoiceResponse{}
+			a.must("gochat.v1.VoiceService/JoinVoice", &pb.JoinVoiceRequest{ChannelId: room}, res)
+			if res.Endpoint == "" || res.Token == "" || res.Channel.GetId() != room {
+				t.Fatalf("join voice: %v", res)
+			}
+			return voiceTicket{Endpoint: res.Endpoint, Token: res.Token}
+		}
+		// Apps send no Origin, which the voice server takes.
+		a := connectVoice(t, ticket(admin), "")
+		b := connectVoice(t, ticket(bob), "")
+		a.waitFor("both are ready", func() bool { return a.id() != "" && b.id() != "" })
+		a.waitFor("admin hears bob", func() bool { return a.heardFrom(b.id()) > 10 })
+		b.waitFor("bob hears admin", func() bool { return b.heardFrom(a.id()) > 10 })
+
+		bob.must("gochat.v1.VoiceService/UpdateVoiceState", &pb.UpdateVoiceStateRequest{SelfMute: true}, &pb.UpdateVoiceStateResponse{})
+		adminWS.next(5*time.Second, "bob muted", func(f *pb.ClientFrame) bool {
+			ch := f.GetEvent().GetVoiceChannelUpdate().GetChannel()
+			if ch.GetChannelId() != room {
+				return false
+			}
+			for _, s := range ch.States {
+				if s.GetUser().GetId() == bobUser.Id && s.SelfMute {
+					return true
+				}
+			}
+			return false
+		})
+
+		if status, e := bob.call("gochat.v1.VoiceService/DisconnectVoiceMember", &pb.DisconnectVoiceMemberRequest{ChannelId: room, UserId: adminUser.Id}, &pb.DisconnectVoiceMemberResponse{}); e == nil || e.Code != 7 {
+			t.Fatalf("bob disconnected admin: %d %v", status, e)
+		}
+		admin.must("gochat.v1.VoiceService/DisconnectVoiceMember", &pb.DisconnectVoiceMemberRequest{ChannelId: room, UserId: bobUser.Id}, &pb.DisconnectVoiceMemberResponse{})
+		if ce := b.closedWith(); ce.Code != 4002 || ce.Reason != "disconnected by a moderator" {
+			t.Fatalf("bob's close: %d %q", ce.Code, ce.Reason)
+		}
+		admin.must("gochat.v1.VoiceService/LeaveVoice", &pb.LeaveVoiceRequest{}, &pb.LeaveVoiceResponse{})
+		if ce := a.closedWith(); ce.Code != 4002 {
+			t.Fatalf("admin's close: %d %q", ce.Code, ce.Reason)
+		}
+	})
+
 	t.Run("refusals", func(t *testing.T) {
 		anon := newApp(t)
 		if status, e := anon.call("gochat.v1.AuthService/Me", &pb.MeRequest{}, &pb.MeResponse{}); status != http.StatusUnauthorized || e.Code != 16 {
@@ -294,7 +350,7 @@ func testClientAPI(t *testing.T, bobName, bobPass, town string) {
 		if status, _ := anon.call("gochat.v1.AuthService/Me", &pb.MeRequest{}, &pb.MeResponse{}); status != http.StatusUnauthorized {
 			t.Fatalf("an unknown token: %d", status)
 		}
-		for _, m := range []string{"gochat.v1.GatewayService/Connect", "gochat.v1.FileService/Upload", "gochat.v1.UserService/SetPhoto", "gochat.v1.VoiceService/JoinVoice", "gochat.v1.Nope/Nope"} {
+		for _, m := range []string{"gochat.v1.GatewayService/Connect", "gochat.v1.FileService/Upload", "gochat.v1.UserService/SetPhoto", "gochat.v1.VoiceServerService/Connect", "gochat.v1.Nope/Nope"} {
 			if status, e := bob.call(m, &pb.MeRequest{}, &pb.MeResponse{}); status != http.StatusNotFound || e.Code != 5 {
 				t.Errorf("%s: %d %v", m, status, e)
 			}

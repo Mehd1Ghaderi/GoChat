@@ -57,7 +57,7 @@ each channel's talk runs on one of them, the least loaded when it starts.
 As in Discord, the chat server keeps the voice states and voice servers
 carry the voice:
 
-1. A page asks to join (`JoinVoice`). The chat server checks the person may,
+1. A page or an app asks to join (`JoinVoice`). The chat server checks the person may,
    picks the channel's voice server and hands back its signaling endpoint and
    a single-use token valid for 30 seconds.
 2. The page opens the voice server's websocket and identifies with the token,
@@ -92,7 +92,9 @@ web:
   and `POST /api/v1/photo` move attachments and photos.
 
 Apps sign in with `AuthService/Login` (and `VerifyMFA` for two-factor
-accounts) and send the session token as `Authorization: Bearer <token>`. The
+accounts) and send the session token as `Authorization: Bearer <token>`.
+They talk in voice channels as pages do: `VoiceService/JoinVoice` hands
+them the voice server's websocket and a token for it. The
 API never reads cookies, so no page can make a browser call it for a
 signed-in person, and it opens only the calls people make: not the gateways'
 streams, nor the photo calls that expect a picture the gateway has already
@@ -144,7 +146,8 @@ documents it, close codes included.
   `Content-Disposition: attachment` unless they are safe images or voice
   messages, which play in place with the audio type the server detected.
 - Voice: join tokens are single-use, short-lived, stored hashed and bound to
-  one voice server; its websocket takes only the web gateway's origins. Only
+  one voice server; its websocket takes the web gateway's pages and no other
+  site's (the apps, which are not pages, send no origin). Only
   Opus is negotiated, and each voice is capped at 512 kbit/s so the room
   cannot be made to repeat a flood. Connections that have not identified and
   signaling messages are bounded. The voice server is ICE lite: it answers

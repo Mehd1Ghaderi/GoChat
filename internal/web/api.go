@@ -69,7 +69,7 @@ var apiCalls = map[string][]string{
 		"ListThread", "React", "SearchMessages", "ListThreads", "MarkThreadRead", "FollowThread",
 		"PinMessage", "ListPinned", "SaveMessage", "ListSaved",
 	},
-	"gochat.v1.VoiceService": {"ListVoiceStates"},
+	"gochat.v1.VoiceService": {"JoinVoice", "LeaveVoice", "UpdateVoiceState", "DisconnectVoiceMember", "ListVoiceStates"},
 }
 
 // apiLimited are the calls on the stricter budget of the sign-in pages:
