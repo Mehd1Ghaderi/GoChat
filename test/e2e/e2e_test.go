@@ -65,10 +65,28 @@ func newClient(t *testing.T, name string) *client {
 	}}
 }
 
+// cookieName is a cookie's name as the server sets it: over HTTPS with the
+// __Host- prefix.
+func cookieName(name string) string {
+	if strings.HasPrefix(baseURL, "https://") {
+		return "__Host-" + name
+	}
+	return name
+}
+
+// wsURL is the gateway's socket address.
+func wsURL() string {
+	u, _ := url.Parse(baseURL)
+	if u.Scheme == "https" {
+		return "wss://" + u.Host + "/ws"
+	}
+	return "ws://" + u.Host + "/ws"
+}
+
 func (c *client) cookie(name string) string {
 	u, _ := url.Parse(baseURL)
 	for _, ck := range c.http.Jar.Cookies(u) {
-		if ck.Name == name {
+		if ck.Name == cookieName(name) {
 			return ck.Value
 		}
 	}
@@ -108,8 +126,11 @@ func (c *client) do(method, path string, body io.Reader, contentType string, htm
 		if err != nil {
 			c.t.Fatalf("%s %s: %v", method, path, err)
 		}
-		b, _ := io.ReadAll(res.Body)
+		b, err := io.ReadAll(res.Body)
 		_ = res.Body.Close()
+		if err != nil {
+			c.t.Fatalf("%s %s: %d, reading the body: %v", method, path, res.StatusCode, err)
+		}
 		after := res.Header.Get("Retry-After")
 		wait, _ := strconv.Atoi(after)
 		if res.StatusCode != http.StatusTooManyRequests || after == "" || attempt == 5 || wait > 15 {
@@ -158,11 +179,10 @@ type socket struct {
 func (c *client) socket(origin string) (*socket, *http.Response, error) {
 	h := http.Header{}
 	h.Set("Origin", origin)
-	u, _ := url.Parse(baseURL)
-	h.Set("Cookie", "gochat_session="+c.cookie("gochat_session"))
+	h.Set("Cookie", cookieName("gochat_session")+"="+c.cookie("gochat_session"))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	conn, res, err := websocket.Dial(ctx, "ws://"+u.Host+"/ws", &websocket.DialOptions{HTTPHeader: h})
+	conn, res, err := websocket.Dial(ctx, wsURL(), &websocket.DialOptions{HTTPHeader: h})
 	if err != nil {
 		return nil, res, err
 	}
@@ -431,14 +451,30 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// settle returns once s's session has handled every frame sent on it,
+	// which it does in order: a post to no channel comes back refused.
+	settle := func(s *socket) {
+		s.send(map[string]string{"op": "post", "channel_id": "00000000-0000-4000-8000-000000000000", "content": "settle"})
+		s.expect(10*time.Second, "channel not found")
+	}
+	// view settles, since what follows may come from another socket and
+	// overtake it.
 	view := func(s *socket, ch string) {
 		s.send(map[string]string{"op": "view", "team_id": teamID, "team_name": teamName, "channel_id": ch})
+		settle(s)
 	}
 	view(adminWS, town)
 	view(bobWS, town)
-	time.Sleep(300 * time.Millisecond)
+	// run fails only the step whose socket expectation failed, not the
+	// steps after it.
+	run := func(name string, f func(t *testing.T)) {
+		t.Run(name, func(t *testing.T) {
+			admin.t, bob.t, adminWS.t, bobWS.t = t, t, t, t
+			f(t)
+		})
+	}
 
-	t.Run("messages arrive in real time and escaped", func(t *testing.T) {
+	run("messages arrive in real time and escaped", func(t *testing.T) {
 		bobWS.send(map[string]string{"op": "post", "channel_id": town, "content": "hello <script>alert(1)</script> from bob"})
 		f := adminWS.expect(5*time.Second, "from bob", `hx-swap-oob="afterbegin"`)
 		if strings.Contains(f, "<script>") || strings.Contains(f, "<b>Tester") {
@@ -447,11 +483,12 @@ func TestEndToEnd(t *testing.T) {
 		bobWS.expect(5*time.Second, "from bob")
 	})
 
-	t.Run("threads keep replies apart", func(t *testing.T) {
+	run("threads keep replies apart", func(t *testing.T) {
 		bobWS.send(map[string]string{"op": "post", "channel_id": town, "content": "root for a thread"})
 		f := adminWS.expect(5*time.Second, "root for a thread", `hx-swap-oob="afterbegin"`)
 		root := msgIDRe.FindStringSubmatch(f)[1]
 		bobWS.send(map[string]string{"op": "thread", "root_id": root})
+		settle(bobWS)
 		adminWS.send(map[string]string{"op": "post", "channel_id": town, "root_id": root, "content": "first reply"})
 		f = bobWS.expect(5*time.Second, "first reply", `id="replies-`+root+`"`)
 		reply := msgIDRe.FindStringSubmatch(f)[1]
@@ -486,7 +523,7 @@ func TestEndToEnd(t *testing.T) {
 		bobWS.expect(5*time.Second, "message not found")
 	})
 
-	t.Run("mentions highlight, count and complete", func(t *testing.T) {
+	run("mentions highlight, count and complete", func(t *testing.T) {
 		_, page := bob.get("/t/" + teamName + "/ch/" + town)
 		m := offTopicRe.FindStringSubmatch(page)
 		if m == nil {
@@ -503,8 +540,8 @@ func TestEndToEnd(t *testing.T) {
 		if !strings.Contains(f, `<span class="mention">@`+bobName+`</span>`) || strings.Contains(f, `">@nobody`) {
 			t.Fatalf("mention markup: %s", f)
 		}
-		if _, list := bob.do(http.MethodGet, "/m/"+town+"/people?q=adm", nil, "", true); !strings.Contains(list, `data-insert="@admin "`) {
-			t.Fatalf("suggestions for adm: %s", list)
+		if _, list := bob.do(http.MethodGet, "/m/"+town+"/people?q="+adminName[:3], nil, "", true); !strings.Contains(list, `data-insert="@`+adminName+` "`) {
+			t.Fatalf("suggestions for %s: %s", adminName[:3], list)
 		}
 		if _, list := bob.do(http.MethodGet, "/m/"+town+"/people?q=cha", nil, "", true); !strings.Contains(list, `data-insert="@channel "`) {
 			t.Fatalf("suggestions for cha: %s", list)
@@ -534,7 +571,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("reactions toggle and arrive live", func(t *testing.T) {
+	run("reactions toggle and arrive live", func(t *testing.T) {
 		bobWS.send(map[string]string{"op": "post", "channel_id": town, "content": "react to me"})
 		f := adminWS.expect(5*time.Second, "react to me", `hx-swap-oob="afterbegin"`)
 		msg := msgIDRe.FindStringSubmatch(f)[1]
@@ -565,7 +602,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("notifications follow mentions, replies and mutes", func(t *testing.T) {
+	run("notifications follow mentions, replies and mutes", func(t *testing.T) {
 		_, page := bob.get("/t/" + teamName + "/ch/" + town)
 		offTopic := offTopicRe.FindStringSubmatch(page)[1]
 		adminWS.send(map[string]string{"op": "post", "channel_id": offTopic, "content": "a word, @" + bobName})
@@ -598,13 +635,13 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("typing reaches others only", func(t *testing.T) {
+	run("typing reaches others only", func(t *testing.T) {
 		adminWS.send(map[string]string{"op": "typing", "channel_id": town})
 		bobWS.expect(5*time.Second, "is typing")
 		adminWS.refuse(time.Second, "is typing")
 	})
 
-	t.Run("a channel is marked unread once until read", func(t *testing.T) {
+	run("a channel is marked unread once until read", func(t *testing.T) {
 		_, page := bob.get("/t/" + teamName + "/ch/" + town)
 		offTopic := offTopicRe.FindStringSubmatch(page)[1]
 		// Reading it clears its mentions, which would show instead.
@@ -625,7 +662,7 @@ func TestEndToEnd(t *testing.T) {
 		bobWS.expect(5*time.Second, mark)
 	})
 
-	t.Run("typing reaches only who shows the channel", func(t *testing.T) {
+	run("typing reaches only who shows the channel", func(t *testing.T) {
 		_, page := bob.get("/t/" + teamName + "/ch/" + town)
 		offTopic := offTopicRe.FindStringSubmatch(page)[1]
 		view(bobWS, offTopic)
@@ -635,7 +672,7 @@ func TestEndToEnd(t *testing.T) {
 		bobWS.refuse(time.Second, "is typing")
 	})
 
-	t.Run("attachments upload, post and download", func(t *testing.T) {
+	run("attachments upload, post and download", func(t *testing.T) {
 		png := []byte("\x89PNG\r\n\x1a\n" + strings.Repeat("\x00", 64))
 		var buf bytes.Buffer
 		mw := multipart.NewWriter(&buf)
@@ -697,7 +734,7 @@ func TestEndToEnd(t *testing.T) {
 		bobWS.expect(5*time.Second, "attachment is not available")
 	})
 
-	t.Run("voice messages follow the channel's setting", func(t *testing.T) {
+	run("voice messages follow the channel's setting", func(t *testing.T) {
 		webm := []byte("\x1a\x45\xdf\xa3" + strings.Repeat("\x00", 64))
 		upload := func(c *client, data []byte, duration string) (*http.Response, string) {
 			var buf bytes.Buffer
@@ -748,11 +785,11 @@ func TestEndToEnd(t *testing.T) {
 		bobWS.expect(5*time.Second, `data-voice-for="`+town+`"`, "voice-record")
 	})
 
-	t.Run("voice channels: talk, mute, moderators and refusals", func(t *testing.T) {
+	run("voice channels: talk, mute, moderators and refusals", func(t *testing.T) {
 		testVoiceChannels(t, admin, bob, adminWS, bobWS)
 	})
 
-	t.Run("private channels stay private", func(t *testing.T) {
+	run("private channels stay private", func(t *testing.T) {
 		name := "secret-" + random(3)
 		res, body := admin.hx("/t/"+teamName+"/channels", url.Values{"name": {name}, "display_name": {"Secret"}, "type": {"private"}})
 		m := channelRe.FindStringSubmatch(res.Header.Get("HX-Location"))
@@ -775,7 +812,7 @@ func TestEndToEnd(t *testing.T) {
 		view(adminWS, town)
 	})
 
-	t.Run("search finds what each person may read", func(t *testing.T) {
+	run("search finds what each person may read", func(t *testing.T) {
 		word := "zq" + random(4)
 		name := "hidden-" + random(3)
 		res, _ := admin.hx("/t/"+teamName+"/channels", url.Values{"name": {name}, "display_name": {"Hidden"}, "type": {"private"}})
@@ -845,7 +882,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("group conversations and the switcher", func(t *testing.T) {
+	run("group conversations and the switcher", func(t *testing.T) {
 		_, body := admin.hx("/t/"+teamName+"/invites", url.Values{})
 		carol := newClient(t, "carol")
 		carolName, carolPass := "carol-"+random(4), "pw-"+random(8)
@@ -904,12 +941,14 @@ func TestEndToEnd(t *testing.T) {
 		if _, list := bob.do(http.MethodGet, "/t/"+teamName+"/switch/results?q=carol", nil, "", true); !strings.Contains(list, "Carol") {
 			t.Fatalf("switcher for carol: %s", list)
 		}
-		if _, modal := bob.do(http.MethodGet, "/t/"+teamName+"/switch", nil, "", true); !strings.Contains(modal, "data-switch-input") || !strings.Contains(modal, "Town Square") {
-			t.Fatalf("switcher: %s", modal)
+		// The modal lists only the first places, which past runs' channels
+		// may fill.
+		if res, modal := bob.do(http.MethodGet, "/t/"+teamName+"/switch", nil, "", true); !strings.Contains(modal, "data-switch-input") || !strings.Contains(modal, `role="option"`) {
+			t.Fatalf("switcher: %d %s", res.StatusCode, modal)
 		}
 	})
 
-	t.Run("channel settings, privacy and archiving", func(t *testing.T) {
+	run("channel settings, privacy and archiving", func(t *testing.T) {
 		res, _ := admin.hx("/t/"+teamName+"/channels", url.Values{"name": {"proj-" + random(3)}, "display_name": {"Project"}, "type": {"public"}})
 		proj := channelRe.FindStringSubmatch(res.Header.Get("HX-Location"))[1]
 		base := "/t/" + teamName + "/ch/" + proj
@@ -953,7 +992,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("threads gather what people follow", func(t *testing.T) {
+	run("threads gather what people follow", func(t *testing.T) {
 		adminWS.send(map[string]string{"op": "post", "channel_id": town, "content": "inbox root " + random(3)})
 		root := msgIDRe.FindStringSubmatch(bobWS.expect(5*time.Second, "inbox root", `hx-swap-oob="afterbegin"`))[1]
 		card := `hx-get="/m/` + town + `/` + root + `/thread"`
@@ -975,8 +1014,7 @@ func TestEndToEnd(t *testing.T) {
 		if list := threads(admin); strings.Contains(list, `thread-card unread" `+card) {
 			t.Fatal("opening the thread did not read it")
 		}
-		adminWS.send(map[string]string{"op": "view", "team_id": teamID, "team_name": teamName, "channel_id": ""})
-		time.Sleep(200 * time.Millisecond)
+		view(adminWS, "")
 		bobWS.send(map[string]string{"op": "post", "channel_id": town, "root_id": root, "content": "another reply"})
 		adminWS.expect(5*time.Second, `id="threads-refresh"`, "threads?list=1")
 		view(adminWS, town)
@@ -995,7 +1033,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("pins are shared and saves are private", func(t *testing.T) {
+	run("pins are shared and saves are private", func(t *testing.T) {
 		adminWS.send(map[string]string{"op": "post", "channel_id": town, "content": "pin me " + random(3)})
 		id := msgIDRe.FindStringSubmatch(bobWS.expect(5*time.Second, "pin me", `hx-swap-oob="afterbegin"`))[1]
 		if res, body := bob.hx("/m/"+town+"/"+id+"/pin", url.Values{"pinned": {"1"}}); res.StatusCode != http.StatusOK || !strings.Contains(body, "Pinned</span>") {
@@ -1041,7 +1079,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("statuses show and do not disturb holds notifications", func(t *testing.T) {
+	run("statuses show and do not disturb holds notifications", func(t *testing.T) {
 		_, list := admin.do(http.MethodGet, "/t/"+teamName+"/people/search?q="+bobName, nil, "", true)
 		bobUser := pickRe.FindStringSubmatch(list)[1]
 		res, _ := admin.hx("/t/"+teamName+"/dm", url.Values{"user_id": {bobUser}})
@@ -1082,7 +1120,7 @@ func TestEndToEnd(t *testing.T) {
 		bobWS.expect(5*time.Second, `id="notify"`, "now?")
 	})
 
-	t.Run("csrf and origin are enforced", func(t *testing.T) {
+	run("csrf and origin are enforced", func(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodPost, baseURL+"/t/"+teamName+"/invites", nil)
 		req.Header.Set("HX-Request", "true")
 		res, err := admin.http.Do(req)
@@ -1109,7 +1147,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("proxies may not rewrite pages", func(t *testing.T) {
+	run("proxies may not rewrite pages", func(t *testing.T) {
 		res, body := admin.get("/settings")
 		if cc := res.Header.Get("Cache-Control"); !strings.Contains(cc, "no-store") || !strings.Contains(cc, "no-transform") {
 			t.Fatalf("page Cache-Control: %q", cc)
@@ -1126,7 +1164,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("pages and sockets compress", func(t *testing.T) {
+	run("pages and sockets compress", func(t *testing.T) {
 		get := func(path string) *http.Response {
 			req, _ := http.NewRequest(http.MethodGet, baseURL+path, nil)
 			req.Header.Set("Accept-Encoding", "gzip")
@@ -1164,11 +1202,10 @@ func TestEndToEnd(t *testing.T) {
 		}
 		h := http.Header{}
 		h.Set("Origin", baseURL)
-		h.Set("Cookie", "gochat_session="+admin.cookie("gochat_session"))
-		u, _ := url.Parse(baseURL)
+		h.Set("Cookie", cookieName("gochat_session")+"="+admin.cookie("gochat_session"))
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		conn, res, err := websocket.Dial(ctx, "ws://"+u.Host+"/ws", &websocket.DialOptions{HTTPHeader: h, CompressionMode: websocket.CompressionNoContextTakeover})
+		conn, res, err := websocket.Dial(ctx, wsURL(), &websocket.DialOptions{HTTPHeader: h, CompressionMode: websocket.CompressionNoContextTakeover})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1178,15 +1215,22 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("members cannot invite", func(t *testing.T) {
+	run("members cannot invite", func(t *testing.T) {
 		res, _ := bob.hx("/t/"+teamName+"/invites", url.Values{})
 		if res.StatusCode != http.StatusForbidden {
 			t.Fatalf("a member created an invite: %d", res.StatusCode)
 		}
 	})
 
-	t.Run("invites die with their creator's rights", func(t *testing.T) {
-		_, list := admin.do(http.MethodGet, "/t/"+teamName+"/members", nil, "", true)
+	// memberRows lists the team's members from just before name, whom past
+	// runs' members could push off the first page.
+	memberRows := func(name string) string {
+		_, rows := admin.do(http.MethodGet, "/t/"+teamName+"/members?after="+url.QueryEscape(name[:len(name)-1]), nil, "", true)
+		return rows
+	}
+
+	run("invites die with their creator's rights", func(t *testing.T) {
+		list := memberRows(bobName)
 		m := regexp.MustCompile(`@` + regexp.QuoteMeta(bobName) + `(?s:.*?)/members/([0-9a-f-]{36})/role`).FindStringSubmatch(list)
 		if m == nil {
 			t.Fatalf("bob is not in the member list: %s", list)
@@ -1212,7 +1256,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("only a team's owner demotes its admins", func(t *testing.T) {
+	run("only a team's owner demotes its admins", func(t *testing.T) {
 		owner, ownerName, _ := join(t, admin, "owner")
 		team := "own-" + random(6)
 		if res, body := owner.form("/teams", url.Values{"name": {team}, "display_name": {"Owned"}}); res.StatusCode != http.StatusSeeOther {
@@ -1258,7 +1302,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("a removed member cannot rejoin with their invite", func(t *testing.T) {
+	run("a removed member cannot rejoin with their invite", func(t *testing.T) {
 		_, body := admin.hx("/t/"+teamName+"/invites", url.Values{})
 		link := inviteRe.FindStringSubmatch(body)
 		if link == nil {
@@ -1274,7 +1318,7 @@ func TestEndToEnd(t *testing.T) {
 		if res.StatusCode != http.StatusSeeOther {
 			t.Fatalf("signup: %d %s", res.StatusCode, body)
 		}
-		_, list := admin.do(http.MethodGet, "/t/"+teamName+"/members", nil, "", true)
+		list := memberRows(name)
 		m := regexp.MustCompile(`@` + regexp.QuoteMeta(name) + `(?s:.*?)/members/([0-9a-f-]{36})/remove`).FindStringSubmatch(list)
 		if m == nil {
 			t.Fatalf("frank is not in the member list: %s", list)
@@ -1286,7 +1330,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("revoked invites stop working", func(t *testing.T) {
+	run("revoked invites stop working", func(t *testing.T) {
 		_, body := admin.hx("/t/"+teamName+"/invites", url.Values{})
 		link := inviteRe.FindStringSubmatch(body)
 		if link == nil {
@@ -1343,23 +1387,23 @@ func TestEndToEnd(t *testing.T) {
 		return names, admins
 	}
 
-	t.Run("members and invites page", func(t *testing.T) {
+	run("members and invites page", func(t *testing.T) {
 		names, _ := members(t)
 		if !slices.IsSorted(names) || len(slices.Compact(slices.Clone(names))) != len(names) || !slices.Contains(names, bobName) {
 			t.Fatalf("members listed out of order, twice or not at all: %v", names)
 		}
 		// A listing continues after the name given.
-		_, rows := admin.do(http.MethodGet, "/t/"+teamName+"/members?after="+url.QueryEscape(adminName), nil, "", true)
+		_, rows := admin.do(http.MethodGet, "/t/"+teamName+"/members?after="+url.QueryEscape(names[0]), nil, "", true)
 		after := memberRe.FindAllStringSubmatch(rows, -1)
-		if len(after) == 0 || after[0][1] <= adminName {
-			t.Fatalf("the rows after %s: %s", adminName, rows)
+		if len(after) == 0 || after[0][1] != names[1] {
+			t.Fatalf("the rows after %s: %s", names[0], rows)
 		}
 		if res, _ := admin.do(http.MethodGet, "/t/"+teamName+"/invites?after=nonsense", nil, "", true); res.StatusCode != http.StatusBadRequest {
 			t.Fatalf("a bad invite cursor: %d", res.StatusCode)
 		}
 	})
 
-	t.Run("a team keeps an admin", func(t *testing.T) {
+	run("a team keeps an admin", func(t *testing.T) {
 		if _, admins := members(t); !slices.Equal(admins, []string{adminName}) {
 			t.Skipf("the team has other admins: %v", admins)
 		}
@@ -1395,7 +1439,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("profile and team photos", func(t *testing.T) {
+	run("profile and team photos", func(t *testing.T) {
 		pic := image.NewRGBA(image.Rect(0, 0, 400, 300))
 		for i := range pic.Pix {
 			if pic.Pix[i] = uint8(i); i%4 == 3 {
@@ -1421,7 +1465,7 @@ func TestEndToEnd(t *testing.T) {
 		if m == nil || m[1] != "u" {
 			t.Fatalf("no photo after upload: %s", body)
 		}
-		userPhoto := m[0]
+		userPhoto, bobPhotos := m[0], "/photos/u/"+m[2]+"/"
 		res, got := admin.get(userPhoto)
 		if res.StatusCode != http.StatusOK || res.Header.Get("Content-Type") != "image/jpeg" || !strings.Contains(res.Header.Get("Cache-Control"), "immutable") {
 			t.Fatalf("photo: %d %v", res.StatusCode, res.Header)
@@ -1453,11 +1497,12 @@ func TestEndToEnd(t *testing.T) {
 		if res, _ := bob.get(m[0]); res.StatusCode != http.StatusOK || res.Header.Get("Content-Type") != "image/png" {
 			t.Fatalf("member fetching the team photo: %d %v", res.StatusCode, res.Header)
 		}
-		if _, body := admin.hx("/t/"+teamName+"/photo/remove", url.Values{}); photoRe.MatchString(body) {
+		// The rail answering it shows the admin's other teams, maybe with photos.
+		if _, body := admin.hx("/t/"+teamName+"/photo/remove", url.Values{}); strings.Contains(body, "/photos/t/"+teamID+"/") {
 			t.Fatalf("team photo not removed: %s", body)
 		}
 
-		if _, body := bob.hx("/settings/photo/remove", url.Values{}); photoRe.MatchString(body) {
+		if _, body := bob.hx("/settings/photo/remove", url.Values{}); strings.Contains(body, bobPhotos) {
 			t.Fatalf("photo not removed: %s", body)
 		}
 		if res, _ := admin.get(userPhoto); res.StatusCode != http.StatusNotFound {
@@ -1465,7 +1510,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("forms refuse multipart bodies and open redirects", func(t *testing.T) {
+	run("forms refuse multipart bodies and open redirects", func(t *testing.T) {
 		res, _ := admin.do(http.MethodPost, "/t/"+teamName+"/invites", strings.NewReader("--x--"), "multipart/form-data; boundary=x", true)
 		if res.StatusCode != http.StatusUnsupportedMediaType {
 			t.Fatalf("a multipart form body was accepted: %d", res.StatusCode)
@@ -1476,7 +1521,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("two-factor sign-in", func(t *testing.T) {
+	run("two-factor sign-in", func(t *testing.T) {
 		_, body := bob.hx("/settings/totp/begin", url.Values{"password": {bobPass}})
 		m := secretRe.FindStringSubmatch(body)
 		if m == nil {
@@ -1539,7 +1584,7 @@ func TestEndToEnd(t *testing.T) {
 		return ws
 	}
 
-	t.Run("deactivation signs out at once and bars sign-in", func(t *testing.T) {
+	run("deactivation signs out at once and bars sign-in", func(t *testing.T) {
 		dave, daveName, davePass := join(t, admin, "dave")
 		ws := live(t, dave)
 		daveID := adminFind(t, admin, daveName)
@@ -1578,7 +1623,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("people see and revoke their sessions", func(t *testing.T) {
+	run("people see and revoke their sessions", func(t *testing.T) {
 		erin, erinName, erinPass := join(t, admin, "erin")
 		laptop := newClient(t, "erin-laptop")
 		laptop.login(erinName, erinPass)
@@ -1624,7 +1669,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("storage quotas bound uploads", func(t *testing.T) {
+	run("storage quotas bound uploads", func(t *testing.T) {
 		fay, fayName, _ := join(t, admin, "fay")
 		fayID := adminFind(t, admin, fayName)
 		quota := func(c *client, v url.Values) (*http.Response, string) {
@@ -1689,7 +1734,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("logout revokes the socket", func(t *testing.T) {
+	run("logout revokes the socket", func(t *testing.T) {
 		res, _ := bob.hx("/logout", url.Values{})
 		if res.Header.Get("HX-Redirect") != "/login" {
 			t.Fatalf("logout: %d %v", res.StatusCode, res.Header)
