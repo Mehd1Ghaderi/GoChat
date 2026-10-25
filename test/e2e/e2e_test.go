@@ -37,6 +37,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/pquerna/otp/totp"
 
+	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
 	"github.com/ssenerg/gochat/internal/core/secure"
 )
 
@@ -787,6 +788,10 @@ func TestEndToEnd(t *testing.T) {
 
 	run("voice channels: talk, mute, moderators and refusals", func(t *testing.T) {
 		testVoiceChannels(t, admin, bob, adminWS, bobWS)
+	})
+
+	run("the client API serves native apps", func(t *testing.T) {
+		testClientAPI(t, bobName, bobPass, town)
 	})
 
 	run("private channels stay private", func(t *testing.T) {
@@ -1803,6 +1808,52 @@ func TestEndToEnd(t *testing.T) {
 		fresh.login(daveName, davePass)
 		if _, card := admin.hx("/admin/users/"+adminFind(t, admin, adminName)+"/deactivate", url.Values{"deactivated": {"1"}}); !strings.Contains(card, "cannot deactivate your own account") {
 			t.Fatalf("the admin deactivated themself: %s", card)
+		}
+	})
+
+	run("the web signs apps out: session list and deactivation", func(t *testing.T) {
+		fran, franName, franPass := join(t, admin, "fran")
+		phone := newApp(t)
+		phone.login(franName, franPass)
+		phoneWS := phone.socket()
+		phoneWS.next(5*time.Second, "ready", func(f *pb.ClientFrame) bool { return f.GetReady() != nil })
+		// The app's session is on the web's list, and revoking it there
+		// ends its socket and its token.
+		_, page := fran.get("/settings")
+		apps := sessionRe.FindAllStringSubmatch(page, -1)
+		if len(apps) != 1 {
+			t.Fatalf("sessions on the settings page: %s", page)
+		}
+		if res, list := fran.hx("/settings/sessions/"+apps[0][1]+"/revoke", url.Values{}); res.StatusCode != http.StatusOK || !strings.Contains(list, "Signed out.") {
+			t.Fatalf("revoke the app's session: %d %s", res.StatusCode, list)
+		}
+		if code := phoneWS.closedWith(5 * time.Second); code != 4003 {
+			t.Fatalf("the app's socket closed with %d", code)
+		}
+		if status, _ := phone.call("gochat.v1.AuthService/Me", &pb.MeRequest{}, &pb.MeResponse{}); status != http.StatusUnauthorized {
+			t.Fatalf("a revoked app token: %d", status)
+		}
+
+		// Deactivating the account signs a new app session out too.
+		phone.login(franName, franPass)
+		phoneWS = phone.socket()
+		phoneWS.next(5*time.Second, "ready", func(f *pb.ClientFrame) bool { return f.GetReady() != nil })
+		franID := adminFind(t, admin, franName)
+		if res, card := admin.hx("/admin/users/"+franID+"/deactivate", url.Values{"deactivated": {"1"}}); res.StatusCode != http.StatusOK || !strings.Contains(card, "Reactivate") {
+			t.Fatalf("deactivate: %d %s", res.StatusCode, card)
+		}
+		if code := phoneWS.closedWith(5 * time.Second); code != 4003 {
+			t.Fatalf("a deactivated app's socket closed with %d", code)
+		}
+		if status, _ := phone.call("gochat.v1.AuthService/Me", &pb.MeRequest{}, &pb.MeResponse{}); status != http.StatusUnauthorized {
+			t.Fatalf("a deactivated app token: %d", status)
+		}
+		again := newApp(t)
+		if status, e := again.call("gochat.v1.AuthService/Login", &pb.LoginRequest{Login: franName, Password: franPass}, &pb.LoginResponse{}); e == nil {
+			t.Fatalf("a deactivated account signed in from an app: %d", status)
+		}
+		if _, card := admin.hx("/admin/users/"+franID+"/deactivate", url.Values{"deactivated": {"0"}}); !strings.Contains(card, `"deactivated": "1"`) {
+			t.Fatalf("reactivate: %s", card)
 		}
 	})
 

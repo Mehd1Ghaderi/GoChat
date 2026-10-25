@@ -200,6 +200,13 @@ type Presence struct {
 	UserIDs []string
 }
 
+// Acquainted replies with those of UserIDs that UserID shares a team with,
+// UserID included: whose presence they may see.
+type Acquainted struct {
+	UserID  string
+	UserIDs []string
+}
+
 // SetStatus and SetCustomStatus reply with the caller as they now are.
 type (
 	SetStatus struct {

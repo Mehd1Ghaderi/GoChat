@@ -1,6 +1,9 @@
 package web
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestPublicURLIsAnOrigin(t *testing.T) {
 	cases := map[string]string{
@@ -15,6 +18,14 @@ func TestPublicURLIsAnOrigin(t *testing.T) {
 		_ = c.Validate()
 		if c.PublicURL != want {
 			t.Errorf("%q became %q, want %q", in, c.PublicURL, want)
+		}
+	}
+}
+
+func TestMinAppVersionIsAVersion(t *testing.T) {
+	for v, ok := range map[string]bool{"": true, "0.3": true, "1.2.0": true, "12": true, "v1.2": false, "1.2.3.4": false, "1.x": false} {
+		if err := (&Config{PublicURL: "http://localhost", MinAppVersion: v}).Validate(); (err == nil || !strings.Contains(err.Error(), "min_app_version")) != ok {
+			t.Errorf("%q: %v", v, err)
 		}
 	}
 }

@@ -18,6 +18,7 @@ message ConnectRequest {
     Attach attach = 2;
     Detach detach = 3;
     View view = 4;
+    Watch watch = 5;
   }
 }
 
@@ -39,6 +40,15 @@ message Detach {
 message View {
   uint64 conn_id = 1;
   string channel_id = 2;
+}
+
+// Watch names the people whose presence and profile a connection shows. The
+// server keeps those its user shares a team with, as it answers presence,
+// and sends their Presence and ProfileChanged events to it; each Watch
+// replaces the last.
+message Watch {
+  uint64 conn_id = 1;
+  repeated string user_ids = 2;
 }
 
 message ConnectResponse {

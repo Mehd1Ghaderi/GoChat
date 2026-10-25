@@ -184,6 +184,8 @@ func (w *worker) Receive(c *actor.Context) {
 		out, err = w.me(ctx, msg.P)
 	case Presence:
 		out, err = w.presence(ctx, msg)
+	case Acquainted:
+		out, err = w.acquaintances(ctx, msg)
 	case SetStatus:
 		out, err = w.setStatus(ctx, msg)
 	case SetCustomStatus:
@@ -466,6 +468,7 @@ func (w *worker) removeTeamMember(ctx context.Context, msg RemoveTeamMember) (Do
 	}
 	w.Engine.Send(w.Voice, voice.DropUser{UserID: target, TeamID: teamID})
 	w.deliver(target, &pb.Event{Payload: &pb.Event_TeamLeft{TeamLeft: &pb.TeamLeft{TeamId: teamID.String()}}})
+	go w.recheckWatches(context.WithoutCancel(ctx), target)
 	return Done{}, nil
 }
 

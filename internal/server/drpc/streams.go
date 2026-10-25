@@ -304,6 +304,7 @@ func (s *gatewayService) Connect(stream pb.DRPCGatewayService_ConnectStream) err
 		return err
 	}
 
+	var watches uint64
 	for {
 		req, err := stream.Recv()
 		if err != nil {
@@ -323,8 +324,27 @@ func (s *gatewayService) Connect(stream pb.DRPCGatewayService_ConnectStream) err
 				ch = id.String()
 			}
 			s.sys.Engine.Send(s.sys.Hub, hub.View{GatewayID: key, ConnID: f.View.ConnId, ChannelID: ch})
+		case *pb.ConnectRequest_Watch:
+			// The check reads the people's teams: it runs off the stream,
+			// and the hub keeps the latest of a connection's watches.
+			watches++
+			go s.watch(ctx, key, f.Watch, watches)
 		}
 	}
+}
+
+// watch keeps those of a connection's watch list its user shares a team
+// with, as presence answers, so a gateway or an app can follow no one else.
+func (s *gatewayService) watch(ctx context.Context, key string, w *pb.Watch, seq uint64) {
+	userID, err := actors.Ask[string](ctx, s.sys.Engine, s.sys.Hub, hub.ConnUser{GatewayID: key, ConnID: w.ConnId})
+	if err != nil || userID == "" {
+		return
+	}
+	known, err := actors.Ask[[]string](ctx, s.sys.Engine, s.sys.Directory, directory.Acquainted{UserID: userID, UserIDs: w.UserIds})
+	if err != nil {
+		return
+	}
+	s.sys.Engine.Send(s.sys.Hub, hub.Watch{GatewayID: key, ConnID: w.ConnId, Seq: seq, UserIDs: known})
 }
 
 func (s *gatewayService) attach(ctx context.Context, key string, a *pb.Attach) {

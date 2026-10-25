@@ -42,7 +42,11 @@ type Handler struct {
 	trusted []*net.IPNet
 	auth    *ipLimiter
 	reqs    *ipLimiter
-	me      *cache.Cache[string, *pb.User]
+	// apiSessions budgets an app's signed-in calls by session, and
+	// apiShared by address, at apiSharedFactor times reqs' budget.
+	apiSessions *ipLimiter
+	apiShared   *ipLimiter
+	me          *cache.Cache[string, *pb.User]
 	// photoReads and photoWork bound the photo uploads handled at once.
 	photoReads chan struct{}
 	photoWork  chan struct{}
@@ -66,7 +70,10 @@ func NewHandler(logger *zap.Logger, cfg *Config, client *drpc.Client, r *render.
 		origin: u.Scheme + "://" + u.Host,
 		auth:   newIPLimiter(rate.Limit(cfg.RateLimit.AuthPerMinute/60), cfg.RateLimit.AuthBurst),
 		reqs:   newIPLimiter(rate.Limit(cfg.RateLimit.RequestsPerSecond), cfg.RateLimit.RequestBurst),
-		me:     cache.New[string, *pb.User](100_000, meCacheTTL),
+
+		apiSessions: newIPLimiter(rate.Limit(cfg.RateLimit.RequestsPerSecond), cfg.RateLimit.RequestBurst),
+		apiShared:   newIPLimiter(rate.Limit(cfg.RateLimit.RequestsPerSecond*apiSharedFactor), cfg.RateLimit.RequestBurst*apiSharedFactor),
+		me:          cache.New[string, *pb.User](100_000, meCacheTTL),
 
 		photoReads: make(chan struct{}, photoReaders),
 		photoWork:  make(chan struct{}, photoDecoders),
@@ -197,8 +204,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("POST /upload", h.csrfMultipart(http.HandlerFunc(h.upload)))
 	mux.HandleFunc("GET /files/{id}", h.download)
 	mux.HandleFunc("GET /files/{id}/inline", h.download)
-	mux.HandleFunc("GET /photos/u/{id}/{version}", h.servePhoto)
-	mux.HandleFunc("GET /photos/t/{id}/{version}", h.servePhoto)
+	mux.HandleFunc("GET /photos/{kind}/{id}/{version}", h.servePhoto)
 
 	mux.HandleFunc("GET /settings", h.settingsPage)
 	mux.Handle("POST /settings/profile", h.csrf(http.HandlerFunc(h.updateProfile)))
@@ -219,6 +225,15 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("POST /admin/users/{user}/quota", h.csrf(http.HandlerFunc(h.adminQuota)))
 
 	mux.HandleFunc("GET /ws", h.websocket)
+
+	// The client API, for native apps; see client.proto.
+	mux.HandleFunc("POST /api/v1/rpc/{service}/{method}", h.apiRPC)
+	mux.HandleFunc("GET /api/v1/gateway", h.apiGateway)
+	mux.HandleFunc("GET /api/v1/info", h.apiInfo)
+	mux.HandleFunc("POST /api/v1/files", h.apiUpload)
+	mux.HandleFunc("GET /api/v1/files/{id}", h.apiDownload)
+	mux.HandleFunc("GET /api/v1/photos/{kind}/{id}/{version}", h.apiPhoto)
+	mux.HandleFunc("POST /api/v1/photo", h.apiSetPhoto)
 
 	return h.recover(h.headers(h.throttle(mux)))
 }

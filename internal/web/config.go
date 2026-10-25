@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -24,6 +25,9 @@ type Config struct {
 	RenderCacheSize int              `mapstructure:"render_cache_size"`
 	HTTP            *HTTPConfig      `mapstructure:"http"`
 	RateLimit       *RateLimitConfig `mapstructure:"rate_limit"`
+	// MinAppVersion is the oldest version of the apps the client API takes,
+	// such as 0.3; empty takes any.
+	MinAppVersion string `mapstructure:"min_app_version"`
 }
 
 type HTTPConfig struct {
@@ -51,6 +55,8 @@ type RateLimitConfig struct {
 
 var _ config.Config = (*Config)(nil)
 
+var appVersionRe = regexp.MustCompile(`^[0-9]{1,4}(\.[0-9]{1,4}){0,2}$`)
+
 func (c *Config) Validate() error {
 	u, err := url.Parse(c.PublicURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Path != "" && u.Path != "/" {
@@ -77,6 +83,9 @@ func (c *Config) Validate() error {
 		if err != nil || (u.Scheme != "ws" && u.Scheme != "wss") || u.Host == "" || (u.Path != "" && u.Path != "/") {
 			return fmt.Errorf("voice_origins: %q is not a ws(s) origin, such as wss://voice.example.com", o)
 		}
+	}
+	if c.MinAppVersion != "" && !appVersionRe.MatchString(c.MinAppVersion) {
+		return fmt.Errorf("min_app_version: %q is not a version such as 0.3 or 1.2.0", c.MinAppVersion)
 	}
 	if c.UploadLimit < 1024 {
 		return errors.New("upload_limit must be at least 1KiB")

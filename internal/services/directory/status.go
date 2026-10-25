@@ -80,7 +80,7 @@ func (w *worker) setCustomStatus(ctx context.Context, msg SetCustomStatus) (*pb.
 	if err != nil {
 		return nil, err
 	}
-	w.Engine.Send(w.Hub, hub.Broadcast{Event: &pb.Event{Broadcast: true, Payload: &pb.Event_ProfileChanged{
+	w.Engine.Send(w.Hub, hub.About{UserID: msg.P.UserID.String(), Event: &pb.Event{Payload: &pb.Event_ProfileChanged{
 		ProfileChanged: &pb.ProfileChanged{User: convert.PublicUser(u)},
 	}}})
 	return convert.User(u), nil
