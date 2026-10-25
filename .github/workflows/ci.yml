@@ -124,6 +124,13 @@ jobs:
         run: go test -count=1 -v ./test/e2e
       # The apps' core drives the same stack as the apps do, a voice call
       # included.
+      - name: Apps' core against the stack
+        env:
+          GOCHAT_E2E_URL: http://localhost:8080
+          GOCHAT_E2E_ADMIN: admin
+          GOCHAT_E2E_TEAM: acme
+        working-directory: mobile
+        run: ./gradlew --no-daemon :core:jvmTest
       - name: Logs
         if: failure()
         run: $COMPOSE logs --no-color --tail 200
