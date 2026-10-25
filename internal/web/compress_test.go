@@ -94,21 +94,30 @@ func TestStaticFilesGzipped(t *testing.T) {
 	}
 	h := &Handler{render: r, zipped: zipped}
 	srv := h.staticFiles(http.StripPrefix(r.StaticPrefix, http.FileServerFS(static)))
-	raw, _ := fs.ReadFile(static, "htmx.min.js")
-	for _, encoding := range []string{"gzip", ""} {
-		req := httptest.NewRequest(http.MethodGet, r.StaticPrefix+"htmx.min.js", nil)
-		req.Header.Set("Accept-Encoding", encoding)
-		w := httptest.NewRecorder()
-		srv.ServeHTTP(w, req)
-		body := w.Body.Bytes()
-		if encoding != "" {
-			if w.Header().Get("Content-Encoding") != "gzip" || len(body) >= len(raw)/2 {
-				t.Fatalf("htmx.min.js: %d bytes gzipped to %d", len(raw), len(body))
+	for _, f := range []struct {
+		name, kind string
+		ratio      float64
+	}{
+		{"htmx.min.js", "javascript", .5},
+		{"denoise.js", "javascript", .5},
+		{"rnnoise.wasm", "application/wasm", .95},
+	} {
+		raw, _ := fs.ReadFile(static, f.name)
+		for _, encoding := range []string{"gzip", ""} {
+			req := httptest.NewRequest(http.MethodGet, r.StaticPrefix+f.name, nil)
+			req.Header.Set("Accept-Encoding", encoding)
+			w := httptest.NewRecorder()
+			srv.ServeHTTP(w, req)
+			body := w.Body.Bytes()
+			if encoding != "" {
+				if w.Header().Get("Content-Encoding") != "gzip" || float64(len(body)) >= f.ratio*float64(len(raw)) {
+					t.Fatalf("%s: %d bytes gzipped to %d", f.name, len(raw), len(body))
+				}
+				body = gunzip(t, body)
 			}
-			body = gunzip(t, body)
-		}
-		if w.Code != http.StatusOK || !bytes.Equal(body, raw) || !strings.Contains(w.Header().Get("Content-Type"), "javascript") {
-			t.Fatalf("%q: %d %q", encoding, w.Code, w.Header().Get("Content-Type"))
+			if w.Code != http.StatusOK || !bytes.Equal(body, raw) || !strings.Contains(w.Header().Get("Content-Type"), f.kind) {
+				t.Fatalf("%s %q: %d %q", f.name, encoding, w.Code, w.Header().Get("Content-Type"))
+			}
 		}
 	}
 }

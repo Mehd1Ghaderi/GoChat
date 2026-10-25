@@ -30,6 +30,17 @@
     <p class="muted">For direct messages, mentions and replies in your threads, while GoChat is in the background. Mute a channel from its header to silence it.</p>
     <div class="row"><button class="btn" type="button" data-notify-toggle hidden>Turn on</button><span class="status" data-notify-state></span></div>
   </section>
+  <section class="card" id="voice">
+    <h2>Voice</h2>
+    <p class="muted">How much background sound to take out of your microphone in voice channels. This browser keeps the choice, from the next time you join.</p>
+    <fieldset class="choice" data-voice-noise>
+      <legend>Noise suppression</legend>
+      <label class="inline"><input type="radio" name="noise" value="off"> Off: everything the microphone hears, as for music</label>
+      <label class="inline"><input type="radio" name="noise" value="standard" checked> Standard: your browser's own filter</label>
+      <label class="inline"><input type="radio" name="noise" value="strong"> Strong: also keyboards, fans and traffic, with more processing</label>
+    </fieldset>
+    <span class="status" data-voice-noise-state></span>
+  </section>
   <section class="card" id="totp">
     {{template "totp" .}}
   </section>
