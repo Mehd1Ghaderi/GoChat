@@ -1,5 +1,8 @@
 package io.github.ssenerg.gochat.core.gateway
 
+import gochat.v1.AppFrame
+import gochat.v1.AppView
+import gochat.v1.AppWatch
 import gochat.v1.ClientFrame
 import gochat.v1.ClientReady
 import gochat.v1.Event
@@ -12,6 +15,7 @@ import io.ktor.websocket.readBytes
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -62,6 +66,28 @@ class Gateway(private val api: ApiClient, private val scope: CoroutineScope) {
 
     private var job: Job? = null
 
+    // What the app shows, which the server sends typing and presence for;
+    // told again on each socket.
+    private var viewing: String = ""
+    private var watching: List<String> = emptyList()
+    private var outgoing: SendChannel<Frame>? = null
+
+    /** Says which channel the app shows, null for none. */
+    fun view(channelId: String?) {
+        viewing = channelId.orEmpty()
+        tell(AppFrame(view = AppView(channel_id = viewing)))
+    }
+
+    /** Says whose presence and profile the app shows. */
+    fun watch(userIds: List<String>) {
+        watching = userIds.take(MAX_WATCHED)
+        tell(AppFrame(watch = AppWatch(user_ids = watching)))
+    }
+
+    private fun tell(frame: AppFrame) {
+        outgoing?.trySend(Frame.Binary(true, AppFrame.ADAPTER.encode(frame)))
+    }
+
     fun start() {
         if (job?.isActive == true) return
         job = scope.launch { run() }
@@ -84,6 +110,7 @@ class Gateway(private val api: ApiClient, private val scope: CoroutineScope) {
                 api.http.webSocket(urlString = api.gatewayUrl, request = {
                     api.token?.let { header(HttpHeaders.Authorization, "Bearer $it") }
                 }) {
+                    this@Gateway.outgoing = outgoing
                     for (frame in incoming) {
                         if (frame !is Frame.Binary) continue
                         val f = runCatching { ClientFrame.ADAPTER.decode(frame.readBytes()) }.getOrNull() ?: continue
@@ -94,6 +121,8 @@ class Gateway(private val api: ApiClient, private val scope: CoroutineScope) {
                             connectedBefore = true
                             delayMs = MIN_DELAY_MS
                             _connection.value = Connection.Online(it)
+                            tell(AppFrame(view = AppView(channel_id = viewing)))
+                            tell(AppFrame(watch = AppWatch(user_ids = watching)))
                             _messages.emit(GatewayMessage.Ready(it, resync))
                         }
                         f.event?.let { _messages.emit(GatewayMessage.Received(it)) }
@@ -107,6 +136,7 @@ class Gateway(private val api: ApiClient, private val scope: CoroutineScope) {
                 // A refused handshake names its status in the message.
                 if (e.message?.contains("401") == true) Outcome.SignedOut else Outcome.Retry("Cannot reach the server")
             }
+            outgoing = null
             when (outcome) {
                 Outcome.SignedOut -> {
                     _connection.value = Connection.SignedOut
@@ -144,6 +174,9 @@ class Gateway(private val api: ApiClient, private val scope: CoroutineScope) {
         const val CLOSE_REVOKED = 4003
         const val CLOSE_TOO_MANY = 4008
         const val CLOSE_TOO_SLOW = 4009
+
+        /** The most people the server takes in one AppWatch. */
+        const val MAX_WATCHED = 1000
 
         private const val MIN_DELAY_MS = 1_000L
         private const val MAX_DELAY_MS = 30_000L

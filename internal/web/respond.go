@@ -30,26 +30,22 @@ func (h *Handler) page(w http.ResponseWriter, r *http.Request, status int, name 
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(status)
-	_, _ = buf.WriteTo(w)
+	h.write(w, r, status, buf.Bytes())
 }
 
-func (h *Handler) fragment(w http.ResponseWriter, status int, name string, data any) {
+func (h *Handler) fragment(w http.ResponseWriter, r *http.Request, status int, name string, data any) {
 	var buf bytes.Buffer
 	if err := h.render.Fragment(&buf, name, data); err != nil {
 		h.logger.Error("failed to render fragment", zap.String("fragment", name), zap.Error(err))
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(status)
-	_, _ = buf.WriteTo(w)
+	h.write(w, r, status, buf.Bytes())
 }
 
 // text answers an htmx request with escaped plain text for its target.
-func (h *Handler) text(w http.ResponseWriter, status int, kind, msg string) {
-	h.fragment(w, status, "status", render.Toast{Kind: kind, Text: msg})
+func (h *Handler) text(w http.ResponseWriter, r *http.Request, status int, kind, msg string) {
+	h.fragment(w, r, status, "status", render.Toast{Kind: kind, Text: msg})
 }
 
 // navigate sends the browser to path: htmx swaps the main pane, a plain

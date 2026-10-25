@@ -27,6 +27,9 @@ const (
 	ObjDirect        Object = "direct"
 	ObjMessage       Object = "message"
 	ObjFile          Object = "file"
+	ObjUser          Object = "user"
+	ObjSession       Object = "session"
+	ObjStorage       Object = "storage"
 	// ObjVoice is the talk in voice channels.
 	ObjVoice Object = "voice"
 )
@@ -51,7 +54,11 @@ const (
 	ActArchive       Action = "archive"
 	ActMakePrivate   Action = "make_private"
 	ActMakePublic    Action = "make_public"
-	ActCreateVoice   Action = "create_voice"
+	ActFind          Action = "find"
+	ActDeactivate    Action = "deactivate"
+	// ActManageAny acts on what belongs to another user.
+	ActManageAny   Action = "manage_any"
+	ActCreateVoice Action = "create_voice"
 	// ActConnect joins the talk of a voice channel; ActMove disconnects
 	// others from it.
 	ActConnect Action = "connect"

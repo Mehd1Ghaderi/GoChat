@@ -15,6 +15,7 @@ import (
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
 	"github.com/ssenerg/gochat/internal/actors"
 	"github.com/ssenerg/gochat/internal/core/audio"
+	"github.com/ssenerg/gochat/internal/core/ids"
 	"github.com/ssenerg/gochat/internal/core/models"
 	"github.com/ssenerg/gochat/internal/core/secure"
 	ierrors "github.com/ssenerg/gochat/internal/errors"
@@ -29,6 +30,8 @@ const (
 	chunkSize = 64 << 10
 	sniffSize = 512
 )
+
+var errTooLarge = ierrors.InvalidArgument("file is too large")
 
 type fileService struct{ *base }
 
@@ -63,9 +66,12 @@ func (s *fileService) Upload(stream pb.DRPCFileService_UploadStream) error {
 		return ierrors.ResourceExhausted("the server is busy, try again")
 	}
 
-	maxSize, tooLarge := s.cfg.Files.MaxSize, ierrors.InvalidArgument("file is too large")
+	maxSize, tooLarge := s.cfg.Files.MaxSize, errTooLarge
 	if up.Voice {
 		maxSize, tooLarge = min(s.cfg.Files.MaxVoiceSize, maxSize), ierrors.InvalidArgument("the voice message is too large")
+	}
+	if up.Room >= 0 && up.Room < maxSize {
+		maxSize, tooLarge = up.Room, files.ErrQuota
 	}
 	var head bytes.Buffer
 	size := int64(0)
@@ -197,6 +203,29 @@ func (s *fileService) GetPhoto(ctx context.Context, req *pb.GetPhotoRequest) (*p
 	return &pb.GetPhotoResponse{Image: ph.Data, ContentType: ph.ContentType, Version: ph.Version}, nil
 }
 
+func (s *fileService) GetStorageUsage(ctx context.Context, req *pb.GetStorageUsageRequest) (*pb.GetStorageUsageResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	u, err := actors.Ask[*files.StorageUsage](ctx, s.sys.Engine, s.sys.Files, files.Usage{P: p, UserID: req.UserId})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.GetStorageUsageResponse{Used: u.Used, Quota: u.Quota, Custom: u.Custom}, nil
+}
+
+func (s *fileService) DiscardUploads(ctx context.Context, req *pb.DiscardUploadsRequest) (*pb.DiscardUploadsResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := actors.Ask[files.Done](ctx, s.sys.Engine, s.sys.Files, files.Discard{P: p, AttachmentIDs: req.AttachmentIds}); err != nil {
+		return nil, err
+	}
+	return &pb.DiscardUploadsResponse{}, nil
+}
+
 func (s *fileService) Download(req *pb.DownloadRequest, stream pb.DRPCFileService_DownloadStream) error {
 	ctx := stream.Context()
 	p, err := Principal(ctx)
@@ -207,12 +236,27 @@ func (s *fileService) Download(req *pb.DownloadRequest, stream pb.DRPCFileServic
 	if err != nil {
 		return err
 	}
-	body, err := s.storage.Get(ctx, att.ObjectKey)
+	first, last, ok, err := files.Span(req.Range, att.Size)
+	if err != nil {
+		return err
+	}
+	header := &pb.DownloadResponse{Part: &pb.DownloadResponse_Header{Header: convert.Attachment(att)}}
+	if !ok {
+		header.Unsatisfiable = true
+		return stream.Send(header)
+	}
+	var body io.ReadCloser
+	if req.Range == nil {
+		body, err = s.storage.Get(ctx, att.ObjectKey)
+	} else {
+		header.Served = &pb.ByteRange{First: first, Last: last}
+		body, err = s.storage.GetRange(ctx, att.ObjectKey, first, last)
+	}
 	if err != nil {
 		return ierrors.Internal(err)
 	}
 	defer func() { _ = body.Close() }()
-	if err := stream.Send(&pb.DownloadResponse{Part: &pb.DownloadResponse_Header{Header: convert.Attachment(att)}}); err != nil {
+	if err := stream.Send(header); err != nil {
 		return err
 	}
 	buf := make([]byte, chunkSize)
@@ -273,6 +317,12 @@ func (s *gatewayService) Connect(stream pb.DRPCGatewayService_ConnectStream) err
 			s.attach(ctx, key, f.Attach)
 		case *pb.ConnectRequest_Detach:
 			s.sys.Engine.Send(s.sys.Hub, hub.Detach{GatewayID: key, ConnID: f.Detach.ConnId})
+		case *pb.ConnectRequest_View:
+			var ch string
+			if id, ok := ids.Parse(f.View.ChannelId); ok {
+				ch = id.String()
+			}
+			s.sys.Engine.Send(s.sys.Hub, hub.View{GatewayID: key, ConnID: f.View.ConnId, ChannelID: ch})
 		}
 	}
 }

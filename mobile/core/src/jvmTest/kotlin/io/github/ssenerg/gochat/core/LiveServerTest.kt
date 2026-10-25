@@ -114,6 +114,7 @@ class LiveServerTest {
         val dm: Channel = session.openConversation(listOf(peer.id))
         assertTrue(dm.isConversation)
         session.state.first { s -> s.channels.any { it.id == dm.id } }
+        assertEquals(st.teamId, dm.team_id, "conversations belong to the team on screen")
 
         withContext(scope.coroutineContext) { app.signOut() }
         assertTrue(app.state.value is AppState.SignedOut)

@@ -7,8 +7,10 @@ package directory
 import (
 	"cmp"
 	"context"
+	"encoding/hex"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/ssenerg/gochat/internal/actors"
 	"github.com/ssenerg/gochat/internal/authz"
 	"github.com/ssenerg/gochat/internal/core/ids"
+	"github.com/ssenerg/gochat/internal/core/keylock"
 	"github.com/ssenerg/gochat/internal/core/models"
 	"github.com/ssenerg/gochat/internal/core/secure"
 	"github.com/ssenerg/gochat/internal/core/validate"
@@ -42,7 +45,7 @@ type Repo interface {
 	SetStatus(ctx context.Context, id gocql.UUID, status string, dndUntil time.Time) error
 	SetCustomStatus(ctx context.Context, id gocql.UUID, emoji, text string, until time.Time) error
 
-	CreateTeam(ctx context.Context, t *models.Team) error
+	CreateTeam(ctx context.Context, n *scylla.NewTeam) error
 	GetTeam(ctx context.Context, id gocql.UUID) (*models.Team, error)
 	GetTeamIDByName(ctx context.Context, name string) (gocql.UUID, error)
 	GetTeams(ctx context.Context, ids []gocql.UUID) ([]*models.Team, error)
@@ -54,7 +57,9 @@ type Repo interface {
 	RemoveTeamMember(ctx context.Context, teamID, userID gocql.UUID) error
 	UpdateTeamMemberRole(ctx context.Context, teamID, userID gocql.UUID, role models.TeamRole) error
 	CreateInvite(ctx context.Context, inv *models.Invite) error
-	ListTeamInvites(ctx context.Context, teamID gocql.UUID, limit int) ([]*models.Invite, error)
+	ListTeamInvites(ctx context.Context, teamID gocql.UUID) ([]*models.Invite, error)
+	FindTeamInvites(ctx context.Context, teamID gocql.UUID, prefix []byte) ([]*models.Invite, error)
+	OpenInvites(ctx context.Context, teamID gocql.UUID, listed []*models.Invite) ([]*models.Invite, error)
 	RevokeInvite(ctx context.Context, teamID gocql.UUID, hash []byte) (bool, error)
 	GetInvite(ctx context.Context, hash []byte) (*models.Invite, error)
 	ConsumeInvite(ctx context.Context, inv *models.Invite, userID gocql.UUID, now time.Time) (bool, error)
@@ -62,7 +67,12 @@ type Repo interface {
 	SpendInvite(ctx context.Context, hash []byte, userID gocql.UUID) error
 
 	CreateChannel(ctx context.Context, ch *models.Channel, creator *models.ChannelMember) error
-	CreateDirectChannel(ctx context.Context, pair string, ch *models.Channel, members []*models.ChannelMember) (gocql.UUID, error)
+	CreateDirectChannel(ctx context.Context, key string, ch *models.Channel, members []*models.ChannelMember) (gocql.UUID, error)
+	ClaimDirectKey(ctx context.Context, key string, id gocql.UUID) (gocql.UUID, error)
+	ChannelsAfter(ctx context.Context, after gocql.UUID, limit int) ([]*models.Channel, error)
+	ListChannelMembers(ctx context.Context, channelID gocql.UUID) ([]*models.ChannelMember, error)
+	GetState(ctx context.Context, key string) (string, error)
+	SetState(ctx context.Context, key, value string) error
 	GetChannels(ctx context.Context, ids []gocql.UUID) ([]*models.Channel, error)
 	GetChannelIDByName(ctx context.Context, teamID gocql.UUID, name string) (gocql.UUID, error)
 	ListTeamChannels(ctx context.Context, teamID gocql.UUID) ([]*scylla.TeamChannel, error)
@@ -70,6 +80,7 @@ type Repo interface {
 	ListLastReads(ctx context.Context, userID gocql.UUID) ([]*scylla.ChannelRead, error)
 	CountMentions(ctx context.Context, userID gocql.UUID) (map[gocql.UUID]int, error)
 	ListMuted(ctx context.Context, userID gocql.UUID) (map[gocql.UUID]bool, error)
+	ListCleared(ctx context.Context, userID gocql.UUID) (map[gocql.UUID]gocql.UUID, error)
 	ListThreadFollows(ctx context.Context, userID gocql.UUID, limit int) ([]*scylla.ThreadFollow, error)
 	GetMessage(ctx context.Context, channelID, id gocql.UUID) (*models.Message, error)
 	GetReply(ctx context.Context, channelID, rootID, id gocql.UUID) (*models.Message, error)
@@ -88,6 +99,10 @@ type Deps struct {
 	Channels *actor.PID
 	Voice    *actor.PID
 	invited  *window.Counter
+	created  *window.Counter
+	// teamLocks serializes the changes that could leave a team without an
+	// admin.
+	teamLocks *keylock.Locks
 }
 
 // The channels every team starts with and every member joins.
@@ -98,6 +113,8 @@ var defaultChannels = []struct{ name, display, purpose string }{
 
 func Pool(d *Deps) actor.Producer {
 	d.invited = window.New(d.Cfg.MaxInvites, d.Cfg.InviteTTL)
+	d.created = window.New(d.Cfg.MaxTeamsPerDay, 24*time.Hour)
+	d.teamLocks = keylock.New()
 	return actors.NewPool(d.Cfg.Workers, func() actor.Receiver { return &worker{Deps: d} },
 		actor.WithMiddleware(actors.Recover(d.Logger)))
 }
@@ -229,28 +246,33 @@ func (w *worker) createTeam(ctx context.Context, msg CreateTeam) (*pb.Team, erro
 	if err != nil {
 		return nil, err
 	}
+	key := msg.P.UserID.String()
+	limited := msg.P.Role != models.SystemRoleAdmin
+	if limited && w.created.Blocked(key) {
+		return nil, ierrors.ResourceExhausted("you created too many teams today, try again tomorrow")
+	}
 	creator, err := w.Users.Get(ctx, msg.P.UserID)
 	if err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC()
 	team := &models.Team{ID: ids.New(), Name: name, DisplayName: display, Description: desc, CreatedBy: creator.ID, CreatedAt: now}
-	if err := w.Repo.CreateTeam(ctx, team); err != nil {
-		return nil, err
-	}
-	member := &models.TeamMember{TeamID: team.ID, UserID: creator.ID, Role: models.TeamRoleAdmin, JoinedAt: now}
-	if err := w.Repo.AddTeamMember(ctx, member, creator.Username, creator.DisplayName); err != nil {
-		return nil, err
+	n := &scylla.NewTeam{
+		Team:     team,
+		Creator:  &models.TeamMember{TeamID: team.ID, UserID: creator.ID, Role: models.TeamRoleAdmin, JoinedAt: now},
+		Username: creator.Username, DisplayName: creator.DisplayName,
 	}
 	for _, dc := range defaultChannels {
-		ch := &models.Channel{
+		n.Channels = append(n.Channels, &models.Channel{
 			ID: ids.New(), TeamID: team.ID, Name: dc.name, DisplayName: dc.display, Purpose: dc.purpose,
 			Kind: models.ChannelPublic, CreatedBy: creator.ID, CreatedAt: now,
-		}
-		cm := &models.ChannelMember{ChannelID: ch.ID, UserID: creator.ID, TeamID: team.ID, Role: models.ChannelRoleAdmin, JoinedAt: now}
-		if err := w.Repo.CreateChannel(ctx, ch, cm); err != nil {
-			return nil, err
-		}
+		})
+	}
+	if err := w.Repo.CreateTeam(ctx, n); err != nil {
+		return nil, err
+	}
+	if limited {
+		w.created.Add(key)
 	}
 	out := convert.Team(team, models.TeamRoleAdmin)
 	w.deliver(creator.ID, &pb.Event{Payload: &pb.Event_TeamJoined{TeamJoined: &pb.TeamJoined{Team: out}}})
@@ -319,7 +341,7 @@ func (w *worker) getTeam(ctx context.Context, msg GetTeam) (*pb.Team, error) {
 	return convert.Team(team, m.Role), nil
 }
 
-func (w *worker) listTeamMembers(ctx context.Context, msg ListTeamMembers) ([]*pb.TeamMember, error) {
+func (w *worker) listTeamMembers(ctx context.Context, msg ListTeamMembers) (*pb.ListTeamMembersResponse, error) {
 	teamID, err := parseID(msg.TeamID, "team")
 	if err != nil {
 		return nil, err
@@ -337,34 +359,42 @@ func (w *worker) listTeamMembers(ctx context.Context, msg ListTeamMembers) ([]*p
 		limit = 50
 	}
 	slices.SortFunc(entries, func(a, b *scylla.TeamMemberEntry) int { return cmp.Compare(a.Username, b.Username) })
-	out := make([]*pb.TeamMember, 0, min(limit, len(entries)))
-	for _, e := range entries {
+	// Usernames are unique, so the last one listed continues the listing.
+	start, found := slices.BinarySearchFunc(entries, msg.After, func(e *scylla.TeamMemberEntry, after string) int {
+		return cmp.Compare(e.Username, after)
+	})
+	if found {
+		start++
+	}
+	res := &pb.ListTeamMembersResponse{}
+	for _, e := range entries[start:] {
 		if query != "" && !strings.HasPrefix(e.Username, query) && !strings.HasPrefix(strings.ToLower(e.DisplayName), query) {
 			continue
 		}
-		out = append(out, &pb.TeamMember{
+		if len(res.Members) == limit {
+			res.Next = res.Members[limit-1].User.Username
+			break
+		}
+		res.Members = append(res.Members, &pb.TeamMember{
 			User:     &pb.User{Id: e.UserID.String(), Username: e.Username, DisplayName: e.DisplayName},
 			Role:     convert.TeamRole(e.Role),
 			JoinedAt: convert.Time(e.JoinedAt),
 		})
-		if len(out) >= limit {
-			break
-		}
 	}
-	userIDs := make([]gocql.UUID, 0, len(out))
-	for _, m := range out {
+	userIDs := make([]gocql.UUID, 0, len(res.Members))
+	for _, m := range res.Members {
 		if id, ok := ids.Parse(m.User.Id); ok {
 			userIDs = append(userIDs, id)
 		}
 	}
 	if found, err := w.Users.GetMany(ctx, userIDs); err == nil {
-		for _, m := range out {
+		for _, m := range res.Members {
 			if id, ok := ids.Parse(m.User.Id); ok && found[id] != nil {
 				m.User.Photo = found[id].Photo
 			}
 		}
 	}
-	return out, nil
+	return res, nil
 }
 
 // manage checks the caller may act on another member of teamID.
@@ -383,6 +413,30 @@ func (w *worker) manage(ctx context.Context, p *models.Principal, teamID gocql.U
 	return nil
 }
 
+// lockTeam holds the team's admin changes until the returned func is
+// called.
+func (w *worker) lockTeam(ctx context.Context, teamID gocql.UUID) (func(), error) {
+	unlock, err := w.teamLocks.Lock(ctx, teamID.String())
+	if err != nil {
+		return nil, ierrors.Unavailable("the team is busy, try again")
+	}
+	return unlock, nil
+}
+
+// keepAdmin fails when target is the team's only admin.
+func (w *worker) keepAdmin(ctx context.Context, teamID, target gocql.UUID) error {
+	entries, err := w.Repo.ListTeamMembers(ctx, teamID)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.Role == models.TeamRoleAdmin && e.UserID != target {
+			return nil
+		}
+	}
+	return ierrors.FailedPrecondition("a team needs at least one admin")
+}
+
 func (w *worker) removeTeamMember(ctx context.Context, msg RemoveTeamMember) (Done, error) {
 	teamID, err := parseID(msg.TeamID, "team")
 	if err != nil {
@@ -395,12 +449,11 @@ func (w *worker) removeTeamMember(ctx context.Context, msg RemoveTeamMember) (Do
 	if target == msg.P.UserID {
 		return Done{}, ierrors.FailedPrecondition("you cannot remove yourself")
 	}
-	if err := w.manage(ctx, msg.P, teamID, authz.ActRemove); err != nil {
+	if err := w.dropTeamMember(ctx, msg.P, teamID, target); err != nil {
 		return Done{}, err
 	}
-	if _, err := w.membership(ctx, teamID, target); err != nil {
-		return Done{}, ierrors.NotFound("not a member")
-	}
+	// The channels go after the team: a join racing the removal then finds
+	// no team, or joined in time to be listed here.
 	memberships, err := w.Repo.ListUserChannels(ctx, target, teamID)
 	if err != nil {
 		return Done{}, err
@@ -411,12 +464,40 @@ func (w *worker) removeTeamMember(ctx context.Context, msg RemoveTeamMember) (Do
 			return Done{}, err
 		}
 	}
-	if err := w.Repo.RemoveTeamMember(ctx, teamID, target); err != nil {
-		return Done{}, err
-	}
 	w.Engine.Send(w.Voice, voice.DropUser{UserID: target, TeamID: teamID})
 	w.deliver(target, &pb.Event{Payload: &pb.Event_TeamLeft{TeamLeft: &pb.TeamLeft{TeamId: teamID.String()}}})
 	return Done{}, nil
+}
+
+// dropTeamMember removes target from the team, keeping it an admin. A
+// removal that stopped short of the channels may be finished.
+func (w *worker) dropTeamMember(ctx context.Context, p *models.Principal, teamID, target gocql.UUID) error {
+	unlock, err := w.lockTeam(ctx, teamID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := w.manage(ctx, p, teamID, authz.ActRemove); err != nil {
+		return err
+	}
+	m, err := w.membership(ctx, teamID, target)
+	if ierrors.Is(err, ierrors.CodeNotFound) {
+		in, err := w.Repo.ListUserChannels(ctx, target, teamID)
+		if err != nil {
+			return err
+		}
+		if len(in) == 0 {
+			return ierrors.NotFound("not a member")
+		}
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := w.mayChangeAdmin(ctx, p, teamID, m); err != nil {
+		return err
+	}
+	return w.Repo.RemoveTeamMember(ctx, teamID, target)
 }
 
 func (w *worker) updateTeamMemberRole(ctx context.Context, msg UpdateTeamMemberRole) (Done, error) {
@@ -428,6 +509,11 @@ func (w *worker) updateTeamMemberRole(ctx context.Context, msg UpdateTeamMemberR
 	if err != nil {
 		return Done{}, err
 	}
+	unlock, err := w.lockTeam(ctx, teamID)
+	if err != nil {
+		return Done{}, err
+	}
+	defer unlock()
 	if err := w.manage(ctx, msg.P, teamID, authz.ActUpdateRole); err != nil {
 		return Done{}, err
 	}
@@ -438,22 +524,33 @@ func (w *worker) updateTeamMemberRole(ctx context.Context, msg UpdateTeamMemberR
 	if current.Role == msg.Role {
 		return Done{}, nil
 	}
-	if current.Role == models.TeamRoleAdmin {
-		entries, err := w.Repo.ListTeamMembers(ctx, teamID)
-		if err != nil {
-			return Done{}, err
-		}
-		admins := 0
-		for _, e := range entries {
-			if e.Role == models.TeamRoleAdmin {
-				admins++
-			}
-		}
-		if admins <= 1 {
-			return Done{}, ierrors.FailedPrecondition("a team needs at least one admin")
-		}
+	if err := w.mayChangeAdmin(ctx, msg.P, teamID, current); err != nil {
+		return Done{}, err
 	}
 	return Done{}, w.Repo.UpdateTeamMemberRole(ctx, teamID, target, msg.Role)
+}
+
+// mayChangeAdmin checks, under the team's lock, that p may demote or remove
+// target: an admin only the team's owner or a system admin may, the owner
+// only themself or a system admin, and never the last admin.
+func (w *worker) mayChangeAdmin(ctx context.Context, p *models.Principal, teamID gocql.UUID, target *models.TeamMember) error {
+	if target.Role != models.TeamRoleAdmin {
+		return nil
+	}
+	team, err := w.Repo.GetTeam(ctx, teamID)
+	if err != nil {
+		return err
+	}
+	if p.Role != models.SystemRoleAdmin {
+		owner := p.UserID == team.CreatedBy
+		switch {
+		case target.UserID == team.CreatedBy && !owner:
+			return ierrors.New(ierrors.CodePermissionDenied, "only the team's owner or a system admin can change the owner's role")
+		case !owner && target.UserID != p.UserID:
+			return ierrors.New(ierrors.CodePermissionDenied, "only the team's owner can demote or remove another admin")
+		}
+	}
+	return w.keepAdmin(ctx, teamID, target.UserID)
 }
 
 // inviter returns the team of rawID when p may manage its invites.
@@ -497,19 +594,87 @@ func (w *worker) createInvite(ctx context.Context, msg CreateInvite) (*Invite, e
 	return &Invite{Token: token, ExpiresAt: inv.ExpiresAt}, nil
 }
 
-const maxListedInvites = 200
+// invitePage is how many invites a listing shows at once.
+const invitePage = 50
 
-func (w *worker) listInvites(ctx context.Context, msg ListInvites) ([]*pb.InviteSummary, error) {
+// inviteKey orders invites newest first, and continues their listing.
+type inviteKey struct {
+	at int64
+	id string
+}
+
+func keyOf(inv *models.Invite) inviteKey {
+	return inviteKey{at: inv.CreatedAt.UnixMicro(), id: secure.PublicID(inv.TokenHash)}
+}
+
+func (k inviteKey) compare(o inviteKey) int {
+	if c := cmp.Compare(o.at, k.at); c != 0 {
+		return c
+	}
+	return cmp.Compare(k.id, o.id)
+}
+
+func (k inviteKey) String() string { return strconv.FormatInt(k.at, 10) + "." + k.id }
+
+var inviteCursorRe = regexp.MustCompile(`^(\d{1,19})\.([0-9a-f]{24})$`)
+
+func parseInviteKey(s string) (inviteKey, bool) {
+	m := inviteCursorRe.FindStringSubmatch(s)
+	if m == nil {
+		return inviteKey{}, false
+	}
+	at, err := strconv.ParseInt(m[1], 10, 64)
+	return inviteKey{at: at, id: m[2]}, err == nil
+}
+
+func (w *worker) listInvites(ctx context.Context, msg ListInvites) (*pb.ListInvitesResponse, error) {
 	teamID, err := w.inviter(ctx, msg.P, msg.TeamID)
 	if err != nil {
 		return nil, err
 	}
-	invs, err := w.Repo.ListTeamInvites(ctx, teamID, maxListedInvites)
+	var after inviteKey
+	if msg.After != "" {
+		var ok bool
+		if after, ok = parseInviteKey(msg.After); !ok {
+			return nil, ierrors.InvalidArgument("invalid invite cursor")
+		}
+	}
+	listed, err := w.Repo.ListTeamInvites(ctx, teamID)
 	if err != nil {
 		return nil, err
 	}
-	creatorIDs := make([]gocql.UUID, 0, len(invs))
-	for _, inv := range invs {
+	keys := make(map[*models.Invite]inviteKey, len(listed))
+	for _, inv := range listed {
+		keys[inv] = keyOf(inv)
+	}
+	slices.SortFunc(listed, func(a, b *models.Invite) int { return keys[a].compare(keys[b]) })
+	if msg.After != "" {
+		start, _ := slices.BinarySearchFunc(listed, after, func(inv *models.Invite, k inviteKey) int {
+			if c := keys[inv].compare(k); c != 0 {
+				return c
+			}
+			return -1
+		})
+		listed = listed[start:]
+	}
+	// One more than a page tells whether another follows.
+	var page []*models.Invite
+	for len(page) <= invitePage && len(listed) > 0 {
+		n := min(len(listed), invitePage+1-len(page))
+		open, err := w.Repo.OpenInvites(ctx, teamID, listed[:n])
+		if err != nil {
+			return nil, err
+		}
+		page = append(page, open...)
+		listed = listed[n:]
+	}
+	res := &pb.ListInvitesResponse{}
+	if len(page) > invitePage {
+		page = page[:invitePage]
+		res.Next = keys[page[invitePage-1]].String()
+	}
+	creatorIDs := make([]gocql.UUID, 0, len(page))
+	for _, inv := range page {
 		if !slices.Contains(creatorIDs, inv.CreatedBy) {
 			creatorIDs = append(creatorIDs, inv.CreatedBy)
 		}
@@ -526,18 +691,17 @@ func (w *worker) listInvites(ctx context.Context, msg ListInvites) ([]*pb.Invite
 		}
 		active[id] = ok
 	}
-	out := make([]*pb.InviteSummary, 0, len(invs))
-	for _, inv := range invs {
+	for _, inv := range page {
 		s := &pb.InviteSummary{
-			Id: secure.PublicID(inv.TokenHash), CreatedAt: convert.Time(inv.CreatedAt), ExpiresAt: convert.Time(inv.ExpiresAt),
+			Id: keys[inv].id, CreatedAt: convert.Time(inv.CreatedAt), ExpiresAt: convert.Time(inv.ExpiresAt),
 			Active: active[inv.CreatedBy],
 		}
 		if u := creators[inv.CreatedBy]; u != nil {
 			s.CreatedBy = convert.PublicUser(u)
 		}
-		out = append(out, s)
+		res.Invites = append(res.Invites, s)
 	}
-	return out, nil
+	return res, nil
 }
 
 var inviteIDRe = regexp.MustCompile(`^[0-9a-f]{24}$`)
@@ -550,7 +714,9 @@ func (w *worker) revokeInvite(ctx context.Context, msg RevokeInvite) (Done, erro
 	if !inviteIDRe.MatchString(msg.InviteID) {
 		return Done{}, ierrors.InvalidArgument("invalid invite id")
 	}
-	invs, err := w.Repo.ListTeamInvites(ctx, teamID, maxListedInvites)
+	// The id is the start of the token hash, which orders the team's list.
+	prefix, _ := hex.DecodeString(msg.InviteID)
+	invs, err := w.Repo.FindTeamInvites(ctx, teamID, prefix)
 	if err != nil {
 		return Done{}, err
 	}
@@ -680,36 +846,19 @@ func (w *worker) joinTeam(ctx context.Context, userID, teamID gocql.UUID) (*pb.T
 	return out, nil
 }
 
-func directPair(a, b gocql.UUID) string {
-	x, y := a.String(), b.String()
-	if x > y {
-		x, y = y, x
-	}
-	return x + ":" + y
-}
-
 func (w *worker) listChannels(ctx context.Context, msg ListChannels) ([]*pb.Channel, error) {
-	var (
-		memberships []*models.ChannelMember
-		teamID      gocql.UUID
-	)
-	if msg.TeamID != "" {
-		var err error
-		if teamID, err = parseID(msg.TeamID, "team"); err != nil {
-			return nil, err
-		}
-		if _, err := w.membership(ctx, teamID, msg.P.UserID); err != nil {
-			return nil, err
-		}
-		if memberships, err = w.Repo.ListUserChannels(ctx, msg.P.UserID, teamID); err != nil {
-			return nil, err
-		}
-	}
-	direct, err := w.Repo.ListUserChannels(ctx, msg.P.UserID, scylla.NoTeam)
+	teamID, err := parseID(msg.TeamID, "team")
 	if err != nil {
 		return nil, err
 	}
-	memberships = append(memberships, direct...)
+	if _, err := w.membership(ctx, teamID, msg.P.UserID); err != nil {
+		return nil, err
+	}
+	// A team's conversations are its own, filed with its channels.
+	memberships, err := w.Repo.ListUserChannels(ctx, msg.P.UserID, teamID)
+	if err != nil {
+		return nil, err
+	}
 	roles := make(map[gocql.UUID]models.ChannelRole, len(memberships))
 	chIDs := make([]gocql.UUID, 0, len(memberships))
 	for _, m := range memberships {
@@ -717,15 +866,13 @@ func (w *worker) listChannels(ctx context.Context, msg ListChannels) ([]*pb.Chan
 		chIDs = append(chIDs, m.ChannelID)
 	}
 	// Every member of a team sees its voice channels, as rooms to talk in.
-	if msg.TeamID != "" {
-		listed, err := w.Repo.ListTeamChannels(ctx, teamID)
-		if err != nil {
-			return nil, err
-		}
-		for _, tc := range listed {
-			if _, mine := roles[tc.ChannelID]; tc.Kind == models.ChannelVoice && !mine {
-				chIDs = append(chIDs, tc.ChannelID)
-			}
+	listed, err := w.Repo.ListTeamChannels(ctx, teamID)
+	if err != nil {
+		return nil, err
+	}
+	for _, tc := range listed {
+		if _, mine := roles[tc.ChannelID]; tc.Kind == models.ChannelVoice && !mine {
+			chIDs = append(chIDs, tc.ChannelID)
 		}
 	}
 	reads, err := w.Repo.ListLastReads(ctx, msg.P.UserID)
@@ -741,6 +888,10 @@ func (w *worker) listChannels(ctx context.Context, msg ListChannels) ([]*pb.Chan
 		return nil, err
 	}
 	muted, err := w.Repo.ListMuted(ctx, msg.P.UserID)
+	if err != nil {
+		return nil, err
+	}
+	cleared, err := w.Repo.ListCleared(ctx, msg.P.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -764,7 +915,8 @@ func (w *worker) listChannels(ctx context.Context, msg ListChannels) ([]*pb.Chan
 	}
 	out := make([]*pb.Channel, 0, len(all))
 	for _, ch := range all {
-		if !ch.ArchivedAt.IsZero() {
+		// A cleared conversation shows again with its next message.
+		if c, ok := cleared[ch.ID]; !ch.ArchivedAt.IsZero() || (ok && !ids.After(ch.LastMessageID, c)) {
 			continue
 		}
 		view := convert.Conversation(ch, roles[ch.ID], lastRead[ch.ID], msg.P.UserID, peers)
@@ -915,88 +1067,6 @@ func (w *worker) announce(ctx context.Context, ch *models.Channel, creator gocql
 	w.Engine.Send(w.Hub, hub.Deliver{UserIDs: ids, Event: &pb.Event{Payload: &pb.Event_ChannelJoined{ChannelJoined: &pb.ChannelJoined{Channel: view}}}})
 }
 
-// teamsOf returns the teams a user belongs to.
-func (w *worker) teamsOf(ctx context.Context, userID gocql.UUID) (map[gocql.UUID]bool, error) {
-	list, err := w.Repo.ListUserTeams(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	set := make(map[gocql.UUID]bool, len(list))
-	for _, t := range list {
-		set[t.TeamID] = true
-	}
-	return set, nil
-}
-
-// reachable checks p may start a conversation with target: an active user
-// who shares one of mine, p's teams, unless p is an admin.
-func (w *worker) reachable(ctx context.Context, p *models.Principal, mine map[gocql.UUID]bool, target gocql.UUID) error {
-	peer, err := w.Users.Get(ctx, target)
-	if err != nil || peer.Deactivated {
-		return ierrors.NotFound("user not found")
-	}
-	if p.Role == models.SystemRoleAdmin {
-		return nil
-	}
-	theirs, err := w.teamsOf(ctx, target)
-	if err != nil {
-		return err
-	}
-	for id := range theirs {
-		if mine[id] {
-			return nil
-		}
-	}
-	return ierrors.NotFound("user not found")
-}
-
-func (w *worker) openDirect(ctx context.Context, msg OpenDirect) (*pb.Channel, error) {
-	if !w.Authz.Can(authz.ObjDirect, authz.ActCreate, string(msg.P.Role)) {
-		return nil, ierrors.PermissionDenied()
-	}
-	target, err := parseID(msg.UserID, "user")
-	if err != nil {
-		return nil, err
-	}
-	if target == msg.P.UserID {
-		return nil, ierrors.InvalidArgument("pick someone else")
-	}
-	mine, err := w.teamsOf(ctx, msg.P.UserID)
-	if err != nil {
-		return nil, err
-	}
-	if err := w.reachable(ctx, msg.P, mine, target); err != nil {
-		return nil, err
-	}
-	now := time.Now().UTC()
-	pair := directPair(msg.P.UserID, target)
-	ch := &models.Channel{
-		ID: ids.New(), TeamID: scylla.NoTeam, Name: pair, DisplayName: "Direct", Kind: models.ChannelDirect,
-		CreatedBy: msg.P.UserID, CreatedAt: now,
-	}
-	members := []*models.ChannelMember{
-		{ChannelID: ch.ID, UserID: msg.P.UserID, TeamID: scylla.NoTeam, Role: models.ChannelRoleMember, JoinedAt: now},
-		{ChannelID: ch.ID, UserID: target, TeamID: scylla.NoTeam, Role: models.ChannelRoleMember, JoinedAt: now},
-	}
-	chID, err := w.Repo.CreateDirectChannel(ctx, pair, ch, members)
-	if err != nil {
-		return nil, err
-	}
-	view, err := actors.Ask[*pb.Channel](ctx, w.Engine, w.Channels, channels.View{Target: channels.Target{P: msg.P, ChannelID: chID}})
-	if err != nil {
-		return nil, err
-	}
-	if chID == ch.ID {
-		self, err := w.Users.Get(ctx, msg.P.UserID)
-		if err == nil {
-			peerView := convert.Channel(ch, models.ChannelRoleMember, gocql.UUID{}, convert.PublicUser(self))
-			w.deliver(target, &pb.Event{Payload: &pb.Event_ChannelJoined{ChannelJoined: &pb.ChannelJoined{Channel: peerView}}})
-		}
-		w.deliver(msg.P.UserID, &pb.Event{Payload: &pb.Event_ChannelJoined{ChannelJoined: &pb.ChannelJoined{Channel: view}}})
-	}
-	return view, nil
-}
-
 func (w *worker) getUser(ctx context.Context, msg GetUser) (*pb.User, error) {
 	id, err := parseID(msg.UserID, "user")
 	if err != nil {
@@ -1040,18 +1110,6 @@ func (w *worker) me(ctx context.Context, p *models.Principal) (*MeResult, error)
 		return nil, err
 	}
 	return &MeResult{User: convert.User(u), Email: u.Email}, nil
-}
-
-func (w *worker) presence(ctx context.Context, msg Presence) (map[string]pb.Status, error) {
-	if len(msg.UserIDs) > 200 {
-		return nil, ierrors.InvalidArgument("too many users")
-	}
-	for _, id := range msg.UserIDs {
-		if _, ok := ids.Parse(id); !ok {
-			return nil, ierrors.InvalidArgument("invalid user id")
-		}
-	}
-	return actors.Ask[map[string]pb.Status](ctx, w.Engine, w.Hub, hub.Statuses{UserIDs: msg.UserIDs})
 }
 
 func (w *worker) listMuted(ctx context.Context, p *models.Principal) ([]string, error) {

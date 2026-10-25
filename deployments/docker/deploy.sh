@@ -1,8 +1,10 @@
 #!/bin/sh
 # Deploys GoChat on this server: pulls IMAGE@DIGEST, applies the migrations
-# and restarts the server, the web gateway and the voice server with it. This script's
-# directory holds docker-compose.yml and .env. If they do not come up
-# healthy, the image that ran before comes back and the script fails.
+# and restarts the server and the web gateway with it. If they do not come
+# up healthy, the image that ran before comes back and the script fails.
+# Then the voice server restarts too, when .env sets VOICE_SERVER_KEY: if it
+# fails, chat stays on the new image and the script fails. This script's
+# directory holds docker-compose.yml and .env.
 #
 #   deploy.sh IMAGE [DIGEST]   e.g. deploy.sh ghcr.io/OWNER/gochat sha256:...
 #
@@ -58,22 +60,34 @@ started() {
 	}
 	printf '%s\n' "$out" | journal
 	compose up --detach --no-build --no-deps --force-recreate --wait --wait-timeout 180 server || return 1
-	compose up --detach --no-build --no-deps --force-recreate --wait --wait-timeout 120 web || return 1
-	compose up --detach --no-build --no-deps --force-recreate --wait --wait-timeout 120 voice
+	compose up --detach --no-build --no-deps --force-recreate --wait --wait-timeout 120 web
 }
 
-if started; then
-	# Images replaced by earlier deploys are not needed any more.
-	docker image prune --force --filter label=org.opencontainers.image.title=gochat >/dev/null
-	echo "deploy: gochat $(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' gochat:latest) is running"
-	exit 0
+# Voice is optional: without its own key it cannot run, and is left off.
+voice_configured() {
+	key=$(sed -n 's/^[[:space:]]*VOICE_SERVER_KEY[[:space:]]*=[[:space:]]*//p' .env | tail -n 1 | tr -d "\"' \r")
+	[ -n "$key" ]
+}
+
+logs="Their logs are on the server: journalctl -t gochat-deploy"
+if ! started; then
+	compose logs --no-color --tail 100 server web 2>&1 | journal || true
+	[ -n "$running" ] || fail "gochat did not come up healthy. $logs"
+	docker image tag gochat:previous gochat:latest
+	if compose up --detach --no-build --no-deps --force-recreate --wait --wait-timeout 180 server web >/dev/null 2>&1; then
+		fail "gochat did not come up healthy, so the image that ran before is back. $logs"
+	fi
+	fail "gochat did not come up healthy, and neither did the image that ran before. $logs"
 fi
 
-compose logs --no-color --tail 100 server web voice 2>&1 | journal || true
-logs="Their logs are on the server: journalctl -t gochat-deploy"
-[ -n "$running" ] || fail "gochat did not come up healthy. $logs"
-docker image tag gochat:previous gochat:latest
-if compose up --detach --no-build --no-deps --force-recreate --wait --wait-timeout 180 server web voice >/dev/null 2>&1; then
-	fail "gochat did not come up healthy, so the image that ran before is back. $logs"
+revision=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' gochat:latest)
+if ! voice_configured; then
+	compose rm --stop --force voice >/dev/null 2>&1 || true
+	echo "deploy: voice is off: VOICE_SERVER_KEY is not set in .env"
+elif ! compose up --detach --no-build --no-deps --force-recreate --wait --wait-timeout 120 voice >/dev/null 2>&1; then
+	compose logs --no-color --tail 100 voice 2>&1 | journal || true
+	fail "gochat $revision is running, but the voice server did not come up healthy. $logs"
 fi
-fail "gochat did not come up healthy, and neither did the image that ran before. $logs"
+# Images replaced by earlier deploys are not needed any more.
+docker image prune --force --filter label=org.opencontainers.image.title=gochat >/dev/null
+echo "deploy: gochat $revision is running"

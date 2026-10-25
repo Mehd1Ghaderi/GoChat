@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"github.com/ssenerg/gochat/internal/config"
 )
 
@@ -15,9 +17,11 @@ type Config struct {
 	ReconnectMax time.Duration `mapstructure:"reconnect_max"`
 	// ReadLimit bounds one message a browser sends.
 	ReadLimit int64 `mapstructure:"read_limit"`
-	// SendQueue is how many fragments a slow browser may lag behind before
-	// its socket is closed.
-	SendQueue    int           `mapstructure:"send_queue"`
+	// SendBuffer is how many bytes a slow browser may lag behind before its
+	// socket is closed, and RecvBuffer how many it may send that its session
+	// has yet to handle.
+	SendBuffer   int           `mapstructure:"send_buffer"`
+	RecvBuffer   int64         `mapstructure:"recv_buffer"`
 	WriteTimeout time.Duration `mapstructure:"write_timeout"`
 	PingInterval time.Duration `mapstructure:"ping_interval"`
 	// MaxPerUser bounds the sockets one person may hold open.
@@ -25,6 +29,20 @@ type Config struct {
 	// FrameRate and FrameBurst bound how fast a browser may send.
 	FrameRate  float64 `mapstructure:"frame_rate"`
 	FrameBurst int     `mapstructure:"frame_burst"`
+	// Compress negotiates permessage-deflate for the messages of at least
+	// CompressThreshold bytes. Each is compressed on its own, so a socket
+	// holds no compressor between writes; every socket compresses its own
+	// copy, so a high threshold spares the fan-out of small messages.
+	Compress          bool `mapstructure:"compress"`
+	CompressThreshold int  `mapstructure:"compress_threshold"`
+	// AttachRate and AttachBurst pace the sockets attached to the server,
+	// and the Resync settings the pages reloaded after their socket came
+	// back, so a restart does not bring every page back at once.
+	AttachRate   float64       `mapstructure:"attach_rate"`
+	AttachBurst  int           `mapstructure:"attach_burst"`
+	ResyncRate   float64       `mapstructure:"resync_rate"`
+	ResyncBurst  int           `mapstructure:"resync_burst"`
+	ResyncJitter time.Duration `mapstructure:"resync_jitter"`
 }
 
 var _ config.Config = (*Config)(nil)
@@ -41,8 +59,11 @@ func (c *Config) Validate() error {
 	if c.ReadLimit < 1024 || c.ReadLimit > 1<<20 {
 		return errors.New("read_limit must be between 1KiB and 1MiB")
 	}
-	if c.SendQueue < 8 {
-		return errors.New("send_queue must be at least 8")
+	if c.SendBuffer < 64<<10 || c.SendBuffer > 64<<20 {
+		return errors.New("send_buffer must be between 64KiB and 64MiB")
+	}
+	if c.RecvBuffer < c.ReadLimit || c.RecvBuffer > 64<<20 {
+		return errors.New("recv_buffer must be between read_limit and 64MiB")
 	}
 	if c.WriteTimeout <= 0 || c.PingInterval <= 0 {
 		return errors.New("write_timeout and ping_interval must be positive")
@@ -53,5 +74,24 @@ func (c *Config) Validate() error {
 	if c.FrameRate <= 0 || c.FrameBurst < 1 {
 		return errors.New("frame_rate and frame_burst must be positive")
 	}
+	if c.AttachRate <= 0 || c.AttachBurst < 1 || c.ResyncRate <= 0 || c.ResyncBurst < 1 {
+		return errors.New("attach_rate, attach_burst, resync_rate and resync_burst must be positive")
+	}
+	if c.Compress && c.CompressThreshold < 128 {
+		return errors.New("compress_threshold must be at least 128")
+	}
+	if c.ResyncJitter < 0 || c.ResyncJitter > time.Minute {
+		return errors.New("resync_jitter must be between 0 and 1m")
+	}
 	return nil
+}
+
+// AcceptOptions are the options a socket of host is accepted with.
+func (c *Config) AcceptOptions(host string) *websocket.AcceptOptions {
+	opts := &websocket.AcceptOptions{OriginPatterns: []string{host}}
+	if c.Compress {
+		opts.CompressionMode = websocket.CompressionNoContextTakeover
+		opts.CompressionThreshold = c.CompressThreshold
+	}
+	return opts
 }

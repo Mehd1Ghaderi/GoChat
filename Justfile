@@ -27,7 +27,7 @@ build: generate
 
 # Run the chat server on the host, against the dev stores.
 server: _require_env build
-    @SERVER_DRPC_GATEWAY_KEY="$GATEWAY_KEY" {{bin_dir}}/{{app_name}} server
+    @SERVER_DRPC_GATEWAY_KEY="$GATEWAY_KEY" SERVER_DRPC_VOICE_SERVER_KEY="${VOICE_SERVER_KEY:-}" {{bin_dir}}/{{app_name}} server
 
 # Run the web gateway on the host.
 web: _require_env build
@@ -35,7 +35,7 @@ web: _require_env build
 
 # Run the voice server on the host.
 voice: _require_env build
-    @CLIENT_DRPC_GATEWAY_KEY="$GATEWAY_KEY" {{bin_dir}}/{{app_name}} voice
+    @CLIENT_DRPC_GATEWAY_KEY="$VOICE_SERVER_KEY" {{bin_dir}}/{{app_name}} voice
 
 # Apply the scylla migrations (dev stores).
 # Migrations run as the database's admin role; the app's role cannot change

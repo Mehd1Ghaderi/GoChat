@@ -234,6 +234,181 @@ func (x *ClientReady) GetResync() bool {
 	return false
 }
 
+// AppFrame is a message an app sends on its event socket. Each replaces what
+// the last of its kind said, and holds across reconnects only if sent again.
+type AppFrame struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Frame:
+	//
+	//	*AppFrame_View
+	//	*AppFrame_Watch
+	Frame         isAppFrame_Frame `protobuf_oneof:"frame"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AppFrame) Reset() {
+	*x = AppFrame{}
+	mi := &file_gochat_v1_client_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AppFrame) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AppFrame) ProtoMessage() {}
+
+func (x *AppFrame) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_client_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AppFrame.ProtoReflect.Descriptor instead.
+func (*AppFrame) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_client_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *AppFrame) GetFrame() isAppFrame_Frame {
+	if x != nil {
+		return x.Frame
+	}
+	return nil
+}
+
+func (x *AppFrame) GetView() *AppView {
+	if x != nil {
+		if x, ok := x.Frame.(*AppFrame_View); ok {
+			return x.View
+		}
+	}
+	return nil
+}
+
+func (x *AppFrame) GetWatch() *AppWatch {
+	if x != nil {
+		if x, ok := x.Frame.(*AppFrame_Watch); ok {
+			return x.Watch
+		}
+	}
+	return nil
+}
+
+type isAppFrame_Frame interface {
+	isAppFrame_Frame()
+}
+
+type AppFrame_View struct {
+	View *AppView `protobuf:"bytes,1,opt,name=view,proto3,oneof"`
+}
+
+type AppFrame_Watch struct {
+	Watch *AppWatch `protobuf:"bytes,2,opt,name=watch,proto3,oneof"`
+}
+
+func (*AppFrame_View) isAppFrame_Frame() {}
+
+func (*AppFrame_Watch) isAppFrame_Frame() {}
+
+// AppView names the channel the app shows, empty for none.
+type AppView struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ChannelId     string                 `protobuf:"bytes,1,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AppView) Reset() {
+	*x = AppView{}
+	mi := &file_gochat_v1_client_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AppView) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AppView) ProtoMessage() {}
+
+func (x *AppView) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_client_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AppView.ProtoReflect.Descriptor instead.
+func (*AppView) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_client_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *AppView) GetChannelId() string {
+	if x != nil {
+		return x.ChannelId
+	}
+	return ""
+}
+
+// AppWatch names the people whose presence and profile the app shows, at
+// most 1000.
+type AppWatch struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserIds       []string               `protobuf:"bytes,1,rep,name=user_ids,json=userIds,proto3" json:"user_ids,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AppWatch) Reset() {
+	*x = AppWatch{}
+	mi := &file_gochat_v1_client_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AppWatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AppWatch) ProtoMessage() {}
+
+func (x *AppWatch) ProtoReflect() protoreflect.Message {
+	mi := &file_gochat_v1_client_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AppWatch.ProtoReflect.Descriptor instead.
+func (*AppWatch) Descriptor() ([]byte, []int) {
+	return file_gochat_v1_client_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *AppWatch) GetUserIds() []string {
+	if x != nil {
+		return x.UserIds
+	}
+	return nil
+}
+
 var File_gochat_v1_client_proto protoreflect.FileDescriptor
 
 const file_gochat_v1_client_proto_rawDesc = "" +
@@ -252,7 +427,16 @@ const file_gochat_v1_client_proto_rawDesc = "" +
 	"session_id\x18\x02 \x01(\tR\tsessionId\x129\n" +
 	"\n" +
 	"expires_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\x12\x16\n" +
-	"\x06resync\x18\x04 \x01(\bR\x06resyncB\xa0\x01\n" +
+	"\x06resync\x18\x04 \x01(\bR\x06resync\"j\n" +
+	"\bAppFrame\x12(\n" +
+	"\x04view\x18\x01 \x01(\v2\x12.gochat.v1.AppViewH\x00R\x04view\x12+\n" +
+	"\x05watch\x18\x02 \x01(\v2\x13.gochat.v1.AppWatchH\x00R\x05watchB\a\n" +
+	"\x05frame\"(\n" +
+	"\aAppView\x12\x1d\n" +
+	"\n" +
+	"channel_id\x18\x01 \x01(\tR\tchannelId\"%\n" +
+	"\bAppWatch\x12\x19\n" +
+	"\buser_ids\x18\x01 \x03(\tR\auserIdsB\xa0\x01\n" +
 	"\rcom.gochat.v1B\vClientProtoP\x01Z=github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1;gochatv1\xa2\x02\x03GXX\xaa\x02\tGochat.V1\xca\x02\tGochat\\V1\xe2\x02\x15Gochat\\V1\\GPBMetadata\xea\x02\n" +
 	"Gochat::V1b\x06proto3"
 
@@ -268,25 +452,30 @@ func file_gochat_v1_client_proto_rawDescGZIP() []byte {
 	return file_gochat_v1_client_proto_rawDescData
 }
 
-var file_gochat_v1_client_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_gochat_v1_client_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_gochat_v1_client_proto_goTypes = []any{
 	(*ApiError)(nil),              // 0: gochat.v1.ApiError
 	(*ClientFrame)(nil),           // 1: gochat.v1.ClientFrame
 	(*ClientReady)(nil),           // 2: gochat.v1.ClientReady
-	(*Event)(nil),                 // 3: gochat.v1.Event
-	(*User)(nil),                  // 4: gochat.v1.User
-	(*timestamppb.Timestamp)(nil), // 5: google.protobuf.Timestamp
+	(*AppFrame)(nil),              // 3: gochat.v1.AppFrame
+	(*AppView)(nil),               // 4: gochat.v1.AppView
+	(*AppWatch)(nil),              // 5: gochat.v1.AppWatch
+	(*Event)(nil),                 // 6: gochat.v1.Event
+	(*User)(nil),                  // 7: gochat.v1.User
+	(*timestamppb.Timestamp)(nil), // 8: google.protobuf.Timestamp
 }
 var file_gochat_v1_client_proto_depIdxs = []int32{
 	2, // 0: gochat.v1.ClientFrame.ready:type_name -> gochat.v1.ClientReady
-	3, // 1: gochat.v1.ClientFrame.event:type_name -> gochat.v1.Event
-	4, // 2: gochat.v1.ClientReady.user:type_name -> gochat.v1.User
-	5, // 3: gochat.v1.ClientReady.expires_at:type_name -> google.protobuf.Timestamp
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	6, // 1: gochat.v1.ClientFrame.event:type_name -> gochat.v1.Event
+	7, // 2: gochat.v1.ClientReady.user:type_name -> gochat.v1.User
+	8, // 3: gochat.v1.ClientReady.expires_at:type_name -> google.protobuf.Timestamp
+	4, // 4: gochat.v1.AppFrame.view:type_name -> gochat.v1.AppView
+	5, // 5: gochat.v1.AppFrame.watch:type_name -> gochat.v1.AppWatch
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_gochat_v1_client_proto_init() }
@@ -300,13 +489,17 @@ func file_gochat_v1_client_proto_init() {
 		(*ClientFrame_Ready)(nil),
 		(*ClientFrame_Event)(nil),
 	}
+	file_gochat_v1_client_proto_msgTypes[3].OneofWrappers = []any{
+		(*AppFrame_View)(nil),
+		(*AppFrame_Watch)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gochat_v1_client_proto_rawDesc), len(file_gochat_v1_client_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -17,6 +17,13 @@ service AuthService {
   rpc BeginTOTPSetup(BeginTOTPSetupRequest) returns (BeginTOTPSetupResponse);
   rpc ConfirmTOTPSetup(ConfirmTOTPSetupRequest) returns (ConfirmTOTPSetupResponse);
   rpc DisableTOTP(DisableTOTPRequest) returns (DisableTOTPResponse);
+  // ListSessions lists the caller's sessions, or a user's for a system admin.
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  // RevokeSession signs one of the caller's sessions out.
+  rpc RevokeSession(RevokeSessionRequest) returns (RevokeSessionResponse);
+  // RevokeSessions signs out the caller's other sessions, or every session
+  // of a user for a system admin.
+  rpc RevokeSessions(RevokeSessionsRequest) returns (RevokeSessionsResponse);
 }
 
 message GetSignupInfoRequest {
@@ -31,6 +38,9 @@ message GetSignupInfoResponse {
   string team_display_name = 4;
   // The first account needs the setup token from the server's configuration.
   bool setup_token_required = 5;
+  // No account exists and the server has no setup token, so none can be
+  // created until it gets one.
+  bool setup_closed = 6;
 }
 
 message SignUpRequest {
@@ -114,3 +124,28 @@ message DisableTOTPRequest {
 }
 
 message DisableTOTPResponse {}
+
+message ListSessionsRequest {
+  // Empty for the caller.
+  string user_id = 1;
+}
+
+message ListSessionsResponse {
+  // The most recently seen first.
+  repeated SessionInfo sessions = 1;
+}
+
+message RevokeSessionRequest {
+  string session_id = 1;
+}
+
+message RevokeSessionResponse {}
+
+message RevokeSessionsRequest {
+  // Empty for the caller, whose current session stays signed in.
+  string user_id = 1;
+}
+
+message RevokeSessionsResponse {
+  int32 revoked = 1;
+}

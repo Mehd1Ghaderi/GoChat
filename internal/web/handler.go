@@ -1,11 +1,15 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"io/fs"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
+	"path"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -44,6 +48,9 @@ type Handler struct {
 	photoWork  chan struct{}
 	connSeq    atomic.Uint64
 	csp        string
+	zipper     *zipper
+	// zipped holds the static files gzipped, by name.
+	zipped map[string][]byte
 }
 
 func NewHandler(logger *zap.Logger, cfg *Config, client *drpc.Client, r *render.Renderer, engine *actor.Engine, gw *gateway.Deps) *Handler {
@@ -63,7 +70,10 @@ func NewHandler(logger *zap.Logger, cfg *Config, client *drpc.Client, r *render.
 
 		photoReads: make(chan struct{}, photoReaders),
 		photoWork:  make(chan struct{}, photoDecoders),
+		zipper:     newZipper(2 * runtime.GOMAXPROCS(0)),
 	}
+	static, _ := fs.Sub(views.Files, "static")
+	h.zipped, _ = gzipAll(static)
 	wsScheme := "ws"
 	if h.secure {
 		wsScheme = "wss"
@@ -75,17 +85,33 @@ func NewHandler(logger *zap.Logger, cfg *Config, client *drpc.Client, r *render.
 	}
 	h.csp = strings.Join([]string{
 		"default-src 'none'",
-		"script-src 'self'",
+		// WebAssembly only, for the voice client's noise filter.
+		"script-src 'self' 'wasm-unsafe-eval'",
 		"style-src 'self'",
 		"img-src 'self' data:",
 		"media-src 'self'",
-		"connect-src " + strings.Join(append([]string{"'self'", h.wsOrig}, cfg.VoiceOrigins...), " "),
+		"connect-src " + strings.Join(sources(append([]string{"'self'", h.wsOrig}, cfg.VoiceOrigins...)), " "),
 		"form-action 'self'",
 		"frame-ancestors 'none'",
 		"base-uri 'none'",
 		"manifest-src 'self'",
 	}, "; ")
 	return h
+}
+
+// sources drops the repeats from a CSP source list, such as a voice server
+// behind the same host as the gateway.
+func sources(list []string) []string {
+	seen := make(map[string]bool, len(list))
+	out := list[:0]
+	for _, src := range list {
+		key := strings.TrimSuffix(strings.ToLower(src), "/")
+		if !seen[key] {
+			seen[key] = true
+			out = append(out, src)
+		}
+	}
+	return out
 }
 
 // Routes returns the gateway's whole HTTP surface.
@@ -123,6 +149,8 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("POST /t/{team}/ch/{channel}/privacy", h.csrf(http.HandlerFunc(h.channelPrivacy)))
 	mux.Handle("POST /t/{team}/ch/{channel}/archive", h.csrf(http.HandlerFunc(h.archiveChannel)))
 	mux.Handle("POST /t/{team}/ch/{channel}/voice", h.csrf(http.HandlerFunc(h.setChannelVoice)))
+	mux.HandleFunc("GET /t/{team}/ch/{channel}/delete", h.deleteConversationModal)
+	mux.Handle("POST /t/{team}/ch/{channel}/delete", h.csrf(http.HandlerFunc(h.deleteConversation)))
 	mux.HandleFunc("GET /t/{team}/channels/new", h.newChannelModal)
 	mux.Handle("POST /t/{team}/channels", h.csrf(http.HandlerFunc(h.createChannel)))
 	mux.HandleFunc("GET /t/{team}/channels/browse", h.browseModal)
@@ -135,6 +163,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("POST /t/{team}/dm", h.csrf(http.HandlerFunc(h.openDirect)))
 	mux.HandleFunc("GET /t/{team}/invite", h.inviteModal)
 	mux.Handle("POST /t/{team}/invites", h.csrf(http.HandlerFunc(h.createInvite)))
+	mux.HandleFunc("GET /t/{team}/invites", h.moreInvites)
 	mux.Handle("POST /t/{team}/invites/{invite}/revoke", h.csrf(http.HandlerFunc(h.revokeInvite)))
 	mux.HandleFunc("GET /t/{team}/members", h.teamMembers)
 	mux.HandleFunc("GET /t/{team}/settings", h.teamSettings)
@@ -180,6 +209,13 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("POST /settings/totp/begin", h.csrf(http.HandlerFunc(h.beginTOTP)))
 	mux.Handle("POST /settings/totp/confirm", h.csrf(http.HandlerFunc(h.confirmTOTP)))
 	mux.Handle("POST /settings/totp/disable", h.csrf(http.HandlerFunc(h.disableTOTP)))
+	mux.Handle("POST /settings/sessions/{id}/revoke", h.csrf(http.HandlerFunc(h.revokeSession)))
+	mux.Handle("POST /settings/sessions/revoke", h.csrf(http.HandlerFunc(h.revokeOtherSessions)))
+
+	mux.HandleFunc("GET /admin/users", h.adminUsers)
+	mux.Handle("POST /admin/users/{user}/deactivate", h.csrf(http.HandlerFunc(h.adminDeactivate)))
+	mux.Handle("POST /admin/users/{user}/sessions/revoke", h.csrf(http.HandlerFunc(h.adminRevokeSessions)))
+	mux.Handle("POST /admin/users/{user}/quota", h.csrf(http.HandlerFunc(h.adminQuota)))
 
 	mux.HandleFunc("GET /ws", h.websocket)
 
@@ -201,7 +237,16 @@ func (h *Handler) staticFiles(next http.Handler) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		hd := w.Header()
+		hd.Set("Cache-Control", "public, max-age=31536000, immutable")
+		hd.Add("Vary", "Accept-Encoding")
+		name := strings.TrimPrefix(r.URL.Path, h.render.StaticPrefix)
+		if zipped, ok := h.zipped[name]; ok && acceptsGzip(r) {
+			hd.Set("Content-Type", mime.TypeByExtension(path.Ext(name)))
+			hd.Set("Content-Encoding", "gzip")
+			http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(zipped))
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }

@@ -75,6 +75,12 @@ and show to the others. A channel's admins and the team's can disconnect
 anyone. Leaving the team, signing out or the sign-in expiring ends the talk.
 A channel takes at most 25 people.
 
+Each browser picks its noise suppression in its account settings: off, the
+browser's own filter (the default), or strong, which runs
+[RNNoise](third_party/rnnoise-wasm) over the microphone in an audio worklet
+before sending it, adding 20 ms. A browser that cannot run it uses its own
+filter.
+
 ### Client API for native apps
 
 The web gateway also serves the [mobile apps](mobile) at `/api/v1`, the way
@@ -87,7 +93,9 @@ web:
   protobuf (`application/proto`) or JSON (`application/json`) and the
   answer in the same encoding, or an `ApiError`.
 - `GET /api/v1/gateway` is the event socket: binary `ClientFrame`s carrying
-  the person's events as the server sends them.
+  the person's events as the server sends them. The app answers with
+  `AppFrame`s naming the channel it shows and the people whose presence it
+  shows, as pages do, since typing and presence go only to those.
 - `POST /api/v1/files`, `GET /api/v1/files/<id>`, `GET /api/v1/photos/...`
   and `POST /api/v1/photo` move attachments and photos.
 
@@ -110,7 +118,10 @@ documents it, close codes included.
   lightweight transactions.
 - **MinIO** stores attachments under `attachments/<channel>/<id>`. Uploads
   stream through the server, which sniffs the content type and enforces the
-  size limit; attachments never posted are deleted by a janitor.
+  size limit and the uploader's quota; attachments never posted are deleted
+  by a janitor. What each person stores is kept as a running total, updated
+  with lightweight transactions as files come and go, so a quota never needs
+  a scan.
 - **Voice messages** are attachments marked as voice. The browser records
   them with `MediaRecorder` and uploads them with their length; the server
   takes them only in channels that allow voice, only up to
@@ -129,14 +140,24 @@ documents it, close codes included.
 - Passwords: argon2id with configurable cost; constant-time paths for unknown
   users; per-account and per-IP sign-in limits.
 - Sessions: 256-bit random tokens, only their SHA-256 is stored; revocation
-  (logout, password change, TOTP change) closes live sockets at once.
+  (logout, password change, TOTP change) closes live sockets at once. Account
+  settings list each session's device, addresses and when it was last seen,
+  and sign any of them out.
+- Administration: system admins find people by username or email at
+  `/admin/users`, deactivate them, which signs them out everywhere and closes
+  their sockets at once, sign out all their sessions, and set their storage
+  quota (`services.files.quota` by default). Deactivated people cannot sign
+  in; an admin cannot deactivate themself.
+- Bootstrap: the first account, which becomes the system admin, needs the
+  setup token unless `services.accounts.allow_open_bootstrap` is set.
 - TOTP: optional per user, secrets sealed with AES-256-GCM bound to the user
   id, codes single-use, ten hashed single-use recovery codes.
 - Invites: one-time, expiring links; only the token hash is stored and it is
   consumed with a lightweight transaction. Team admins see the open invites
   and can revoke them; an invite is suspended while its creator may not
   invite, and creating them is capped per person.
-- Web: strict CSP (no inline script, no eval), CSRF double-submit token plus
+- Web: strict CSP (no inline script, no eval; WebAssembly only for the noise
+  filter), CSRF double-submit token plus
   `Origin` and `Sec-Fetch-Site` checks, `__Host-` `Secure` cookies and HSTS on
   https, `X-Frame-Options: DENY`, `nosniff`, per-IP rate limits. The page may
   use the microphone, for voice messages, and no other device.
@@ -155,7 +176,9 @@ documents it, close codes included.
   encrypted in transit between each browser and the voice server
   (DTLS-SRTP); the voice server itself can hear it, as Discord's can.
 - Server API: every DRPC call carries the shared gateway key (checked in
-  constant time) and the user's session; errors returned to gateways never
+  constant time) and the user's session; voice servers hold a key of their
+  own, which opens only their link to the server, so the internet-facing
+  voice server never holds the key that acts for users; errors returned to gateways never
   carry internal causes. TLS and client certificates are supported on the DRPC
   link and on the Scylla connection.
 
@@ -171,7 +194,9 @@ cp .env.template .env
 ```
 
 Fill in `.env`: database and MinIO credentials, a `GATEWAY_KEY` of at least 32
-characters and a `SERVICES_ACCOUNTS_SECRET_KEY` from `openssl rand -base64 32`.
+characters, a different `VOICE_SERVER_KEY` for voice channels from
+`openssl rand -hex 32`, a `SERVICES_ACCOUNTS_SECRET_KEY` from `openssl rand -base64 32` and
+a `SERVICES_ACCOUNTS_SETUP_TOKEN` from `openssl rand -hex 24`.
 If Docker Hub is not reachable, set `DOCKER_REGISTRY` to a mirror such as
 `mirror.gcr.io/`.
 
@@ -183,11 +208,16 @@ just up
 
 This builds the image, starts Scylla and MinIO on an internal network, applies
 the migrations and starts the server and the web gateway on
-`http://localhost:8080` (`WEB_PORT`). The first account to sign up becomes the
-system admin and is asked to create the first team; everyone else joins through
-invite links (or freely when `services.accounts.open_signup` is on). Set
-`SERVICES_ACCOUNTS_SETUP_TOKEN` to require a token for that first account when
-the server is reachable by others before you set it up.
+`http://localhost:8080` (`WEB_PORT`). The first account to sign up, with the
+setup token, becomes the system admin and is asked to create the first team;
+everyone else joins through invite links (or freely when
+`services.accounts.open_signup` is on).
+
+Without a setup token the server refuses to create that first account, and
+says so in its log and on the sign-up page: whoever reached it first would
+own it. On a machine nobody else can reach, `services.accounts.allow_open_bootstrap`
+(`SERVICES_ACCOUNTS_ALLOW_OPEN_BOOTSTRAP` for host runs) lets the first sign-up
+become the admin without one.
 
 ### Running the binaries on the host
 
@@ -222,8 +252,11 @@ Docker Compose. The `image` job publishes the image to
 signs in with runs nothing but [`deploy.sh`](deployments/docker/deploy.sh)
 there, which pulls exactly that image, applies the migrations and restarts
 the server and the web gateway with it. If they do not come up healthy, the
-script puts the image that ran before back and the job fails; the output of
-the migrations, the server and the gateway goes to the server's journal
+script puts the image that ran before back and the job fails. The voice
+server restarts after them, when `.env` sets `VOICE_SERVER_KEY`: if it
+fails, chat stays on the new image and the job fails, so voice alone never
+rolls a deploy back. The output of the migrations, the server, the gateway
+and the voice server goes to the server's journal
 (`journalctl -t gochat-deploy`), not to the public CI log. Scylla and MinIO
 keep running across deploys. The server needs to reach `ghcr.io`.
 
@@ -302,7 +335,8 @@ doing so.
 
 ### Voice in production
 
-Voice needs the server to have a public IP address. Two things must reach the
+Voice needs the server to have a public IP address and a `VOICE_SERVER_KEY` in
+`.env` (`openssl rand -hex 32`, not the gateway key). Two things must reach the
 voice server:
 
 1. **The signaling websocket** (`VOICE_BIND:VOICE_PORT`, 127.0.0.1:8090),
@@ -368,10 +402,11 @@ Secrets that should come from the environment:
 | `DATABASE_SCYLLA_ADMIN_USERNAME`, `DATABASE_SCYLLA_ADMIN_PASSWORD` | migrate, scylla-init |
 | `STORAGE_MINIO_ACCESS_KEY`, `STORAGE_MINIO_SECRET_KEY` | server (the app's account) |
 | `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` | minio, minio-init |
-| `SERVER_DRPC_GATEWAY_KEY` / `CLIENT_DRPC_GATEWAY_KEY` | server / web and voice (same value) |
+| `SERVER_DRPC_GATEWAY_KEY` / `CLIENT_DRPC_GATEWAY_KEY` | server / web (same value) |
+| `SERVER_DRPC_VOICE_SERVER_KEY` / `CLIENT_DRPC_GATEWAY_KEY` | server / voice (same value, not the gateway key) |
 | `VOICE_ICE_TURN_SECRET` (optional) | voice |
 | `SERVICES_ACCOUNTS_SECRET_KEY` | server |
-| `SERVICES_ACCOUNTS_SETUP_TOKEN` (optional) | server |
+| `SERVICES_ACCOUNTS_SETUP_TOKEN` (until the first account exists) | server |
 
 Set `web.public_url` to the origin browsers use; an `https` origin turns on
 `Secure` cookies and HSTS. Behind a reverse proxy, list its addresses in
@@ -391,8 +426,10 @@ The end-to-end suite in [test/e2e](test/e2e) drives a running stack through the
 web gateway: invites, real-time delivery, typing, attachments, voice messages
 and their channel setting, voice channels (with Pion peers that talk through
 the voice server), the client API the apps use, private channel isolation,
-CSRF, TOTP with recovery codes and session revocation. It needs an
-existing admin account and team:
+CSRF, TOTP with recovery codes, session revocation, deactivation and storage
+quotas. It needs an existing admin account and team, or with
+`GOCHAT_E2E_BOOTSTRAP=1` and the server's token in `GOCHAT_E2E_SETUP_TOKEN`
+creates them on a fresh server:
 
 ```bash
 GOCHAT_E2E_URL=http://localhost:8080 GOCHAT_E2E_ADMIN=admin GOCHAT_E2E_ADMIN_PASSWORD=... GOCHAT_E2E_TEAM=acme go test ./test/e2e -count=1

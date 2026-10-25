@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/anthdm/hollywood/actor"
@@ -23,23 +24,28 @@ const (
 	CloseTooSlow         websocket.StatusCode = 4009
 )
 
+// MaxWatched bounds the people an app may show the presence of.
+const MaxWatched = 1000
+
 // clientSession serves one event socket of the client API: native apps get
 // the person's events as the chat server sends them, in binary ClientFrames,
-// and render them themselves.
+// and render them themselves. They say what they show in AppFrames, which
+// the session hands the router as a page's session does.
 type clientSession struct {
 	*Deps
 	connID   uint64
 	call     drpc.Call
 	ws       *websocket.Conn
-	out      chan outMsg
+	out      *outbox
+	in       *Inflow
 	closing  bool
 	stopPing context.CancelFunc
 	expiry   *time.Timer
 }
 
-func NewClientSession(d *Deps, connID uint64, call drpc.Call, ws *websocket.Conn) actor.Producer {
+func NewClientSession(d *Deps, connID uint64, call drpc.Call, ws *websocket.Conn, in *Inflow) actor.Producer {
 	return func() actor.Receiver {
-		return &clientSession{Deps: d, connID: connID, call: call, ws: ws, out: make(chan outMsg, d.Cfg.SendQueue)}
+		return &clientSession{Deps: d, connID: connID, call: call, ws: ws, out: newOutbox(d.Cfg.SendBuffer), in: in}
 	}
 }
 
@@ -57,10 +63,11 @@ func (s *clientSession) Receive(c *actor.Context) {
 		if s.expiry != nil {
 			s.expiry.Stop()
 		}
-		if !s.closing {
-			s.closing = true
-			close(s.out)
-		}
+		s.closing = true
+		s.out.close(websocket.StatusNormalClosure)
+	case Frame:
+		s.frame(c, msg.Data)
+		s.in.done(len(msg.Data))
 	case Ready:
 		// The socket ends with its session.
 		if s.expiry == nil && !msg.ExpiresAt.IsZero() {
@@ -91,6 +98,35 @@ func (s *clientSession) Receive(c *actor.Context) {
 	}
 }
 
+// frame takes what the app shows: the channel, whose typing it gets, and
+// the people, whose presence and profile changes it gets.
+func (s *clientSession) frame(c *actor.Context, data []byte) {
+	var f pb.AppFrame
+	if err := proto.Unmarshal(data, &f); err != nil {
+		return
+	}
+	switch fr := f.Frame.(type) {
+	case *pb.AppFrame_View:
+		id := fr.View.GetChannelId()
+		if id != "" && !uuidRe.MatchString(id) {
+			return
+		}
+		c.Send(s.Router, viewing{connID: s.connID, channelID: id})
+	case *pb.AppFrame_Watch:
+		ids := fr.Watch.GetUserIds()
+		if len(ids) > MaxWatched {
+			ids = ids[:MaxWatched]
+		}
+		users := make([]string, 0, len(ids))
+		for _, id := range ids {
+			if uuidRe.MatchString(id) && !slices.Contains(users, id) {
+				users = append(users, id)
+			}
+		}
+		c.Send(s.Router, watching{connID: s.connID, users: users})
+	}
+}
+
 // send queues a frame, closing a socket whose app does not keep up: it
 // reconnects and loads what it shows again.
 func (s *clientSession) send(f *pb.ClientFrame) {
@@ -102,52 +138,45 @@ func (s *clientSession) send(f *pb.ClientFrame) {
 		s.Logger.Error("failed to encode a client frame", zap.Error(err))
 		return
 	}
-	select {
-	case s.out <- outMsg{data: data}:
-	default:
+	if !s.out.push(data) {
 		s.Logger.Debug("app too slow, closing its socket", zap.Uint64("conn", s.connID))
 		s.closing = true
-		close(s.out)
-		// The queue is full: the close goes out of line, as the handshake
-		// may take a while.
+		s.out.close(0)
+		// What is queued is dropped: the close goes out of line, as the
+		// handshake may take a while.
 		go func() { _ = s.ws.Close(CloseTooSlow, "too far behind") }()
 	}
 }
 
+// close closes the socket with code once what is queued is written.
 func (s *clientSession) close(code websocket.StatusCode) {
-	if s.closing {
-		return
+	if !s.closing {
+		s.closing = true
+		s.out.close(code)
 	}
-	select {
-	case s.out <- outMsg{close: true, code: code}:
-	default:
-		_ = s.ws.CloseNow()
-	}
-	s.closing = true
-	close(s.out)
 }
 
+// write owns the socket's sending side.
 func (s *clientSession) write() {
-	for m := range s.out {
-		if m.close {
-			_ = s.ws.Close(m.code, "")
-			s.drain()
+	for {
+		items, done, code := s.out.take()
+		for _, b := range items {
+			ctx, cancel := context.WithTimeout(context.Background(), s.Cfg.WriteTimeout)
+			err := s.ws.Write(ctx, websocket.MessageBinary, b)
+			cancel()
+			s.out.sent(len(b))
+			if err != nil {
+				s.out.close(0)
+				_ = s.ws.CloseNow()
+				return
+			}
+		}
+		if done {
+			if code != 0 {
+				_ = s.ws.Close(code, "")
+			}
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), s.Cfg.WriteTimeout)
-		err := s.ws.Write(ctx, websocket.MessageBinary, m.data)
-		cancel()
-		if err != nil {
-			_ = s.ws.CloseNow()
-			s.drain()
-			return
-		}
-	}
-	_ = s.ws.Close(websocket.StatusNormalClosure, "")
-}
-
-func (s *clientSession) drain() {
-	for range s.out {
 	}
 }
 

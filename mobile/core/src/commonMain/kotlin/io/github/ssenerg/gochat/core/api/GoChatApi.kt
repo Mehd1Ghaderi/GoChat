@@ -107,11 +107,12 @@ class GoChatApi(val client: ApiClient) {
         channels("RemoveChannelMember", RemoveChannelMemberRequest(channel_id = channelId, user_id = userId), RemoveChannelMemberResponse.ADAPTER)
     }
 
-    suspend fun openDirect(userId: String) =
-        channels("OpenDirectChannel", OpenDirectChannelRequest(user_id = userId), OpenDirectChannelResponse.ADAPTER).channel
+    /** Opens the conversation with [userId] in [teamId]; each team has its own. */
+    suspend fun openDirect(teamId: String, userId: String) =
+        channels("OpenDirectChannel", OpenDirectChannelRequest(user_id = userId, team_id = teamId), OpenDirectChannelResponse.ADAPTER).channel
 
-    suspend fun openGroup(userIds: List<String>) =
-        channels("OpenGroupChannel", OpenGroupChannelRequest(user_ids = userIds), OpenGroupChannelResponse.ADAPTER).channel
+    suspend fun openGroup(teamId: String, userIds: List<String>) =
+        channels("OpenGroupChannel", OpenGroupChannelRequest(user_ids = userIds, team_id = teamId), OpenGroupChannelResponse.ADAPTER).channel
 
     suspend fun markRead(channelId: String, messageId: String) {
         channels("MarkChannelRead", MarkChannelReadRequest(channel_id = channelId, message_id = messageId), MarkChannelReadResponse.ADAPTER)

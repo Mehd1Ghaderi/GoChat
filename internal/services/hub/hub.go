@@ -4,6 +4,7 @@ package hub
 
 import (
 	"errors"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -67,24 +68,43 @@ type Detach struct {
 	ConnID    uint64
 }
 
-// Deliver sends Event to the online users among UserIDs. UserIDs must not be
-// modified after it is sent.
+// Members is a set of users shared by the events sent to them: it is
+// replaced, never modified.
+type Members map[string]struct{}
+
+// Deliver sends Event to the connections of the online users among UserIDs,
+// or among Members. With Viewing it goes only to the connections showing
+// that channel, and never to Except. Neither list may be modified after it
+// is sent.
 type Deliver struct {
 	UserIDs []string
+	Members Members
+	Viewing string
+	Except  string
 	Event   *pb.Event
+}
+
+// View records the channel a connection shows, empty for none.
+type View struct {
+	GatewayID string
+	ConnID    uint64
+	ChannelID string
 }
 
 type Broadcast struct{ Event *pb.Event }
 
+// RevokeSessions closes the connections of SessionIDs, or with All every
+// connection of UserID.
 type RevokeSessions struct {
 	UserID     string
 	SessionIDs []string
+	All        bool
 }
 
-// Online replies with the users among UserIDs who are not offline, and
-// Statuses with their statuses.
+// Online replies with the members who are not offline, and Statuses with
+// the statuses of UserIDs.
 type (
-	Online   struct{ UserIDs []string }
+	Online   struct{ Members Members }
 	Statuses struct{ UserIDs []string }
 )
 
@@ -117,6 +137,7 @@ const revokedTTL = time.Minute
 type conn struct {
 	userID    string
 	sessionID string
+	viewing   string
 }
 
 type gateway struct {
@@ -124,7 +145,13 @@ type gateway struct {
 	pid     *actor.PID
 	stream  Stream
 	pending *atomic.Int64
-	conns   map[uint64]conn
+	conns   map[uint64]*conn
+}
+
+// connRef names a connection of a gateway.
+type connRef struct {
+	gw *gateway
+	id uint64
 }
 
 type hub struct {
@@ -139,6 +166,10 @@ type hub struct {
 	chosen    map[string]choice
 	// revoked holds recently revoked session ids and when they were revoked.
 	revoked map[string]time.Time
+	// conns holds each user's connections, and viewers those showing each
+	// channel.
+	conns   map[string][]connRef
+	viewers map[string]map[*gateway]map[uint64]struct{}
 }
 
 func New(logger *zap.Logger, cfg *Config) actor.Producer {
@@ -151,6 +182,8 @@ func New(logger *zap.Logger, cfg *Config) actor.Producer {
 			announced: make(map[string]pb.Status),
 			chosen:    make(map[string]choice),
 			revoked:   make(map[string]time.Time),
+			conns:     make(map[string][]connRef),
+			viewers:   make(map[string]map[*gateway]map[uint64]struct{}),
 		}
 	}
 }
@@ -171,6 +204,12 @@ func (h *hub) Receive(c *actor.Context) {
 		h.detach(c, msg)
 	case Deliver:
 		h.deliver(c, msg)
+	case View:
+		if gw := h.gateways[msg.GatewayID]; gw != nil {
+			if cn := gw.conns[msg.ConnID]; cn != nil {
+				h.view(gw, msg.ConnID, cn, msg.ChannelID)
+			}
+		}
 	case Broadcast:
 		resp := &pb.ConnectResponse{Frame: &pb.ConnectResponse_Event{Event: msg.Event}}
 		for _, gw := range h.gateways {
@@ -179,12 +218,12 @@ func (h *hub) Receive(c *actor.Context) {
 	case RevokeSessions:
 		h.revoke(c, msg)
 	case Online:
-		online := make([]string, 0, len(msg.UserIDs))
-		for _, id := range msg.UserIDs {
+		var online []string
+		h.eachOnline(msg.Members, func(id string) {
 			if h.status(id) != pb.Status_STATUS_OFFLINE {
 				online = append(online, id)
 			}
-		}
+		})
 		actors.Reply(c, online)
 	case Statuses:
 		out := make(map[string]pb.Status, len(msg.UserIDs))
@@ -234,7 +273,7 @@ func (h *hub) register(c *actor.Context, msg RegisterGateway) {
 		id:      msg.ID,
 		stream:  msg.Stream,
 		pending: new(atomic.Int64),
-		conns:   make(map[uint64]conn),
+		conns:   make(map[uint64]*conn),
 	}
 	gw.pid = c.SpawnChild(newWriter(h.logger, gw.id, msg.Stream, gw.pending), "gateway",
 		actor.WithMiddleware(actors.Recover(h.logger)))
@@ -270,7 +309,8 @@ func (h *hub) attach(c *actor.Context, msg Attach) {
 		h.removeConn(c, gw, msg.ConnID)
 	}
 	userID := msg.User.GetId()
-	gw.conns[msg.ConnID] = conn{userID: userID, sessionID: msg.SessionID}
+	gw.conns[msg.ConnID] = &conn{userID: userID, sessionID: msg.SessionID}
+	h.conns[userID] = append(h.conns[userID], connRef{gw: gw, id: msg.ConnID})
 	per := h.online[userID]
 	if per == nil {
 		per = make(map[string]int)
@@ -325,7 +365,14 @@ func (h *hub) removeConn(c *actor.Context, gw *gateway, connID uint64) {
 	if !ok {
 		return
 	}
+	h.view(gw, connID, cn, "")
 	delete(gw.conns, connID)
+	mine := slices.DeleteFunc(h.conns[cn.userID], func(r connRef) bool { return r.gw == gw && r.id == connID })
+	if len(mine) == 0 {
+		delete(h.conns, cn.userID)
+	} else {
+		h.conns[cn.userID] = mine
+	}
 	per := h.online[cn.userID]
 	if per == nil {
 		return
@@ -341,22 +388,96 @@ func (h *hub) removeConn(c *actor.Context, gw *gateway, connID uint64) {
 	}
 }
 
-func (h *hub) deliver(c *actor.Context, msg Deliver) {
-	byGateway := make(map[string][]string)
-	for _, uid := range msg.UserIDs {
-		for gwID := range h.online[uid] {
-			byGateway[gwID] = append(byGateway[gwID], uid)
+// view moves a connection to the channel it now shows.
+func (h *hub) view(gw *gateway, connID uint64, cn *conn, channelID string) {
+	if cn.viewing == channelID {
+		return
+	}
+	if byGW := h.viewers[cn.viewing]; byGW != nil {
+		if delete(byGW[gw], connID); len(byGW[gw]) == 0 {
+			if delete(byGW, gw); len(byGW) == 0 {
+				delete(h.viewers, cn.viewing)
+			}
 		}
 	}
-	for gwID, uids := range byGateway {
-		gw := h.gateways[gwID]
-		if gw == nil {
-			continue
+	cn.viewing = channelID
+	if channelID == "" {
+		return
+	}
+	byGW := h.viewers[channelID]
+	if byGW == nil {
+		byGW = make(map[*gateway]map[uint64]struct{})
+		h.viewers[channelID] = byGW
+	}
+	if byGW[gw] == nil {
+		byGW[gw] = make(map[uint64]struct{})
+	}
+	byGW[gw][connID] = struct{}{}
+}
+
+// eachOnline calls fn for the members with a connection, walking the
+// smaller of the members and the users online.
+func (h *hub) eachOnline(members Members, fn func(userID string)) {
+	if len(h.online) < len(members) {
+		for id := range h.online {
+			if _, ok := members[id]; ok {
+				fn(id)
+			}
 		}
+		return
+	}
+	for id := range members {
+		if _, ok := h.online[id]; ok {
+			fn(id)
+		}
+	}
+}
+
+func (h *hub) deliver(c *actor.Context, msg Deliver) {
+	for gw, conns := range h.route(msg) {
 		ev := shallowEvent(msg.Event)
-		ev.UserIds = uids
+		ev.ConnIds = conns
 		h.send(c, gw, &pb.ConnectResponse{Frame: &pb.ConnectResponse_Event{Event: ev}})
 	}
+}
+
+// route finds the connections an event goes to, by gateway.
+func (h *hub) route(msg Deliver) map[*gateway][]uint64 {
+	byGateway := make(map[*gateway][]uint64, len(h.gateways))
+	add := func(userID string, refs []connRef) {
+		if userID == msg.Except {
+			return
+		}
+		for _, r := range refs {
+			byGateway[r.gw] = append(byGateway[r.gw], r.id)
+		}
+	}
+	switch {
+	case msg.Viewing != "":
+		for gw, conns := range h.viewers[msg.Viewing] {
+			for id := range conns {
+				uid := gw.conns[id].userID
+				if _, ok := msg.Members[uid]; ok && uid != msg.Except {
+					byGateway[gw] = append(byGateway[gw], id)
+				}
+			}
+		}
+	case msg.Members != nil && len(h.conns) < len(msg.Members):
+		for uid, refs := range h.conns {
+			if _, ok := msg.Members[uid]; ok {
+				add(uid, refs)
+			}
+		}
+	case msg.Members != nil:
+		for uid := range msg.Members {
+			add(uid, h.conns[uid])
+		}
+	default:
+		for _, uid := range msg.UserIDs {
+			add(uid, h.conns[uid])
+		}
+	}
+	return byGateway
 }
 
 // shallowEvent copies an event's envelope so each gateway gets its own
@@ -366,6 +487,22 @@ func shallowEvent(e *pb.Event) *pb.Event {
 }
 
 func (h *hub) revoke(c *actor.Context, msg RevokeSessions) {
+	if msg.All {
+		msg.SessionIDs = slices.Clone(msg.SessionIDs)
+		for gwID := range h.online[msg.UserID] {
+			gw := h.gateways[gwID]
+			if gw == nil {
+				continue
+			}
+			for _, cn := range gw.conns {
+				if cn.userID == msg.UserID {
+					msg.SessionIDs = append(msg.SessionIDs, cn.sessionID)
+				}
+			}
+		}
+		slices.Sort(msg.SessionIDs)
+		msg.SessionIDs = slices.Compact(msg.SessionIDs)
+	}
 	if len(msg.SessionIDs) == 0 {
 		return
 	}

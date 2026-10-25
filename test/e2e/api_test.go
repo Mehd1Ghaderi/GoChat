@@ -156,6 +156,43 @@ func (s *appSocket) next(d time.Duration, what string, match func(*pb.ClientFram
 	}
 }
 
+// send writes an AppFrame, as the apps say what they show.
+func (s *appSocket) send(f *pb.AppFrame) {
+	s.t.Helper()
+	b, _ := proto.Marshal(f)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.conn.Write(ctx, websocket.MessageBinary, b); err != nil {
+		s.t.Fatalf("app frame: %v", err)
+	}
+}
+
+// eventually repeats act until s receives a frame match accepts: what an app
+// says it shows reaches the chat server a moment after.
+func (s *appSocket) eventually(what string, act func(), match func(*pb.ClientFrame) bool) {
+	s.t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		act()
+		wait := time.After(time.Second)
+	frames:
+		for {
+			select {
+			case f, ok := <-s.frames:
+				if !ok {
+					s.t.Fatalf("the event socket closed while waiting for %s", what)
+				}
+				if match(f) {
+					return
+				}
+			case <-wait:
+				break frames
+			}
+		}
+	}
+	s.t.Fatalf("no %s on the event socket", what)
+}
+
 func (s *appSocket) closedWith(d time.Duration) websocket.StatusCode {
 	s.t.Helper()
 	for {
@@ -214,17 +251,36 @@ func testClientAPI(t *testing.T, bobName, bobPass, town string) {
 		if got := f.GetEvent().GetMessagePosted().GetMessage(); got.Content != "from the app <b>raw</b>" || got.Author.GetId() != adminUser.Id {
 			t.Fatalf("the event changed the message: %v", got)
 		}
-		if ev := f.GetEvent(); len(ev.UserIds) != 0 || ev.Broadcast {
+		if ev := f.GetEvent(); len(ev.ConnIds) != 0 || ev.Broadcast {
 			t.Fatalf("the event names its recipients: %v", ev)
 		}
-		bob.must("gochat.v1.MessageService/SendTyping", &pb.SendTypingRequest{ChannelId: town}, &pb.SendTypingResponse{})
-		adminWS.next(5*time.Second, "typing", func(f *pb.ClientFrame) bool {
+		// Typing reaches the apps that show the channel, as it does pages.
+		adminWS.send(&pb.AppFrame{Frame: &pb.AppFrame_View{View: &pb.AppView{ChannelId: town}}})
+		adminWS.eventually("typing", func() {
+			bob.call("gochat.v1.MessageService/SendTyping", &pb.SendTypingRequest{ChannelId: town}, &pb.SendTypingResponse{})
+		}, func(f *pb.ClientFrame) bool {
 			return f.GetEvent().GetTyping().GetUser().GetId() == bobUser.Id
 		})
 		bob.must("gochat.v1.MessageService/React", &pb.ReactRequest{MessageId: posted.Message.Id, ChannelId: town, Emoji: "tada"}, &pb.ReactResponse{})
 		adminWS.next(5*time.Second, "the reaction", func(f *pb.ClientFrame) bool {
 			return f.GetEvent().GetReactionsChanged().GetMessageId() == posted.Message.Id
 		})
+	})
+
+	t.Run("presence reaches the apps that show the person", func(t *testing.T) {
+		adminWS.send(&pb.AppFrame{Frame: &pb.AppFrame_Watch{Watch: &pb.AppWatch{UserIds: []string{bobUser.Id, "not-an-id"}}}})
+		away := false
+		adminWS.eventually("bob's presence", func() {
+			away = !away
+			status := pb.Status_STATUS_ONLINE
+			if away {
+				status = pb.Status_STATUS_AWAY
+			}
+			bob.must("gochat.v1.UserService/SetStatus", &pb.SetStatusRequest{Status: status}, &pb.SetStatusResponse{})
+		}, func(f *pb.ClientFrame) bool {
+			return f.GetEvent().GetPresence().GetUserId() == bobUser.Id
+		})
+		bob.must("gochat.v1.UserService/SetStatus", &pb.SetStatusRequest{Status: pb.Status_STATUS_ONLINE}, &pb.SetStatusResponse{})
 	})
 
 	t.Run("JSON works too", func(t *testing.T) {

@@ -37,6 +37,12 @@ type Repo interface {
 	ListChannelMembers(ctx context.Context, channelID gocql.UUID) ([]*models.ChannelMember, error)
 	AddChannelMember(ctx context.Context, m *models.ChannelMember) error
 	RemoveChannelMember(ctx context.Context, m *models.ChannelMember) error
+	MoveChannelMember(ctx context.Context, m *models.ChannelMember, teamID gocql.UUID) error
+	SetChannelTeam(ctx context.Context, id, teamID gocql.UUID) error
+	SetCleared(ctx context.Context, userID, channelID, clearedID gocql.UUID) error
+	GetCleared(ctx context.Context, userID, channelID gocql.UUID) (gocql.UUID, error)
+	DeleteDirectKey(ctx context.Context, key string, channelID gocql.UUID) error
+	DeleteChannel(ctx context.Context, id gocql.UUID) error
 	GetTeamMember(ctx context.Context, teamID, userID gocql.UUID) (*models.TeamMember, error)
 	InsertMessage(ctx context.Context, m *models.Message, newBucket bool) error
 	GetMessage(ctx context.Context, channelID, id gocql.UUID) (*models.Message, error)
@@ -71,6 +77,7 @@ type Repo interface {
 	ClaimAttachment(ctx context.Context, a *models.Attachment, messageID gocql.UUID) (bool, error)
 	UnclaimAttachment(ctx context.Context, a *models.Attachment, messageID gocql.UUID) error
 	DeleteAttachment(ctx context.Context, a *models.Attachment) error
+	PendObject(ctx context.Context, id gocql.UUID, key string, at time.Time) error
 }
 
 type Storage interface {

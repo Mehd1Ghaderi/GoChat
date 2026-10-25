@@ -11,6 +11,7 @@ import (
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
 	"github.com/ssenerg/gochat/internal/core/ids"
 	"github.com/ssenerg/gochat/internal/core/models"
+	"github.com/ssenerg/gochat/internal/core/secure"
 )
 
 func Time(t time.Time) *timestamppb.Timestamp {
@@ -103,6 +104,20 @@ func User(u *models.User) *pb.User {
 	}
 }
 
+// Session describes s, the session of the request when current.
+func Session(s *models.Session, current bool) *pb.SessionInfo {
+	return &pb.SessionInfo{
+		Id:         secure.PublicID(s.TokenHash),
+		UserAgent:  s.UserAgent,
+		Ip:         s.IP,
+		LastIp:     s.LastIP,
+		CreatedAt:  Time(s.CreatedAt),
+		LastSeenAt: Time(s.LastSeen),
+		ExpiresAt:  Time(s.ExpiresAt),
+		Current:    current,
+	}
+}
+
 // PublicUser is User without what only its owner should see.
 func PublicUser(u *models.User) *pb.User {
 	if u == nil {
@@ -149,6 +164,7 @@ func Team(t *models.Team, role models.TeamRole) *pb.Team {
 		Role:        TeamRole(role),
 		CreatedAt:   Time(t.CreatedAt),
 		Photo:       t.Photo,
+		OwnerId:     t.CreatedBy.String(),
 	}
 }
 

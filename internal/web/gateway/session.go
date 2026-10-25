@@ -3,6 +3,8 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"maps"
+	"math/rand/v2"
 	"regexp"
 	"slices"
 	"time"
@@ -39,16 +41,15 @@ type Deps struct {
 	Client *drpc.Client
 	Render *render.Renderer
 	Router *actor.PID
+	// Resyncs paces the pages reloaded after their socket came back.
+	Resyncs *rate.Limiter
+	// Sidebars hands a page's sidebar to its socket; nil loads it again.
+	Sidebars *Sidebars
 }
 
-// Frame is one message a browser sent over its socket.
+// Frame is one message a browser sent over its socket, admitted by the
+// session's Inflow.
 type Frame struct{ Data []byte }
-
-type outMsg struct {
-	data  []byte
-	code  websocket.StatusCode
-	close bool
-}
 
 type (
 	clearTyping struct {
@@ -68,6 +69,7 @@ type (
 	refetched struct{ m *pb.Message }
 	failed    struct{ text string }
 	expired   struct{}
+	resyncDue struct{}
 	// viewChecked carries the newest message of the channel a tab opened.
 	viewChecked struct{ channelID, last string }
 	leftChannel struct{ channelID string }
@@ -78,8 +80,8 @@ type session struct {
 	connID    uint64
 	call      drpc.Call
 	ws        *websocket.Conn
-	out       chan outMsg
-	limiter   *rate.Limiter
+	out       *outbox
+	in        *Inflow
 	user      *pb.User
 	sessionID string
 	teamID    string
@@ -90,8 +92,10 @@ type session struct {
 	// which takes no new messages.
 	anchored bool
 	sidebar  map[string]bool
-	// mentions counts unread mentions per channel in the sidebar.
+	// mentions counts unread mentions per channel in the sidebar, and
+	// unread holds the channels it shows unread.
 	mentions map[string]int
+	unread   map[string]bool
 	peers    map[string]bool
 	directs  map[string]bool
 	// muted holds the channels the user muted, names the sidebar's titles.
@@ -116,6 +120,8 @@ type session struct {
 	// inThreads is set while the tab shows the threads it follows.
 	inThreads bool
 	resynced  string
+	// resyncing is set while a resync waits its turn.
+	resyncing bool
 	posts     chan *pb.PostMessageRequest
 	reads     map[string]string
 	flushing  bool
@@ -126,17 +132,18 @@ type session struct {
 	early [][]byte
 }
 
-func NewSession(d *Deps, connID uint64, call drpc.Call, ws *websocket.Conn) actor.Producer {
+func NewSession(d *Deps, connID uint64, call drpc.Call, ws *websocket.Conn, in *Inflow) actor.Producer {
 	return func() actor.Receiver {
 		return &session{
 			Deps:     d,
 			connID:   connID,
 			call:     call,
 			ws:       ws,
-			out:      make(chan outMsg, d.Cfg.SendQueue),
-			limiter:  rate.NewLimiter(rate.Limit(d.Cfg.FrameRate), d.Cfg.FrameBurst),
+			out:      newOutbox(d.Cfg.SendBuffer),
+			in:       in,
 			sidebar:  make(map[string]bool),
 			mentions: make(map[string]int),
+			unread:   make(map[string]bool),
 			muted:    make(map[string]bool),
 			saved:    make(map[string]bool),
 			peerOf:   make(map[string]string),
@@ -165,10 +172,8 @@ func (s *session) Receive(c *actor.Context) {
 		if s.expiry != nil {
 			s.expiry.Stop()
 		}
-		if !s.closing {
-			s.closing = true
-			close(s.out)
-		}
+		s.closing = true
+		s.out.close(websocket.StatusNormalClosure)
 	case Ready:
 		s.user, s.sessionID = msg.User, msg.SessionID
 		s.dnd = render.Chosen(msg.User) == pb.Status_STATUS_DND
@@ -182,10 +187,11 @@ func (s *session) Receive(c *actor.Context) {
 		}
 		for _, data := range s.early {
 			s.frame(c, data)
+			s.in.done(len(data))
 		}
 		s.early = nil
 		if msg.Again {
-			s.resync(c)
+			s.resyncLater(c)
 		}
 		s.rpc(c, func(ctx context.Context) any {
 			res, err := s.Client.Channels.ListMutedChannels(ctx, &pb.ListMutedChannelsRequest{})
@@ -214,20 +220,22 @@ func (s *session) Receive(c *actor.Context) {
 		s.redirect("/login")
 	case Revoked, expired:
 		s.redirect("/login")
+	case resyncDue:
+		s.resyncing = false
+		s.resync(c)
 	case Event:
 		if s.user != nil {
 			s.event(c, msg.Event)
 		}
 	case Frame:
-		if !s.limiter.Allow() {
-			s.close(websocket.StatusPolicyViolation)
-			return
-		}
-		if s.user != nil {
+		switch {
+		case s.user != nil:
 			s.frame(c, msg.Data)
-		} else if len(s.early) < earlyFrames {
+			s.in.done(len(msg.Data))
+		case len(s.early) < earlyFrames:
 			s.early = append(s.early, msg.Data)
-		} else {
+		default:
+			s.in.done(len(msg.Data))
 			s.toast("error", "Some messages could not be sent: reload and try again.")
 		}
 	case clearTyping:
@@ -261,30 +269,6 @@ func (s *session) Receive(c *actor.Context) {
 		if msg.teamID != s.teamID {
 			return
 		}
-		s.sidebar = make(map[string]bool, len(msg.lists.Channels)+len(msg.lists.DMs))
-		s.mentions = make(map[string]int)
-		s.peers = make(map[string]bool, len(msg.lists.DMs))
-		s.directs = make(map[string]bool, len(msg.lists.DMs))
-		s.peerOf = make(map[string]string, len(msg.lists.DMs))
-		for _, ch := range msg.lists.Channels {
-			s.sidebar[ch.Id] = true
-			s.mentions[ch.Id] = int(ch.MentionCount)
-			s.names[ch.Id] = render.Title(ch)
-			s.muted[ch.Id] = ch.Muted
-		}
-		for _, ch := range msg.lists.DMs {
-			s.sidebar[ch.Id] = true
-			s.directs[ch.Id] = true
-			if ch.Type == pb.ChannelType_CHANNEL_TYPE_GROUP {
-				s.names[ch.Id] = render.Title(ch)
-			}
-			s.mentions[ch.Id] = int(ch.MentionCount)
-			s.muted[ch.Id] = ch.Muted
-			if ch.Peer != nil {
-				s.peers[ch.Peer.Id] = true
-				s.peerOf[ch.Id] = ch.Peer.Id
-			}
-		}
 		if msg.lists.OOB {
 			msg.lists.Active = s.channelID
 			if s.inThreads {
@@ -292,6 +276,7 @@ func (s *session) Receive(c *actor.Context) {
 			}
 			s.fragment("channel-lists", msg.lists)
 		}
+		s.adopt(c, NewSidebar(s.user.Id, msg.lists), msg.lists.OOB)
 	case railReady:
 		s.fragment("team-rail", msg.rail)
 	case mutedReady:
@@ -315,26 +300,27 @@ func (s *session) Receive(c *actor.Context) {
 
 // write owns the socket's sending side.
 func (s *session) write() {
-	for m := range s.out {
-		if m.close {
-			_ = s.ws.Close(m.code, "")
-			s.drain()
+	for {
+		items, done, code := s.out.take()
+		for _, b := range items {
+			ctx, cancel := context.WithTimeout(context.Background(), s.Cfg.WriteTimeout)
+			err := s.ws.Write(ctx, websocket.MessageText, b)
+			cancel()
+			s.out.sent(len(b))
+			if err != nil {
+				s.out.close(0)
+				_ = s.ws.CloseNow()
+				return
+			}
+		}
+		if done {
+			if code != 0 {
+				_ = s.ws.Close(code, "")
+			} else {
+				_ = s.ws.CloseNow()
+			}
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), s.Cfg.WriteTimeout)
-		err := s.ws.Write(ctx, websocket.MessageText, m.data)
-		cancel()
-		if err != nil {
-			_ = s.ws.CloseNow()
-			s.drain()
-			return
-		}
-	}
-	_ = s.ws.Close(websocket.StatusNormalClosure, "")
-}
-
-func (s *session) drain() {
-	for range s.out {
 	}
 }
 
@@ -362,27 +348,20 @@ func (s *session) send(data []byte) {
 	if s.closing {
 		return
 	}
-	select {
-	case s.out <- outMsg{data: data}:
-	default:
+	if !s.out.push(data) {
 		s.Logger.Debug("browser too slow, closing its socket", zap.Uint64("conn", s.connID))
-		_ = s.ws.CloseNow()
 		s.closing = true
-		close(s.out)
+		s.out.close(0)
+		_ = s.ws.CloseNow()
 	}
 }
 
+// close closes the socket with code once what is queued is written.
 func (s *session) close(code websocket.StatusCode) {
-	if s.closing {
-		return
+	if !s.closing {
+		s.closing = true
+		s.out.close(code)
 	}
-	select {
-	case s.out <- outMsg{close: true, code: code}:
-	default:
-		_ = s.ws.CloseNow()
-	}
-	s.closing = true
-	close(s.out)
 }
 
 func (s *session) fragment(name string, data any) {
@@ -432,6 +411,22 @@ func (s *session) channelURL() string {
 	return "/t/" + s.teamName + "/ch/" + s.channelID
 }
 
+// resyncLater resyncs the page in its turn, after a random while, so the
+// pages of a restart do not all reload at once.
+func (s *session) resyncLater(c *actor.Context) {
+	if s.resyncing {
+		return
+	}
+	s.resyncing = true
+	self, engine := c.PID(), c.Engine()
+	time.AfterFunc(resyncWait(s.Resyncs, s.Cfg.ResyncJitter), func() { engine.Send(self, resyncDue{}) })
+}
+
+// resyncWait is how long a resync waits: its turn, then up to jitter more.
+func resyncWait(turns *rate.Limiter, jitter time.Duration) time.Duration {
+	return turns.Reserve().Delay() + rand.N(jitter+1) //nolint:gosec // jitter needs no secrecy
+}
+
 func (s *session) resync(c *actor.Context) {
 	if s.channelID == "" || s.teamName == "" {
 		return
@@ -450,6 +445,38 @@ func (s *session) rpc(c *actor.Context, fn func(ctx context.Context) any) {
 			engine.Send(self, v)
 		}
 	}()
+}
+
+// adopt takes the sidebar's state. Its unread marks count only when the
+// page shows them.
+func (s *session) adopt(c *actor.Context, sb *Sidebar, shown bool) {
+	s.sidebar = make(map[string]bool, len(sb.items))
+	s.mentions = make(map[string]int)
+	s.peers = make(map[string]bool)
+	s.directs = make(map[string]bool)
+	s.peerOf = make(map[string]string)
+	if shown {
+		s.unread = make(map[string]bool)
+	}
+	for _, it := range sb.items {
+		s.sidebar[it.id] = true
+		s.mentions[it.id] = it.mentions
+		s.muted[it.id] = it.muted
+		if it.name != "" {
+			s.names[it.id] = it.name
+		}
+		if it.direct {
+			s.directs[it.id] = true
+		}
+		if it.peer != "" {
+			s.peers[it.peer] = true
+			s.peerOf[it.id] = it.peer
+		}
+		if shown && it.unread {
+			s.unread[it.id] = true
+		}
+	}
+	c.Send(s.Router, watching{connID: s.connID, users: slices.Collect(maps.Keys(s.peers))})
 }
 
 func (s *session) loadSidebar(c *actor.Context, oob bool) {
@@ -504,6 +531,8 @@ type clientFrame struct {
 	RootID     string          `json:"root_id"`
 	Content    string          `json:"content"`
 	Attachment json.RawMessage `json:"attachment"`
+	// Sidebar is the key of the sidebar the page came with.
+	Sidebar string `json:"sidebar"`
 }
 
 func (f *clientFrame) attachments() []string {
@@ -578,6 +607,7 @@ func (s *session) view(c *actor.Context, f *clientFrame) {
 	teamChanged := f.TeamID != s.teamID
 	if f.ChannelID != s.channelID {
 		s.resynced, s.threadID = "", ""
+		c.Send(s.Router, viewing{connID: s.connID, channelID: f.ChannelID})
 	}
 	s.teamID, s.teamName, s.channelID = f.TeamID, f.TeamName, f.ChannelID
 	s.inThreads = f.ChannelID == ""
@@ -586,18 +616,23 @@ func (s *session) view(c *actor.Context, f *clientFrame) {
 	s.typingSeq++
 	s.typer, s.shown = "", ""
 	if teamChanged {
-		s.loadSidebar(c, false)
+		if sb := s.Sidebars.take(f.Sidebar, s.user.Id, f.TeamID); sb != nil {
+			s.adopt(c, sb, true)
+		} else {
+			s.loadSidebar(c, false)
+		}
 	}
 	if s.inThreads {
 		return
 	}
 	s.mentions[f.ChannelID] = 0
+	delete(s.unread, f.ChannelID)
 	if uuidRe.MatchString(f.LastID) {
 		s.shown = f.LastID
 		s.markRead(c, f.ChannelID, f.LastID)
 	}
 	if f.Resync == "1" {
-		s.resync(c)
+		s.resyncLater(c)
 		return
 	}
 	chID := f.ChannelID
@@ -692,7 +727,9 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 	case *pb.Event_MessagePosted:
 		m := p.MessagePosted.Message
 		mine := m.GetAuthor().GetId() == me
-		if !mine {
+		// Another team's conversations and threads are shown there alone.
+		elsewhere := p.MessagePosted.TeamId != s.teamID
+		if !mine && (!elsewhere || !p.MessagePosted.Conversation) {
 			s.notify(m, p.MessagePosted.ParticipantIds)
 		}
 		if m.RootId != "" {
@@ -704,7 +741,7 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 			} else if !mine && m.ChannelId != s.channelID && render.Mentions(m, s.user) {
 				s.mentioned(m.ChannelId)
 			}
-			if !mine && m.RootId != s.threadID && slices.Contains(p.MessagePosted.ParticipantIds, me) {
+			if !mine && !elsewhere && m.RootId != s.threadID && slices.Contains(p.MessagePosted.ParticipantIds, me) {
 				s.fragment("threads-unread", true)
 				if s.inThreads {
 					s.fragment("threads-refresh", s.teamName)
@@ -730,7 +767,9 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 		} else if !mine && s.sidebar[m.ChannelId] {
 			if s.direct(m.ChannelId) || render.Mentions(m, s.user) {
 				s.mentioned(m.ChannelId)
-			} else if s.mentions[m.ChannelId] == 0 && !s.muted[m.ChannelId] {
+			} else if s.mentions[m.ChannelId] == 0 && !s.muted[m.ChannelId] && !s.unread[m.ChannelId] {
+				// Once, until the channel is read.
+				s.unread[m.ChannelId] = true
 				s.fragment("unread", m.ChannelId)
 			}
 		}
@@ -828,7 +867,11 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 	case *pb.Event_ChannelLeft:
 		if p.ChannelLeft.ChannelId == s.channelID {
 			if !p.ChannelLeft.Own {
-				s.toast("error", "You are no longer a member of this channel.")
+				if p.ChannelLeft.Deleted {
+					s.toast("error", "This conversation was deleted.")
+				} else {
+					s.toast("error", "You are no longer a member of this channel.")
+				}
 				s.fragment("ws-control", "/t/"+s.teamName)
 				return
 			}

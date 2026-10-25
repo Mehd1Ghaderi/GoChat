@@ -10,7 +10,7 @@
 {{define "team-mark"}}{{if .Photo}}<img src="/photos/t/{{.Id}}/{{.Photo}}" alt="" decoding="async">{{else}}{{teamInitials .}}{{end}}{{end}}
 
 {{define "channel-lists"}}
-<nav class="channel-lists" id="channel-lists" aria-label="Channels"{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>
+<nav class="channel-lists" id="channel-lists" aria-label="Channels"{{with .Key}} data-sidebar="{{.}}"{{end}}{{if .OOB}} hx-swap-oob="outerHTML"{{end}}>
   <button class="jump-to" type="button" hx-get="/t/{{.Team.Name}}/switch" hx-target="#modal">{{icon "search"}}<span>Go to…</span><kbd data-shortcut>Ctrl K</kbd></button>
   <ul class="top-links">
     <li><a href="/t/{{.Team.Name}}/threads" hx-get="/t/{{.Team.Name}}/threads" hx-target="#main" hx-push-url="true" data-place="threads"

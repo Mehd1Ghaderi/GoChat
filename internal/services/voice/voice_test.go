@@ -331,6 +331,18 @@ func TestMuteKickRevokeAndDrop(t *testing.T) {
 	}
 }
 
+// Deactivating someone revokes every session they have, listed or not.
+func TestRevokingAllSessionsEndsTheTalk(t *testing.T) {
+	r := newRig(t, 10, gocql.UUID{})
+	r.serverUp("vs1")
+	room, p := ids.New(), r.user()
+	got := r.connect(p, room, "vs1")
+	r.engine.Send(r.voice, RevokeSessions{UserID: p.UserID, All: true})
+	if d := r.disconnected(got.Session); d.Reason != "signed out" {
+		t.Fatalf("reason %q", d.Reason)
+	}
+}
+
 func TestFullChannels(t *testing.T) {
 	r := newRig(t, 2, gocql.UUID{})
 	r.serverUp("vs1")

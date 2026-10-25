@@ -50,6 +50,7 @@ voice:
 client:
   drpc:
     address: localhost:7070
+    # The chat server's voice_server_key, never the web gateways' key.
     gateway_key: ""
     tls:
       enabled: false

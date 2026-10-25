@@ -16,7 +16,7 @@ import (
 
 const channelColumns = "id, team_id, name, display_name, purpose, kind, created_by, created_at, last_message_id, archived_at, voice_disabled"
 
-// NoTeam is the team of direct channels, which belong to none.
+// NoTeam is the team of conversations from before teams owned them.
 var NoTeam = gocql.UUID{}
 
 type TeamChannel struct {
@@ -57,19 +57,15 @@ func (r *Repository) CreateChannel(ctx context.Context, ch *models.Channel, crea
 	return nil
 }
 
-// CreateDirectChannel returns the direct channel of pair, creating it with
-// members when it does not exist yet. A pair claimed by a creation that never
+// CreateDirectChannel returns the conversation of key, creating it with
+// members when it does not exist yet. A key claimed by a creation that never
 // completed is completed with the claimed id.
-func (r *Repository) CreateDirectChannel(ctx context.Context, pair string, ch *models.Channel, members []*models.ChannelMember) (gocql.UUID, error) {
-	row := make(map[string]any)
-	q := r.query(ctx, "INSERT INTO direct_channels (pair, channel_id) VALUES (?, ?) IF NOT EXISTS", pair, ch.ID)
-	applied, err := q.MapScanCAS(row)
-	q.Release()
+func (r *Repository) CreateDirectChannel(ctx context.Context, key string, ch *models.Channel, members []*models.ChannelMember) (gocql.UUID, error) {
+	id, err := r.ClaimDirectKey(ctx, key, ch.ID)
 	if err != nil {
-		return gocql.UUID{}, wrap(err)
+		return gocql.UUID{}, err
 	}
-	if !applied {
-		id, _ := row["channel_id"].(gocql.UUID)
+	if id != ch.ID {
 		if _, err := r.GetChannel(ctx, id); !ierrors.Is(err, ierrors.CodeNotFound) {
 			return id, err
 		}
@@ -88,6 +84,67 @@ func (r *Repository) CreateDirectChannel(ctx context.Context, pair string, ch *m
 		return gocql.UUID{}, err
 	}
 	return ch.ID, nil
+}
+
+// ClaimDirectKey gives key to the conversation id unless another holds it,
+// returning the holder. A key is a team's id and the sorted ids of the
+// conversation's people; the keys of conversations from before teams owned
+// them hold the people alone.
+func (r *Repository) ClaimDirectKey(ctx context.Context, key string, id gocql.UUID) (gocql.UUID, error) {
+	row := make(map[string]any)
+	q := r.query(ctx, "INSERT INTO direct_channels (pair, channel_id) VALUES (?, ?) IF NOT EXISTS", key, id)
+	applied, err := q.MapScanCAS(row)
+	q.Release()
+	if err != nil {
+		return gocql.UUID{}, wrap(err)
+	}
+	if applied {
+		return id, nil
+	}
+	holder, _ := row["channel_id"].(gocql.UUID)
+	return holder, nil
+}
+
+// ConversationKey is the key of a team's conversation of the people a
+// conversation's name lists; those from before teams owned them have the
+// people alone.
+func ConversationKey(teamID gocql.UUID, people string) string {
+	if ids.IsZero(teamID) {
+		return people
+	}
+	return teamID.String() + "/" + people
+}
+
+// DeleteDirectKey frees key while channelID holds it.
+func (r *Repository) DeleteDirectKey(ctx context.Context, key string, channelID gocql.UUID) error {
+	_, err := r.query(ctx, "DELETE FROM direct_channels WHERE pair = ? IF channel_id = ?", key, channelID).ExecCASRelease()
+	return wrap(err)
+}
+
+// DeleteChannel deletes a channel whose messages and members are gone.
+func (r *Repository) DeleteChannel(ctx context.Context, id gocql.UUID) error {
+	if err := r.query(ctx, "DELETE FROM message_buckets WHERE channel_id = ?", id).ExecRelease(); err != nil {
+		return wrap(err)
+	}
+	return wrap(r.query(ctx, "DELETE FROM channels WHERE id = ?", id).ExecRelease())
+}
+
+// SetChannelTeam gives a conversation to a team.
+func (r *Repository) SetChannelTeam(ctx context.Context, id, teamID gocql.UUID) error {
+	return wrap(r.query(ctx, "UPDATE channels SET team_id = ? WHERE id = ?", teamID, id).ExecRelease())
+}
+
+// MoveChannelMember files m's membership under teamID.
+func (r *Repository) MoveChannelMember(ctx context.Context, m *models.ChannelMember, teamID gocql.UUID) error {
+	if m.TeamID == teamID {
+		return nil
+	}
+	b := r.batch(ctx, true)
+	b.Query("INSERT INTO user_channels (user_id, team_id, channel_id, role, joined_at) VALUES (?, ?, ?, ?, ?)",
+		m.UserID, teamID, m.ChannelID, string(m.Role), m.JoinedAt)
+	b.Query("DELETE FROM user_channels WHERE user_id = ? AND team_id = ? AND channel_id = ?", m.UserID, m.TeamID, m.ChannelID)
+	b.Query("UPDATE channel_members SET team_id = ? WHERE channel_id = ? AND user_id = ?", teamID, m.ChannelID, m.UserID)
+	return r.execBatch(b)
 }
 
 func (r *Repository) UpdateChannelInfo(ctx context.Context, id gocql.UUID, displayName, purpose string) error {
@@ -279,7 +336,7 @@ func (r *Repository) CountMentions(ctx context.Context, userID gocql.UUID) (map[
 
 func (r *Repository) SetMuted(ctx context.Context, userID, channelID gocql.UUID, muted bool) error {
 	if !muted {
-		return wrap(r.query(ctx, "DELETE FROM channel_prefs WHERE user_id = ? AND channel_id = ?", userID, channelID).ExecRelease())
+		return wrap(r.query(ctx, "DELETE muted FROM channel_prefs WHERE user_id = ? AND channel_id = ?", userID, channelID).ExecRelease())
 	}
 	return wrap(r.query(ctx, "INSERT INTO channel_prefs (user_id, channel_id, muted) VALUES (?, ?, true)", userID, channelID).ExecRelease())
 }
@@ -291,6 +348,37 @@ func (r *Repository) IsMuted(ctx context.Context, userID, channelID gocql.UUID) 
 		return false, nil
 	}
 	return muted, wrap(err)
+}
+
+// SetCleared hides a conversation's messages up to clearedID from a user.
+func (r *Repository) SetCleared(ctx context.Context, userID, channelID, clearedID gocql.UUID) error {
+	return wrap(r.query(ctx, "UPDATE channel_prefs SET cleared_id = ? WHERE user_id = ? AND channel_id = ?", clearedID, userID, channelID).ExecRelease())
+}
+
+// GetCleared returns up to which message a user cleared a conversation,
+// zero for none.
+func (r *Repository) GetCleared(ctx context.Context, userID, channelID gocql.UUID) (gocql.UUID, error) {
+	var id gocql.UUID
+	err := r.query(ctx, "SELECT cleared_id FROM channel_prefs WHERE user_id = ? AND channel_id = ?", userID, channelID).Scan(&id)
+	if errors.Is(err, gocql.ErrNotFound) {
+		return gocql.UUID{}, nil
+	}
+	return id, wrap(err)
+}
+
+// ListCleared returns up to which message a user cleared each conversation
+// they cleared.
+func (r *Repository) ListCleared(ctx context.Context, userID gocql.UUID) (map[gocql.UUID]gocql.UUID, error) {
+	out := map[gocql.UUID]gocql.UUID{}
+	iter := r.query(ctx, "SELECT channel_id, cleared_id FROM channel_prefs WHERE user_id = ?", userID).Iter()
+	var channelID, clearedID gocql.UUID
+	for iter.Scan(&channelID, &clearedID) {
+		if !ids.IsZero(clearedID) {
+			out[channelID] = clearedID
+		}
+		clearedID = gocql.UUID{}
+	}
+	return out, wrap(iter.Close())
 }
 
 // ListMuted returns the channels a user muted.

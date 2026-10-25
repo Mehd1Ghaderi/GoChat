@@ -1,0 +1,16 @@
+{{define "content"}}
+<main class="page">
+  <header class="page-header">
+    <a class="btn" href="/">{{icon "back"}}Back</a>
+    <h1>Users</h1>
+  </header>
+  <section class="card">
+    <form method="get" action="/admin/users" class="row">
+      <label class="row">Username or email<input name="q" required maxlength="254" value="{{.Query}}" autofocus autocomplete="off" spellcheck="false"></label>
+      <button class="btn primary" type="submit">Find</button>
+    </form>
+    {{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
+  </section>
+  {{with .Found}}{{template "admin-user" .}}{{end}}
+</main>
+{{end}}

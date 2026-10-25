@@ -18,8 +18,11 @@ import "google/protobuf/timestamp.proto";
 // in the same encoding, or an ApiError with the HTTP status of its code.
 //
 // GET /api/v1/gateway opens the event socket: it sends one binary
-// ClientFrame per message, a ClientReady first. A socket that ends with a
-// close code of 4000 or more says why:
+// ClientFrame per message, a ClientReady first. The app sends binary
+// AppFrames saying what it shows, as pages do: typing reaches only the
+// sockets that show its channel, and presence and profile changes only those
+// that show the person. A socket that ends with a close code of 4000 or more
+// says why:
 //   4000  the chat server could not attach it: reconnect later
 //   4001  the token is not a valid session: sign in again
 //   4003  the session was revoked or expired: sign in again
@@ -59,4 +62,24 @@ message ClientReady {
   // Set when events may have been lost since the last ClientReady of this
   // socket: the app should load what it shows again.
   bool resync = 4;
+}
+
+// AppFrame is a message an app sends on its event socket. Each replaces what
+// the last of its kind said, and holds across reconnects only if sent again.
+message AppFrame {
+  oneof frame {
+    AppView view = 1;
+    AppWatch watch = 2;
+  }
+}
+
+// AppView names the channel the app shows, empty for none.
+message AppView {
+  string channel_id = 1;
+}
+
+// AppWatch names the people whose presence and profile the app shows, at
+// most 1000.
+message AppWatch {
+  repeated string user_ids = 1;
 }

@@ -77,6 +77,10 @@ type Session struct {
 	ExpiresAt time.Time  `db:"expires_at"`
 	IP        string     `db:"ip"`
 	UserAgent string     `db:"user_agent"`
+	// LastSeen is when it was last used, recorded at most every few minutes,
+	// from LastIP.
+	LastSeen time.Time `db:"last_seen"`
+	LastIP   string    `db:"last_ip"`
 }
 
 type MFAChallenge struct {
@@ -157,6 +161,8 @@ type Attachment struct {
 	ObjectKey   string     `db:"object_key"`
 	MessageID   gocql.UUID `db:"message_id"`
 	CreatedAt   time.Time  `db:"created_at"`
+	// Counted is set when Size is part of the uploader's storage usage.
+	Counted bool `db:"counted"`
 	// Voice marks a voice message, DurationMS its length as recorded.
 	Voice      bool `db:"voice"`
 	DurationMS int  `db:"duration_ms"`

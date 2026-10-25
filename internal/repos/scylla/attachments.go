@@ -12,10 +12,14 @@ import (
 	ierrors "github.com/ssenerg/gochat/internal/errors"
 )
 
-const attachmentColumns = "id, channel_id, uploader_id, name, content_type, size, object_key, message_id, created_at, voice, duration_ms"
+const attachmentColumns = "id, channel_id, uploader_id, name, content_type, size, object_key, message_id, created_at, counted, voice, duration_ms"
 
 // PendingShards spreads a day's unposted uploads over several partitions.
 const PendingShards = 16
+
+// PendingTTL is how long an upload stays pending: the pending_uploads
+// table's default_time_to_live.
+const PendingTTL = 14 * 24 * time.Hour
 
 // PendingUpload is an upload not posted yet, kept until it is or the janitor
 // deletes it.
@@ -36,8 +40,8 @@ func pendingShard(id gocql.UUID) int {
 
 func (r *Repository) InsertAttachment(ctx context.Context, a *models.Attachment) error {
 	b := r.batch(ctx, true)
-	b.Query("INSERT INTO attachments (id, channel_id, uploader_id, name, content_type, size, object_key, created_at, voice, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		a.ID, a.ChannelID, a.UploaderID, a.Name, a.ContentType, a.Size, a.ObjectKey, a.CreatedAt, a.Voice, a.DurationMS)
+	b.Query("INSERT INTO attachments (id, channel_id, uploader_id, name, content_type, size, object_key, created_at, counted, voice, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		a.ID, a.ChannelID, a.UploaderID, a.Name, a.ContentType, a.Size, a.ObjectKey, a.CreatedAt, a.Counted, a.Voice, a.DurationMS)
 	b.Query("INSERT INTO pending_uploads (day, shard, id, object_key, created_at) VALUES (?, ?, ?, ?, ?)",
 		PendingDay(a.CreatedAt), pendingShard(a.ID), a.ID, a.ObjectKey, a.CreatedAt)
 	return r.execBatch(b)
@@ -85,14 +89,34 @@ func (r *Repository) UnclaimAttachment(ctx context.Context, a *models.Attachment
 		PendingDay(a.CreatedAt), pendingShard(a.ID), a.ID, a.ObjectKey, a.CreatedAt).ExecRelease())
 }
 
-// DeleteAttachment deletes the attachment of a deleted message.
+// DeleteAttachment deletes the attachment of a deleted message, giving its
+// uploader the space back.
 func (r *Repository) DeleteAttachment(ctx context.Context, a *models.Attachment) error {
-	return wrap(r.query(ctx, "DELETE FROM attachments WHERE id = ?", a.ID).ExecRelease())
+	applied, err := r.query(ctx, "DELETE FROM attachments WHERE id = ? IF EXISTS", a.ID).ExecCASRelease()
+	if err != nil || !applied {
+		return wrap(err)
+	}
+	r.uncount(ctx, a)
+	return nil
+}
+
+// PendObject puts an object whose row is gone on the pending list, for the
+// janitor to delete once it would an upload made at.
+func (r *Repository) PendObject(ctx context.Context, id gocql.UUID, key string, at time.Time) error {
+	return wrap(r.query(ctx, "INSERT INTO pending_uploads (day, shard, id, object_key, created_at) VALUES (?, ?, ?, ?, ?)",
+		PendingDay(at), pendingShard(id), id, key, at).ExecRelease())
 }
 
 // DeleteOrphan deletes an upload's row unless it was posted meanwhile,
 // reporting whether its object is no longer referenced.
 func (r *Repository) DeleteOrphan(ctx context.Context, id gocql.UUID) (bool, error) {
+	a, err := r.GetAttachment(ctx, id)
+	if err != nil {
+		if ierrors.Is(err, ierrors.CodeNotFound) {
+			return true, nil
+		}
+		return false, err
+	}
 	row := make(map[string]any)
 	q := r.query(ctx, "DELETE FROM attachments WHERE id = ? IF message_id = null", id)
 	applied, err := q.MapScanCAS(row)
@@ -101,6 +125,7 @@ func (r *Repository) DeleteOrphan(ctx context.Context, id gocql.UUID) (bool, err
 		return false, wrap(err)
 	}
 	if applied {
+		r.uncount(ctx, a)
 		return true, nil
 	}
 	posted, _ := row["message_id"].(gocql.UUID)
@@ -131,4 +156,14 @@ func (r *Repository) ListPendingUploads(ctx context.Context, day int32) ([]*Pend
 		out = append(out, part...)
 	}
 	return out, nil
+}
+
+// uncount takes a deleted attachment out of its uploader's usage.
+func (r *Repository) uncount(ctx context.Context, a *models.Attachment) {
+	if !a.Counted {
+		return
+	}
+	if err := r.ReleaseStorage(ctx, a.UploaderID, a.Size); err != nil {
+		r.logger.Warn("failed to release storage", zap.String("user", a.UploaderID.String()), zap.Error(err))
+	}
 }

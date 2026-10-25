@@ -3,6 +3,9 @@
 //
 //	GOCHAT_E2E_URL=http://localhost:8080 GOCHAT_E2E_ADMIN=admin \
 //	GOCHAT_E2E_ADMIN_PASSWORD=... GOCHAT_E2E_TEAM=acme go test ./test/e2e/
+//
+// With GOCHAT_E2E_BOOTSTRAP set it first creates the admin and the team on a
+// fresh server, with the server's setup token in GOCHAT_E2E_SETUP_TOKEN.
 package e2e
 
 import (
@@ -12,6 +15,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -19,6 +23,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -40,6 +45,7 @@ var (
 	adminName = os.Getenv("GOCHAT_E2E_ADMIN")
 	adminPass = os.Getenv("GOCHAT_E2E_ADMIN_PASSWORD")
 	teamName  = os.Getenv("GOCHAT_E2E_TEAM")
+	setupKey  = os.Getenv("GOCHAT_E2E_SETUP_TOKEN")
 )
 
 type client struct {
@@ -59,10 +65,28 @@ func newClient(t *testing.T, name string) *client {
 	}}
 }
 
+// cookieName is a cookie's name as the server sets it: over HTTPS with the
+// __Host- prefix.
+func cookieName(name string) string {
+	if strings.HasPrefix(baseURL, "https://") {
+		return "__Host-" + name
+	}
+	return name
+}
+
+// wsURL is the gateway's socket address.
+func wsURL() string {
+	u, _ := url.Parse(baseURL)
+	if u.Scheme == "https" {
+		return "wss://" + u.Host + "/ws"
+	}
+	return "ws://" + u.Host + "/ws"
+}
+
 func (c *client) cookie(name string) string {
 	u, _ := url.Parse(baseURL)
 	for _, ck := range c.http.Jar.Cookies(u) {
-		if ck.Name == name {
+		if ck.Name == cookieName(name) {
 			return ck.Value
 		}
 	}
@@ -92,7 +116,8 @@ func (c *client) do(method, path string, body io.Reader, contentType string, htm
 		buf, _ = io.ReadAll(body)
 	}
 	// The sign-in endpoints are rate limited per address, which every client
-	// here shares: wait for the limiter rather than fail.
+	// here shares: wait for the limiter, which says how long, rather than
+	// fail.
 	for attempt := 0; ; attempt++ {
 		if buf != nil {
 			req.Body = io.NopCloser(bytes.NewReader(buf))
@@ -101,10 +126,14 @@ func (c *client) do(method, path string, body io.Reader, contentType string, htm
 		if err != nil {
 			c.t.Fatalf("%s %s: %v", method, path, err)
 		}
-		b, _ := io.ReadAll(res.Body)
+		b, err := io.ReadAll(res.Body)
 		_ = res.Body.Close()
-		wait, _ := strconv.Atoi(res.Header.Get("Retry-After"))
-		if res.StatusCode != http.StatusTooManyRequests || attempt == 5 || wait > 15 {
+		if err != nil {
+			c.t.Fatalf("%s %s: %d, reading the body: %v", method, path, res.StatusCode, err)
+		}
+		after := res.Header.Get("Retry-After")
+		wait, _ := strconv.Atoi(after)
+		if res.StatusCode != http.StatusTooManyRequests || after == "" || attempt == 5 || wait > 15 {
 			return res, string(b)
 		}
 		time.Sleep(time.Duration(wait) * time.Second)
@@ -150,11 +179,10 @@ type socket struct {
 func (c *client) socket(origin string) (*socket, *http.Response, error) {
 	h := http.Header{}
 	h.Set("Origin", origin)
-	u, _ := url.Parse(baseURL)
-	h.Set("Cookie", "gochat_session="+c.cookie("gochat_session"))
+	h.Set("Cookie", cookieName("gochat_session")+"="+c.cookie("gochat_session"))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	conn, res, err := websocket.Dial(ctx, "ws://"+u.Host+"/ws", &websocket.DialOptions{HTTPHeader: h})
+	conn, res, err := websocket.Dial(ctx, wsURL(), &websocket.DialOptions{HTTPHeader: h})
 	if err != nil {
 		return nil, res, err
 	}
@@ -224,6 +252,22 @@ func (s *socket) collect(within time.Duration) []string {
 	}
 }
 
+// closed waits for the server to close the socket.
+func (s *socket) closed(within time.Duration) {
+	s.t.Helper()
+	deadline := time.After(within)
+	for {
+		select {
+		case _, ok := <-s.in:
+			if !ok {
+				return
+			}
+		case <-deadline:
+			s.t.Fatal("the socket is still open")
+		}
+	}
+}
+
 func (s *socket) refuse(within time.Duration, part string) {
 	s.t.Helper()
 	deadline := time.After(within)
@@ -243,28 +287,54 @@ func (s *socket) refuse(within time.Duration, part string) {
 }
 
 var (
-	inviteRe    = regexp.MustCompile(`/join/([A-Za-z0-9_-]{43})`)
-	channelRe   = regexp.MustCompile(`/t/[a-z0-9-]+/ch/([0-9a-f-]{36})`)
-	attRe       = regexp.MustCompile(`name="attachment" value="([0-9a-f-]{36})"`)
-	secretRe    = regexp.MustCompile(`<code>([A-Z2-7]{16,})</code>`)
-	codeRe      = regexp.MustCompile(`<code>([a-z2-7]{5}-[a-z2-7]{5})</code>`)
-	teamIDRe    = regexp.MustCompile(`data-team="([0-9a-f-]{36})"`)
-	msgIDRe     = regexp.MustCompile(`id="msg-([0-9a-f-]{36})"`)
-	newestRe    = regexp.MustCompile(`data-newest="([0-9a-f-]{36})"`)
-	offTopicRe  = regexp.MustCompile(`data-channel="([0-9a-f-]{36})"(?s:[^<]*>.{0,600}?)<span class="label">Off-Topic</span>`)
-	photoRe     = regexp.MustCompile(`/photos/([ut])/([0-9a-f-]{36})/([0-9a-f]{16})`)
-	staticCSSRe = regexp.MustCompile(`/static/[0-9a-f]+/app\.css`)
-	pickRe      = regexp.MustCompile(`data-pick="([0-9a-f-]{36})"`)
+	inviteRe      = regexp.MustCompile(`/join/([A-Za-z0-9_-]{43})`)
+	channelRe     = regexp.MustCompile(`/t/[a-z0-9-]+/ch/([0-9a-f-]{36})`)
+	attRe         = regexp.MustCompile(`name="attachment" value="([0-9a-f-]{36})"`)
+	secretRe      = regexp.MustCompile(`<code>([A-Z2-7]{16,})</code>`)
+	codeRe        = regexp.MustCompile(`<code>([a-z2-7]{5}-[a-z2-7]{5})</code>`)
+	teamIDRe      = regexp.MustCompile(`data-team="([0-9a-f-]{36})"`)
+	msgIDRe       = regexp.MustCompile(`id="msg-([0-9a-f-]{36})"`)
+	newestRe      = regexp.MustCompile(`data-newest="([0-9a-f-]{36})"`)
+	offTopicRe    = regexp.MustCompile(`data-channel="([0-9a-f-]{36})"(?s:[^<]*>.{0,600}?)<span class="label">Off-Topic</span>`)
+	photoRe       = regexp.MustCompile(`/photos/([ut])/([0-9a-f-]{36})/([0-9a-f]{16})`)
+	staticCSSRe   = regexp.MustCompile(`/static/[0-9a-f]+/app\.css`)
+	pickRe        = regexp.MustCompile(`data-pick="([0-9a-f-]{36})"`)
+	adminUserRe   = regexp.MustCompile(`/admin/users/([0-9a-f-]{36})/`)
+	sessionRe     = regexp.MustCompile(`/settings/sessions/([0-9a-f]{24})/revoke`)
+	memberRe      = regexp.MustCompile(`<small class="muted">@([a-z0-9._-]+)( · admin| · owner)?</small>`)
+	moreMembersRe = regexp.MustCompile(`class="older" hx-get="(/t/[a-z0-9-]+/members\?after=[^"]+)"`)
+	pageTokenRe   = regexp.MustCompile(`hx-headers='\{"X-CSRF-Token": "([A-Za-z0-9_-]+)"\}'`)
 )
+
+// userIDOf finds a team member's id with c's people search.
+func userIDOf(t *testing.T, c *client, name string) string {
+	t.Helper()
+	_, list := c.do(http.MethodGet, "/t/"+teamName+"/people/search?q="+url.QueryEscape(name), nil, "", true)
+	m := pickRe.FindStringSubmatch(list)
+	if m == nil {
+		t.Fatalf("no one found for %q: %s", name, list)
+	}
+	return m[1]
+}
 
 // bootstrap sets a fresh server up with the admin and the team the tests use.
 func bootstrap(t *testing.T, admin *client) {
 	t.Helper()
-	admin.get("/signup")
-	res, body := admin.form("/signup", url.Values{
+	if setupKey == "" {
+		t.Fatal("GOCHAT_E2E_SETUP_TOKEN is not set")
+	}
+	if _, page := admin.get("/signup"); !strings.Contains(page, `name="setup_token"`) {
+		t.Fatalf("the first sign-up asks for no setup token: %s", page)
+	}
+	form := url.Values{
 		"username": {adminName}, "display_name": {"Ada Admin"}, "email": {adminName + "@example.test"},
 		"password": {adminPass}, "confirm": {adminPass},
-	})
+	}
+	if res, body := admin.form("/signup", form); res.StatusCode == http.StatusSeeOther || !strings.Contains(body, "the setup token is not correct") {
+		t.Fatalf("the first account was created without the setup token: %d %s", res.StatusCode, body)
+	}
+	form.Set("setup_token", setupKey)
+	res, body := admin.form("/signup", form)
 	if res.StatusCode != http.StatusSeeOther {
 		t.Fatalf("bootstrap sign-up: %d %s", res.StatusCode, body)
 	}
@@ -272,6 +342,49 @@ func bootstrap(t *testing.T, admin *client) {
 	if res.StatusCode != http.StatusSeeOther {
 		t.Fatalf("bootstrap team: %d %s", res.StatusCode, body)
 	}
+}
+
+// join signs a new person up with an invite from admin.
+func join(t *testing.T, admin *client, prefix string) (c *client, name, pass string) {
+	t.Helper()
+	return joinTeam(t, admin, teamName, prefix)
+}
+
+// joinTeam signs a new person up with an invite inviter makes to team.
+func joinTeam(t *testing.T, inviter *client, team, prefix string) (c *client, name, pass string) {
+	t.Helper()
+	_, body := inviter.hx("/t/"+team+"/invites", url.Values{})
+	m := inviteRe.FindStringSubmatch(body)
+	if m == nil {
+		t.Fatalf("no invite link in %s", body)
+	}
+	c = newClient(t, prefix)
+	name, pass = prefix+"-"+random(4), "pw-"+random(8)
+	c.get("/signup?invite=" + m[1])
+	if res, body := c.form("/signup", url.Values{
+		"username": {name}, "display_name": {prefix}, "email": {name + "@example.test"},
+		"password": {pass}, "confirm": {pass}, "invite": {m[1]},
+	}); res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("%s's signup: %d %s", prefix, res.StatusCode, body)
+	}
+	return c, name, pass
+}
+
+// adminFind returns the id of the user the admin page finds for login.
+func adminFind(t *testing.T, admin *client, login string) string {
+	t.Helper()
+	_, page := admin.get("/admin/users?q=" + url.QueryEscape(login))
+	m := adminUserRe.FindStringSubmatch(page)
+	if m == nil {
+		t.Fatalf("the admin page did not find %s: %s", login, page)
+	}
+	return m[1]
+}
+
+// signedOut reports whether c's session no longer works.
+func signedOut(c *client) bool {
+	res, _ := c.get("/settings")
+	return res.StatusCode == http.StatusSeeOther && strings.HasPrefix(res.Header.Get("Location"), "/login")
 }
 
 func TestEndToEnd(t *testing.T) {
@@ -338,14 +451,30 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// settle returns once s's session has handled every frame sent on it,
+	// which it does in order: a post to no channel comes back refused.
+	settle := func(s *socket) {
+		s.send(map[string]string{"op": "post", "channel_id": "00000000-0000-4000-8000-000000000000", "content": "settle"})
+		s.expect(10*time.Second, "channel not found")
+	}
+	// view settles, since what follows may come from another socket and
+	// overtake it.
 	view := func(s *socket, ch string) {
 		s.send(map[string]string{"op": "view", "team_id": teamID, "team_name": teamName, "channel_id": ch})
+		settle(s)
 	}
 	view(adminWS, town)
 	view(bobWS, town)
-	time.Sleep(300 * time.Millisecond)
+	// run fails only the step whose socket expectation failed, not the
+	// steps after it.
+	run := func(name string, f func(t *testing.T)) {
+		t.Run(name, func(t *testing.T) {
+			admin.t, bob.t, adminWS.t, bobWS.t = t, t, t, t
+			f(t)
+		})
+	}
 
-	t.Run("messages arrive in real time and escaped", func(t *testing.T) {
+	run("messages arrive in real time and escaped", func(t *testing.T) {
 		bobWS.send(map[string]string{"op": "post", "channel_id": town, "content": "hello <script>alert(1)</script> from bob"})
 		f := adminWS.expect(5*time.Second, "from bob", `hx-swap-oob="afterbegin"`)
 		if strings.Contains(f, "<script>") || strings.Contains(f, "<b>Tester") {
@@ -354,11 +483,12 @@ func TestEndToEnd(t *testing.T) {
 		bobWS.expect(5*time.Second, "from bob")
 	})
 
-	t.Run("threads keep replies apart", func(t *testing.T) {
+	run("threads keep replies apart", func(t *testing.T) {
 		bobWS.send(map[string]string{"op": "post", "channel_id": town, "content": "root for a thread"})
 		f := adminWS.expect(5*time.Second, "root for a thread", `hx-swap-oob="afterbegin"`)
 		root := msgIDRe.FindStringSubmatch(f)[1]
 		bobWS.send(map[string]string{"op": "thread", "root_id": root})
+		settle(bobWS)
 		adminWS.send(map[string]string{"op": "post", "channel_id": town, "root_id": root, "content": "first reply"})
 		f = bobWS.expect(5*time.Second, "first reply", `id="replies-`+root+`"`)
 		reply := msgIDRe.FindStringSubmatch(f)[1]
@@ -393,7 +523,7 @@ func TestEndToEnd(t *testing.T) {
 		bobWS.expect(5*time.Second, "message not found")
 	})
 
-	t.Run("mentions highlight, count and complete", func(t *testing.T) {
+	run("mentions highlight, count and complete", func(t *testing.T) {
 		_, page := bob.get("/t/" + teamName + "/ch/" + town)
 		m := offTopicRe.FindStringSubmatch(page)
 		if m == nil {
@@ -410,8 +540,8 @@ func TestEndToEnd(t *testing.T) {
 		if !strings.Contains(f, `<span class="mention">@`+bobName+`</span>`) || strings.Contains(f, `">@nobody`) {
 			t.Fatalf("mention markup: %s", f)
 		}
-		if _, list := bob.do(http.MethodGet, "/m/"+town+"/people?q=adm", nil, "", true); !strings.Contains(list, `data-insert="@admin "`) {
-			t.Fatalf("suggestions for adm: %s", list)
+		if _, list := bob.do(http.MethodGet, "/m/"+town+"/people?q="+adminName[:3], nil, "", true); !strings.Contains(list, `data-insert="@`+adminName+` "`) {
+			t.Fatalf("suggestions for %s: %s", adminName[:3], list)
 		}
 		if _, list := bob.do(http.MethodGet, "/m/"+town+"/people?q=cha", nil, "", true); !strings.Contains(list, `data-insert="@channel "`) {
 			t.Fatalf("suggestions for cha: %s", list)
@@ -441,7 +571,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("reactions toggle and arrive live", func(t *testing.T) {
+	run("reactions toggle and arrive live", func(t *testing.T) {
 		bobWS.send(map[string]string{"op": "post", "channel_id": town, "content": "react to me"})
 		f := adminWS.expect(5*time.Second, "react to me", `hx-swap-oob="afterbegin"`)
 		msg := msgIDRe.FindStringSubmatch(f)[1]
@@ -472,7 +602,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("notifications follow mentions, replies and mutes", func(t *testing.T) {
+	run("notifications follow mentions, replies and mutes", func(t *testing.T) {
 		_, page := bob.get("/t/" + teamName + "/ch/" + town)
 		offTopic := offTopicRe.FindStringSubmatch(page)[1]
 		adminWS.send(map[string]string{"op": "post", "channel_id": offTopic, "content": "a word, @" + bobName})
@@ -505,13 +635,44 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("typing reaches others only", func(t *testing.T) {
+	run("typing reaches others only", func(t *testing.T) {
 		adminWS.send(map[string]string{"op": "typing", "channel_id": town})
 		bobWS.expect(5*time.Second, "is typing")
 		adminWS.refuse(time.Second, "is typing")
 	})
 
-	t.Run("attachments upload, post and download", func(t *testing.T) {
+	run("a channel is marked unread once until read", func(t *testing.T) {
+		_, page := bob.get("/t/" + teamName + "/ch/" + town)
+		offTopic := offTopicRe.FindStringSubmatch(page)[1]
+		// Reading it clears its mentions, which would show instead.
+		view(bobWS, offTopic)
+		view(bobWS, town)
+		time.Sleep(300 * time.Millisecond)
+		mark := `id="unread-` + offTopic + `" class="dot on"`
+		for i := range 3 {
+			adminWS.send(map[string]string{"op": "post", "channel_id": offTopic, "content": "chatter " + strconv.Itoa(i)})
+		}
+		if n := strings.Count(strings.Join(bobWS.collect(2*time.Second), "\n"), mark); n != 1 {
+			t.Fatalf("marked unread %d times", n)
+		}
+		view(bobWS, offTopic)
+		view(bobWS, town)
+		time.Sleep(300 * time.Millisecond)
+		adminWS.send(map[string]string{"op": "post", "channel_id": offTopic, "content": "more chatter"})
+		bobWS.expect(5*time.Second, mark)
+	})
+
+	run("typing reaches only who shows the channel", func(t *testing.T) {
+		_, page := bob.get("/t/" + teamName + "/ch/" + town)
+		offTopic := offTopicRe.FindStringSubmatch(page)[1]
+		view(bobWS, offTopic)
+		defer view(bobWS, town)
+		time.Sleep(300 * time.Millisecond)
+		adminWS.send(map[string]string{"op": "typing", "channel_id": town})
+		bobWS.refuse(time.Second, "is typing")
+	})
+
+	run("attachments upload, post and download", func(t *testing.T) {
 		png := []byte("\x89PNG\r\n\x1a\n" + strings.Repeat("\x00", 64))
 		var buf bytes.Buffer
 		mw := multipart.NewWriter(&buf)
@@ -536,12 +697,44 @@ func TestEndToEnd(t *testing.T) {
 		if res, _ := admin.get("/files/" + att + "/inline"); res.Header.Get("Content-Type") != "image/png" {
 			t.Fatalf("inline image type: %s", res.Header.Get("Content-Type"))
 		}
+		// Players such as Safari's read media in ranges.
+		ranged := func(rng, ifRange string) (*http.Response, string) {
+			req, _ := http.NewRequest(http.MethodGet, baseURL+"/files/"+att+"/inline", nil)
+			req.Header.Set("Range", rng)
+			if ifRange != "" {
+				req.Header.Set("If-Range", ifRange)
+			}
+			res, err := admin.http.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = res.Body.Close() }()
+			b, _ := io.ReadAll(res.Body)
+			return res, string(b)
+		}
+		size := strconv.Itoa(len(png))
+		for _, c := range []struct {
+			rng, ifRange, span, body string
+			status                   int
+		}{
+			{"bytes=2-5", "", "bytes 2-5/" + size, string(png[2:6]), http.StatusPartialContent},
+			{"bytes=-4", "", "bytes " + strconv.Itoa(len(png)-4) + "-" + strconv.Itoa(len(png)-1) + "/" + size, string(png[len(png)-4:]), http.StatusPartialContent},
+			{"bytes=0-", `"` + att + `"`, "bytes 0-" + strconv.Itoa(len(png)-1) + "/" + size, string(png), http.StatusPartialContent},
+			{"bytes=500-", "", "bytes */" + size, "", http.StatusRequestedRangeNotSatisfiable},
+			{"bytes=2-5", `"stale"`, "", string(png), http.StatusOK},
+			{"bytes=0-1,4-5", "", "", string(png), http.StatusOK},
+		} {
+			res, body := ranged(c.rng, c.ifRange)
+			if res.StatusCode != c.status || res.Header.Get("Content-Range") != c.span || body != c.body || res.Header.Get("Accept-Ranges") != "bytes" {
+				t.Fatalf("Range %q (If-Range %q): %d %q %q", c.rng, c.ifRange, res.StatusCode, res.Header.Get("Content-Range"), body)
+			}
+		}
 		// An attachment is posted once.
 		bobWS.send(map[string]any{"op": "post", "channel_id": town, "content": "again", "attachment": att})
 		bobWS.expect(5*time.Second, "attachment is not available")
 	})
 
-	t.Run("voice messages follow the channel's setting", func(t *testing.T) {
+	run("voice messages follow the channel's setting", func(t *testing.T) {
 		webm := []byte("\x1a\x45\xdf\xa3" + strings.Repeat("\x00", 64))
 		upload := func(c *client, data []byte, duration string) (*http.Response, string) {
 			var buf bytes.Buffer
@@ -592,15 +785,15 @@ func TestEndToEnd(t *testing.T) {
 		bobWS.expect(5*time.Second, `data-voice-for="`+town+`"`, "voice-record")
 	})
 
-	t.Run("voice channels: talk, mute, moderators and refusals", func(t *testing.T) {
+	run("voice channels: talk, mute, moderators and refusals", func(t *testing.T) {
 		testVoiceChannels(t, admin, bob, adminWS, bobWS)
 	})
 
-	t.Run("the client API serves native apps", func(t *testing.T) {
+	run("the client API serves native apps", func(t *testing.T) {
 		testClientAPI(t, bobName, bobPass, town)
 	})
 
-	t.Run("private channels stay private", func(t *testing.T) {
+	run("private channels stay private", func(t *testing.T) {
 		name := "secret-" + random(3)
 		res, body := admin.hx("/t/"+teamName+"/channels", url.Values{"name": {name}, "display_name": {"Secret"}, "type": {"private"}})
 		m := channelRe.FindStringSubmatch(res.Header.Get("HX-Location"))
@@ -623,7 +816,7 @@ func TestEndToEnd(t *testing.T) {
 		view(adminWS, town)
 	})
 
-	t.Run("search finds what each person may read", func(t *testing.T) {
+	run("search finds what each person may read", func(t *testing.T) {
 		word := "zq" + random(4)
 		name := "hidden-" + random(3)
 		res, _ := admin.hx("/t/"+teamName+"/channels", url.Values{"name": {name}, "display_name": {"Hidden"}, "type": {"private"}})
@@ -693,7 +886,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("group conversations and the switcher", func(t *testing.T) {
+	run("group conversations and the switcher", func(t *testing.T) {
 		_, body := admin.hx("/t/"+teamName+"/invites", url.Values{})
 		carol := newClient(t, "carol")
 		carolName, carolPass := "carol-"+random(4), "pw-"+random(8)
@@ -752,12 +945,197 @@ func TestEndToEnd(t *testing.T) {
 		if _, list := bob.do(http.MethodGet, "/t/"+teamName+"/switch/results?q=carol", nil, "", true); !strings.Contains(list, "Carol") {
 			t.Fatalf("switcher for carol: %s", list)
 		}
-		if _, modal := bob.do(http.MethodGet, "/t/"+teamName+"/switch", nil, "", true); !strings.Contains(modal, "data-switch-input") || !strings.Contains(modal, "Town Square") {
-			t.Fatalf("switcher: %s", modal)
+		// The modal lists only the first places, which past runs' channels
+		// may fill.
+		if res, modal := bob.do(http.MethodGet, "/t/"+teamName+"/switch", nil, "", true); !strings.Contains(modal, "data-switch-input") || !strings.Contains(modal, `role="option"`) {
+			t.Fatalf("switcher: %d %s", res.StatusCode, modal)
 		}
 	})
 
-	t.Run("channel settings, privacy and archiving", func(t *testing.T) {
+	run("each team keeps its own direct messages", func(t *testing.T) {
+		one, oneName, _ := join(t, admin, "pair-one")
+		two, twoName, _ := join(t, admin, "pair-two")
+		other := "pair-" + random(6)
+		if res, body := one.form("/teams", url.Values{"name": {other}, "display_name": {"Pairs"}}); res.StatusCode != http.StatusSeeOther {
+			t.Fatalf("create a team: %d %s", res.StatusCode, body)
+		}
+		_, body := one.hx("/t/"+other+"/invites", url.Values{})
+		link := inviteRe.FindStringSubmatch(body)
+		if link == nil {
+			t.Fatalf("no invite link in %s", body)
+		}
+		two.form("/join/"+link[1], url.Values{})
+		oneID, twoID := userIDOf(t, two, oneName), userIDOf(t, one, twoName)
+		open := func(c *client, team, peer string) string {
+			t.Helper()
+			res, body := c.hx("/t/"+team+"/dm", url.Values{"user_id": {peer}})
+			m := channelRe.FindStringSubmatch(res.Header.Get("HX-Location"))
+			if m == nil {
+				t.Fatalf("open a conversation in %s: %d %s", team, res.StatusCode, body)
+			}
+			return m[1]
+		}
+		dms := map[string]string{teamName: open(one, teamName, twoID), other: open(one, other, twoID)}
+		if dms[teamName] == dms[other] {
+			t.Fatal("two teams share a direct conversation")
+		}
+		for team, dm := range dms {
+			if again := open(two, team, oneID); again != dm {
+				t.Fatalf("in %s the pair found %s, then %s", team, dm, again)
+			}
+		}
+		_, page := two.get("/t/" + other + "/ch/" + dms[other])
+		teams := map[string]string{teamName: teamID, other: teamIDRe.FindStringSubmatch(page)[1]}
+		elsewhere := map[string]string{teamName: other, other: teamName}
+
+		// Two watches acme: only acme's conversation reaches it.
+		oneWS, _, err := one.socket(baseURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		twoWS, _, err := two.socket(baseURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		view(twoWS, town)
+		word := "zq" + random(4)
+		post := func(team string) {
+			t.Helper()
+			oneWS.send(map[string]string{"op": "view", "team_id": teams[team], "team_name": team, "channel_id": dms[team]})
+			oneWS.send(map[string]string{"op": "post", "channel_id": dms[team], "content": word + " in " + team})
+			oneWS.expect(5*time.Second, word+" in "+team)
+		}
+		post(other)
+		twoWS.refuse(2*time.Second, dms[other])
+		post(teamName)
+		twoWS.expect(5*time.Second, `id="notify"`, word+" in "+teamName)
+
+		search := func(team string) string {
+			t.Helper()
+			var body string
+			for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(500 * time.Millisecond) {
+				_, body = two.do(http.MethodGet, "/t/"+team+"/search?q="+url.QueryEscape(word), nil, "", true)
+				_, body, _ = strings.Cut(body, `id="search-results"`)
+				if strings.Contains(body, "<mark>"+word+"</mark>") {
+					return body
+				}
+			}
+			t.Fatalf("search in %s did not find %s: %s", team, word, body)
+			return ""
+		}
+		for team, dm := range dms {
+			away := dms[elsewhere[team]]
+			if _, page := two.get("/t/" + team + "/ch/" + dm); !strings.Contains(page, word+" in "+team) || strings.Contains(page, away) {
+				t.Fatalf("two's %s conversation shows the other team's: %s", team, page)
+			}
+			if res, _ := two.get("/t/" + team + "/ch/" + away); res.StatusCode != http.StatusNotFound {
+				t.Fatalf("%s opened the other team's conversation: %d", team, res.StatusCode)
+			}
+			if _, list := two.do(http.MethodGet, "/t/"+team+"/switch/results?q=pair-one", nil, "", true); !strings.Contains(list, "/ch/"+dm) || strings.Contains(list, away) {
+				t.Fatalf("the switcher in %s: %s", team, list)
+			}
+			if body := search(team); !strings.Contains(body, "</mark> in "+team) || strings.Contains(body, "</mark> in "+elsewhere[team]) {
+				t.Fatalf("search in %s: %s", team, body)
+			}
+		}
+	})
+
+	run("a direct conversation is deleted for one or for both", func(t *testing.T) {
+		one, oneName, _ := join(t, admin, "del-one")
+		two, twoName, _ := join(t, admin, "del-two")
+		oneID, twoID := userIDOf(t, two, oneName), userIDOf(t, one, twoName)
+		open := func(c *client, peer string) string {
+			t.Helper()
+			res, body := c.hx("/t/"+teamName+"/dm", url.Values{"user_id": {peer}})
+			m := channelRe.FindStringSubmatch(res.Header.Get("HX-Location"))
+			if m == nil {
+				t.Fatalf("open a conversation: %d %s", res.StatusCode, body)
+			}
+			return m[1]
+		}
+		dm := open(one, twoID)
+		oneWS, _, err := one.socket(baseURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		twoWS, _, err := two.socket(baseURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		view(oneWS, dm)
+		view(twoWS, town)
+		word := "zq" + random(4)
+		say := func(s *socket, text string) {
+			t.Helper()
+			s.send(map[string]string{"op": "post", "channel_id": dm, "content": text})
+			s.expect(5*time.Second, text)
+		}
+		say(oneWS, word+" before")
+		search := func(c *client) string {
+			t.Helper()
+			_, body := c.do(http.MethodGet, "/t/"+teamName+"/search?q="+url.QueryEscape(word), nil, "", true)
+			_, body, _ = strings.Cut(body, `id="search-results"`)
+			return body
+		}
+		for deadline := time.Now().Add(10 * time.Second); !strings.Contains(search(two), word); time.Sleep(500 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatal("search did not find the message")
+			}
+		}
+		if _, modal := one.do(http.MethodGet, "/t/"+teamName+"/ch/"+dm+"/delete", nil, "", true); !strings.Contains(modal, `name="everyone"`) {
+			t.Fatalf("the delete dialog: %s", modal)
+		}
+
+		// For one: gone from one's sidebar, history and search, not from two's.
+		if res, body := one.hx("/t/"+teamName+"/ch/"+dm+"/delete", url.Values{}); res.StatusCode >= 300 {
+			t.Fatalf("delete for one: %d %s", res.StatusCode, body)
+		}
+		if _, page := one.get("/t/" + teamName + "/ch/" + town); strings.Contains(page, dm) {
+			t.Fatal("the cleared conversation is still in its sidebar")
+		}
+		if _, page := one.get("/t/" + teamName + "/ch/" + dm); strings.Contains(page, word+" before") {
+			t.Fatal("the cleared conversation still shows its messages")
+		}
+		if body := search(one); strings.Contains(body, word) {
+			t.Fatalf("search finds a cleared message: %s", body)
+		}
+		if _, page := two.get("/t/" + teamName + "/ch/" + dm); !strings.Contains(page, word+" before") {
+			t.Fatal("clearing for one took the other's messages")
+		}
+		// The next message brings it back with only what is new.
+		view(twoWS, dm)
+		view(oneWS, town)
+		say(twoWS, word+" after")
+		oneWS.expect(5*time.Second, `id="channel-lists"`, dm)
+		if _, page := one.get("/t/" + teamName + "/ch/" + dm); !strings.Contains(page, word+" after") || strings.Contains(page, word+" before") {
+			t.Fatalf("the conversation came back with: %s", page)
+		}
+
+		// For both: gone for each, the other told, and opening it again
+		// starts afresh.
+		view(oneWS, dm)
+		if res, body := two.hx("/t/"+teamName+"/ch/"+dm+"/delete", url.Values{"everyone": {"1"}}); res.StatusCode >= 300 {
+			t.Fatalf("delete for both: %d %s", res.StatusCode, body)
+		}
+		oneWS.expect(5*time.Second, "This conversation was deleted.")
+		for _, c := range []*client{one, two} {
+			if res, _ := c.get("/t/" + teamName + "/ch/" + dm); res.StatusCode != http.StatusNotFound {
+				t.Fatalf("a deleted conversation opened: %d", res.StatusCode)
+			}
+			if body := search(c); strings.Contains(body, word) {
+				t.Fatalf("search finds a deleted message: %s", body)
+			}
+		}
+		again := open(one, twoID)
+		if again == dm {
+			t.Fatal("the deleted conversation opened again")
+		}
+		if _, page := two.get("/t/" + teamName + "/ch/" + open(two, oneID)); strings.Contains(page, word) {
+			t.Fatalf("the new conversation shows deleted messages: %s", page)
+		}
+	})
+
+	run("channel settings, privacy and archiving", func(t *testing.T) {
 		res, _ := admin.hx("/t/"+teamName+"/channels", url.Values{"name": {"proj-" + random(3)}, "display_name": {"Project"}, "type": {"public"}})
 		proj := channelRe.FindStringSubmatch(res.Header.Get("HX-Location"))[1]
 		base := "/t/" + teamName + "/ch/" + proj
@@ -801,7 +1179,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("threads gather what people follow", func(t *testing.T) {
+	run("threads gather what people follow", func(t *testing.T) {
 		adminWS.send(map[string]string{"op": "post", "channel_id": town, "content": "inbox root " + random(3)})
 		root := msgIDRe.FindStringSubmatch(bobWS.expect(5*time.Second, "inbox root", `hx-swap-oob="afterbegin"`))[1]
 		card := `hx-get="/m/` + town + `/` + root + `/thread"`
@@ -823,8 +1201,7 @@ func TestEndToEnd(t *testing.T) {
 		if list := threads(admin); strings.Contains(list, `thread-card unread" `+card) {
 			t.Fatal("opening the thread did not read it")
 		}
-		adminWS.send(map[string]string{"op": "view", "team_id": teamID, "team_name": teamName, "channel_id": ""})
-		time.Sleep(200 * time.Millisecond)
+		view(adminWS, "")
 		bobWS.send(map[string]string{"op": "post", "channel_id": town, "root_id": root, "content": "another reply"})
 		adminWS.expect(5*time.Second, `id="threads-refresh"`, "threads?list=1")
 		view(adminWS, town)
@@ -843,7 +1220,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("pins are shared and saves are private", func(t *testing.T) {
+	run("pins are shared and saves are private", func(t *testing.T) {
 		adminWS.send(map[string]string{"op": "post", "channel_id": town, "content": "pin me " + random(3)})
 		id := msgIDRe.FindStringSubmatch(bobWS.expect(5*time.Second, "pin me", `hx-swap-oob="afterbegin"`))[1]
 		if res, body := bob.hx("/m/"+town+"/"+id+"/pin", url.Values{"pinned": {"1"}}); res.StatusCode != http.StatusOK || !strings.Contains(body, "Pinned</span>") {
@@ -889,7 +1266,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("statuses show and do not disturb holds notifications", func(t *testing.T) {
+	run("statuses show and do not disturb holds notifications", func(t *testing.T) {
 		_, list := admin.do(http.MethodGet, "/t/"+teamName+"/people/search?q="+bobName, nil, "", true)
 		bobUser := pickRe.FindStringSubmatch(list)[1]
 		res, _ := admin.hx("/t/"+teamName+"/dm", url.Values{"user_id": {bobUser}})
@@ -930,7 +1307,7 @@ func TestEndToEnd(t *testing.T) {
 		bobWS.expect(5*time.Second, `id="notify"`, "now?")
 	})
 
-	t.Run("csrf and origin are enforced", func(t *testing.T) {
+	run("csrf and origin are enforced", func(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodPost, baseURL+"/t/"+teamName+"/invites", nil)
 		req.Header.Set("HX-Request", "true")
 		res, err := admin.http.Do(req)
@@ -957,7 +1334,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("proxies may not rewrite pages", func(t *testing.T) {
+	run("proxies may not rewrite pages", func(t *testing.T) {
 		res, body := admin.get("/settings")
 		if cc := res.Header.Get("Cache-Control"); !strings.Contains(cc, "no-store") || !strings.Contains(cc, "no-transform") {
 			t.Fatalf("page Cache-Control: %q", cc)
@@ -974,15 +1351,73 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("members cannot invite", func(t *testing.T) {
+	run("pages and sockets compress", func(t *testing.T) {
+		get := func(path string) *http.Response {
+			req, _ := http.NewRequest(http.MethodGet, baseURL+path, nil)
+			req.Header.Set("Accept-Encoding", "gzip")
+			res, err := admin.http.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = res.Body.Close()
+			return res
+		}
+		_, page := admin.get("/t/" + teamName + "/ch/" + town)
+		if res := get("/t/" + teamName + "/ch/" + town); res.Header.Get("Content-Encoding") != "gzip" {
+			t.Fatalf("page encoding %q", res.Header.Get("Content-Encoding"))
+		}
+		if res := get(staticCSSRe.FindString(page)); res.Header.Get("Content-Encoding") != "gzip" {
+			t.Fatalf("stylesheet encoding %q", res.Header.Get("Content-Encoding"))
+		}
+		// The page's token is masked, and works.
+		m := pageTokenRe.FindStringSubmatch(page)
+		if m == nil || m[1] == admin.cookie("gochat_csrf") {
+			t.Fatalf("the page carries its token bare: %v", m)
+		}
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/t/"+teamName+"/ch/"+town+"/mute", strings.NewReader("muted=0"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", baseURL)
+		req.Header.Set("HX-Request", "true")
+		req.Header.Set("X-CSRF-Token", m[1])
+		res, err := admin.http.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("the masked token was refused: %d", res.StatusCode)
+		}
+		h := http.Header{}
+		h.Set("Origin", baseURL)
+		h.Set("Cookie", cookieName("gochat_session")+"="+admin.cookie("gochat_session"))
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		conn, res, err := websocket.Dial(ctx, wsURL(), &websocket.DialOptions{HTTPHeader: h, CompressionMode: websocket.CompressionNoContextTakeover})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = conn.CloseNow() }()
+		if ext := res.Header.Get("Sec-WebSocket-Extensions"); !strings.Contains(ext, "permessage-deflate") {
+			t.Fatalf("socket extensions %q", ext)
+		}
+	})
+
+	run("members cannot invite", func(t *testing.T) {
 		res, _ := bob.hx("/t/"+teamName+"/invites", url.Values{})
 		if res.StatusCode != http.StatusForbidden {
 			t.Fatalf("a member created an invite: %d", res.StatusCode)
 		}
 	})
 
-	t.Run("invites die with their creator's rights", func(t *testing.T) {
-		_, list := admin.do(http.MethodGet, "/t/"+teamName+"/members", nil, "", true)
+	// memberRows lists the team's members from just before name, whom past
+	// runs' members could push off the first page.
+	memberRows := func(name string) string {
+		_, rows := admin.do(http.MethodGet, "/t/"+teamName+"/members?after="+url.QueryEscape(name[:len(name)-1]), nil, "", true)
+		return rows
+	}
+
+	run("invites die with their creator's rights", func(t *testing.T) {
+		list := memberRows(bobName)
 		m := regexp.MustCompile(`@` + regexp.QuoteMeta(bobName) + `(?s:.*?)/members/([0-9a-f-]{36})/role`).FindStringSubmatch(list)
 		if m == nil {
 			t.Fatalf("bob is not in the member list: %s", list)
@@ -1008,7 +1443,53 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("a removed member cannot rejoin with their invite", func(t *testing.T) {
+	run("only a team's owner demotes its admins", func(t *testing.T) {
+		owner, ownerName, _ := join(t, admin, "owner")
+		team := "own-" + random(6)
+		if res, body := owner.form("/teams", url.Values{"name": {team}, "display_name": {"Owned"}}); res.StatusCode != http.StatusSeeOther {
+			t.Fatalf("create a team: %d %s", res.StatusCode, body)
+		}
+		x, xName, _ := joinTeam(t, owner, team, "x")
+		_, yName, _ := joinTeam(t, owner, team, "y")
+		ids := map[string]string{}
+		_, list := owner.do(http.MethodGet, "/t/"+team+"/members", nil, "", true)
+		for _, name := range []string{xName, yName} {
+			m := regexp.MustCompile(`@` + regexp.QuoteMeta(name) + `(?s:.*?)/members/([0-9a-f-]{36})/role`).FindStringSubmatch(list)
+			if m == nil {
+				t.Fatalf("%s is not in the member list: %s", name, list)
+			}
+			ids[name] = m[1]
+		}
+		if !strings.Contains(list, "@"+ownerName+" · owner") {
+			t.Fatalf("the owner is not marked: %s", list)
+		}
+		role := func(c *client, name, r string) int {
+			res, _ := c.hx("/t/"+team+"/members/"+ids[name]+"/role", url.Values{"role": {r}})
+			return res.StatusCode
+		}
+		for _, name := range []string{xName, yName} {
+			if s := role(owner, name, "admin"); s != http.StatusOK {
+				t.Fatalf("the owner made %s an admin: %d", name, s)
+			}
+		}
+		if s := role(x, yName, "member"); s != http.StatusForbidden {
+			t.Fatalf("an admin demoted another: %d", s)
+		}
+		if res, _ := x.hx("/t/"+team+"/members/"+ids[yName]+"/remove", url.Values{}); res.StatusCode != http.StatusForbidden {
+			t.Fatalf("an admin removed another: %d", res.StatusCode)
+		}
+		if _, view := x.do(http.MethodGet, "/t/"+team+"/members", nil, "", true); strings.Contains(view, "/members/"+ids[yName]+"/role") {
+			t.Fatal("an admin is offered to demote another")
+		}
+		if s := role(owner, yName, "member"); s != http.StatusOK {
+			t.Fatalf("the owner demoted an admin: %d", s)
+		}
+		if s := role(x, xName, "member"); s != http.StatusOK {
+			t.Fatalf("an admin stepped down: %d", s)
+		}
+	})
+
+	run("a removed member cannot rejoin with their invite", func(t *testing.T) {
 		_, body := admin.hx("/t/"+teamName+"/invites", url.Values{})
 		link := inviteRe.FindStringSubmatch(body)
 		if link == nil {
@@ -1024,7 +1505,7 @@ func TestEndToEnd(t *testing.T) {
 		if res.StatusCode != http.StatusSeeOther {
 			t.Fatalf("signup: %d %s", res.StatusCode, body)
 		}
-		_, list := admin.do(http.MethodGet, "/t/"+teamName+"/members", nil, "", true)
+		list := memberRows(name)
 		m := regexp.MustCompile(`@` + regexp.QuoteMeta(name) + `(?s:.*?)/members/([0-9a-f-]{36})/remove`).FindStringSubmatch(list)
 		if m == nil {
 			t.Fatalf("frank is not in the member list: %s", list)
@@ -1036,7 +1517,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("revoked invites stop working", func(t *testing.T) {
+	run("revoked invites stop working", func(t *testing.T) {
 		_, body := admin.hx("/t/"+teamName+"/invites", url.Values{})
 		link := inviteRe.FindStringSubmatch(body)
 		if link == nil {
@@ -1067,7 +1548,85 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("profile and team photos", func(t *testing.T) {
+	// members lists the team's members page by page, and its admins.
+	members := func(t *testing.T) (names, admins []string) {
+		t.Helper()
+		next := "/t/" + teamName + "/members"
+		for pages := 0; next != ""; pages++ {
+			if pages > 100 {
+				t.Fatal("the member list does not end")
+			}
+			res, body := admin.do(http.MethodGet, next, nil, "", true)
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("%s: %d %s", next, res.StatusCode, body)
+			}
+			for _, m := range memberRe.FindAllStringSubmatch(body, -1) {
+				names = append(names, m[1])
+				if m[2] != "" {
+					admins = append(admins, m[1])
+				}
+			}
+			next = ""
+			if m := moreMembersRe.FindStringSubmatch(body); m != nil {
+				next = html.UnescapeString(m[1])
+			}
+		}
+		return names, admins
+	}
+
+	run("members and invites page", func(t *testing.T) {
+		names, _ := members(t)
+		if !slices.IsSorted(names) || len(slices.Compact(slices.Clone(names))) != len(names) || !slices.Contains(names, bobName) {
+			t.Fatalf("members listed out of order, twice or not at all: %v", names)
+		}
+		// A listing continues after the name given.
+		_, rows := admin.do(http.MethodGet, "/t/"+teamName+"/members?after="+url.QueryEscape(names[0]), nil, "", true)
+		after := memberRe.FindAllStringSubmatch(rows, -1)
+		if len(after) == 0 || after[0][1] != names[1] {
+			t.Fatalf("the rows after %s: %s", names[0], rows)
+		}
+		if res, _ := admin.do(http.MethodGet, "/t/"+teamName+"/invites?after=nonsense", nil, "", true); res.StatusCode != http.StatusBadRequest {
+			t.Fatalf("a bad invite cursor: %d", res.StatusCode)
+		}
+	})
+
+	run("a team keeps an admin", func(t *testing.T) {
+		if _, admins := members(t); !slices.Equal(admins, []string{adminName}) {
+			t.Skipf("the team has other admins: %v", admins)
+		}
+		bobID, adminID := userIDOf(t, admin, bobName), userIDOf(t, bob, adminName)
+		if res, body := admin.hx("/t/"+teamName+"/members/"+adminID+"/role", url.Values{"role": {"member"}}); res.StatusCode == http.StatusOK || !strings.Contains(body+res.Header.Get("X-Error"), "at least one admin") {
+			t.Fatalf("the last admin stepped down: %d %s", res.StatusCode, body)
+		}
+		admin.hx("/t/"+teamName+"/members/"+bobID+"/role", url.Values{"role": {"admin"}})
+		// Both step down at once: one of them stays.
+		codes := make(chan int, 2)
+		for _, c := range []struct {
+			by     *client
+			target string
+		}{{admin, adminID}, {bob, bobID}} {
+			go func() {
+				res, _ := c.by.hx("/t/"+teamName+"/members/"+c.target+"/role", url.Values{"role": {"member"}})
+				codes <- res.StatusCode
+			}()
+		}
+		ok := 0
+		for range 2 {
+			if <-codes == http.StatusOK {
+				ok++
+			}
+		}
+		if ok != 1 {
+			t.Fatalf("%d demotions went through", ok)
+		}
+		// Put the roles back: admin an admin, bob a member.
+		bob.hx("/t/"+teamName+"/members/"+adminID+"/role", url.Values{"role": {"admin"}})
+		if res, _ := admin.hx("/t/"+teamName+"/members/"+bobID+"/role", url.Values{"role": {"member"}}); res.StatusCode != http.StatusOK {
+			t.Fatalf("restoring the roles: %d", res.StatusCode)
+		}
+	})
+
+	run("profile and team photos", func(t *testing.T) {
 		pic := image.NewRGBA(image.Rect(0, 0, 400, 300))
 		for i := range pic.Pix {
 			if pic.Pix[i] = uint8(i); i%4 == 3 {
@@ -1093,7 +1652,7 @@ func TestEndToEnd(t *testing.T) {
 		if m == nil || m[1] != "u" {
 			t.Fatalf("no photo after upload: %s", body)
 		}
-		userPhoto := m[0]
+		userPhoto, bobPhotos := m[0], "/photos/u/"+m[2]+"/"
 		res, got := admin.get(userPhoto)
 		if res.StatusCode != http.StatusOK || res.Header.Get("Content-Type") != "image/jpeg" || !strings.Contains(res.Header.Get("Cache-Control"), "immutable") {
 			t.Fatalf("photo: %d %v", res.StatusCode, res.Header)
@@ -1125,11 +1684,12 @@ func TestEndToEnd(t *testing.T) {
 		if res, _ := bob.get(m[0]); res.StatusCode != http.StatusOK || res.Header.Get("Content-Type") != "image/png" {
 			t.Fatalf("member fetching the team photo: %d %v", res.StatusCode, res.Header)
 		}
-		if _, body := admin.hx("/t/"+teamName+"/photo/remove", url.Values{}); photoRe.MatchString(body) {
+		// The rail answering it shows the admin's other teams, maybe with photos.
+		if _, body := admin.hx("/t/"+teamName+"/photo/remove", url.Values{}); strings.Contains(body, "/photos/t/"+teamID+"/") {
 			t.Fatalf("team photo not removed: %s", body)
 		}
 
-		if _, body := bob.hx("/settings/photo/remove", url.Values{}); photoRe.MatchString(body) {
+		if _, body := bob.hx("/settings/photo/remove", url.Values{}); strings.Contains(body, bobPhotos) {
 			t.Fatalf("photo not removed: %s", body)
 		}
 		if res, _ := admin.get(userPhoto); res.StatusCode != http.StatusNotFound {
@@ -1137,7 +1697,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("forms refuse multipart bodies and open redirects", func(t *testing.T) {
+	run("forms refuse multipart bodies and open redirects", func(t *testing.T) {
 		res, _ := admin.do(http.MethodPost, "/t/"+teamName+"/invites", strings.NewReader("--x--"), "multipart/form-data; boundary=x", true)
 		if res.StatusCode != http.StatusUnsupportedMediaType {
 			t.Fatalf("a multipart form body was accepted: %d", res.StatusCode)
@@ -1148,17 +1708,32 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("two-factor sign-in", func(t *testing.T) {
+	run("two-factor sign-in", func(t *testing.T) {
 		_, body := bob.hx("/settings/totp/begin", url.Values{"password": {bobPass}})
 		m := secretRe.FindStringSubmatch(body)
 		if m == nil {
 			t.Fatalf("no secret: %s", body)
 		}
 		code, _ := totp.GenerateCode(m[1], time.Now())
-		_, body = bob.hx("/settings/totp/confirm", url.Values{"code": {code}})
-		codes := codeRe.FindAllStringSubmatch(body, -1)
+		// Submitted twice at once, one shows the codes.
+		bodies := make(chan string, 2)
+		for range 2 {
+			go func() {
+				_, body := bob.hx("/settings/totp/confirm", url.Values{"code": {code}})
+				bodies <- body
+			}()
+		}
+		var codes [][]string
+		for range 2 {
+			if found := codeRe.FindAllStringSubmatch(<-bodies, -1); found != nil {
+				if codes != nil {
+					t.Fatal("both confirmations showed codes")
+				}
+				codes = found
+			}
+		}
 		if len(codes) != 10 {
-			t.Fatalf("no recovery codes: %s", body)
+			t.Fatalf("no recovery codes: %v", codes)
 		}
 		fresh := newClient(t, "bob2")
 		res, _ := fresh.form("/login", url.Values{"login": {bobName}, "password": {bobPass}})
@@ -1181,7 +1756,172 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("logout revokes the socket", func(t *testing.T) {
+	// live opens c's socket and waits until it carries c's own posts.
+	live := func(t *testing.T, c *client) *socket {
+		t.Helper()
+		ws, _, err := c.socket(baseURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ws.t = t
+		view(ws, town)
+		word := "here-" + random(4)
+		ws.send(map[string]string{"op": "post", "channel_id": town, "content": word})
+		ws.expect(5*time.Second, word)
+		return ws
+	}
+
+	run("deactivation signs out at once and bars sign-in", func(t *testing.T) {
+		dave, daveName, davePass := join(t, admin, "dave")
+		ws := live(t, dave)
+		daveID := adminFind(t, admin, daveName)
+		deactivate := func(c *client, on string) (*http.Response, string) {
+			return c.hx("/admin/users/"+daveID+"/deactivate", url.Values{"deactivated": {on}})
+		}
+		if res, _ := deactivate(bob, "1"); res.StatusCode != http.StatusNotFound {
+			t.Fatalf("a member deactivated someone: %d", res.StatusCode)
+		}
+		if res, _ := bob.get("/admin/users?q=" + daveName); res.StatusCode != http.StatusNotFound {
+			t.Fatalf("a member opened the admin page: %d", res.StatusCode)
+		}
+		res, card := deactivate(admin, "1")
+		if res.StatusCode != http.StatusOK || !strings.Contains(card, "Reactivate") || !strings.Contains(card, "Not signed in anywhere") {
+			t.Fatalf("deactivate: %d %s", res.StatusCode, card)
+		}
+		ws.expect(5*time.Second, `data-redirect="/login"`)
+		ws.closed(5 * time.Second)
+		if !signedOut(dave) {
+			t.Fatal("a deactivated user's session still works")
+		}
+		if again, _, err := dave.socket(baseURL); err == nil {
+			again.t = t
+			again.expect(5*time.Second, `data-redirect="/login"`)
+		}
+		fresh := newClient(t, "dave2")
+		if res, body := fresh.form("/login", url.Values{"login": {daveName}, "password": {davePass}}); res.StatusCode == http.StatusSeeOther || !strings.Contains(body, "account is deactivated") {
+			t.Fatalf("a deactivated user signed in: %d %s", res.StatusCode, body)
+		}
+		if _, card := deactivate(admin, "0"); !strings.Contains(card, `"deactivated": "1"`) {
+			t.Fatalf("reactivate: %s", card)
+		}
+		fresh.login(daveName, davePass)
+		if _, card := admin.hx("/admin/users/"+adminFind(t, admin, adminName)+"/deactivate", url.Values{"deactivated": {"1"}}); !strings.Contains(card, "cannot deactivate your own account") {
+			t.Fatalf("the admin deactivated themself: %s", card)
+		}
+	})
+
+	run("people see and revoke their sessions", func(t *testing.T) {
+		erin, erinName, erinPass := join(t, admin, "erin")
+		laptop := newClient(t, "erin-laptop")
+		laptop.login(erinName, erinPass)
+		laptopWS := live(t, laptop)
+		_, page := erin.get("/settings")
+		others := sessionRe.FindAllStringSubmatch(page, -1)
+		if len(others) != 1 || !strings.Contains(page, "This device") || !strings.Contains(page, "Go-http-client") {
+			t.Fatalf("sessions on the settings page: %s", page)
+		}
+		res, list := erin.hx("/settings/sessions/"+others[0][1]+"/revoke", url.Values{})
+		if res.StatusCode != http.StatusOK || strings.Contains(list, others[0][1]) || !strings.Contains(list, "Signed out.") {
+			t.Fatalf("revoke a session: %d %s", res.StatusCode, list)
+		}
+		laptopWS.expect(5*time.Second, `data-redirect="/login"`)
+		if !signedOut(laptop) || signedOut(erin) {
+			t.Fatal("the wrong session was signed out")
+		}
+		if _, list := erin.hx("/settings/sessions/"+strings.Repeat("0", 24)+"/revoke", url.Values{}); !strings.Contains(list, "session not found") {
+			t.Fatalf("revoking a session that is not hers: %s", list)
+		}
+
+		phone := newClient(t, "erin-phone")
+		phone.login(erinName, erinPass)
+		if _, list := erin.hx("/settings/sessions/revoke", url.Values{}); !strings.Contains(list, "Every other session was signed out.") {
+			t.Fatalf("sign out the others: %s", list)
+		}
+		if !signedOut(phone) || signedOut(erin) {
+			t.Fatal("signing out the others did not keep only this one")
+		}
+
+		erinWS := live(t, erin)
+		erinID := adminFind(t, admin, erinName)
+		if res, _ := bob.hx("/admin/users/"+erinID+"/sessions/revoke", url.Values{}); res.StatusCode != http.StatusNotFound {
+			t.Fatalf("a member signed someone out: %d", res.StatusCode)
+		}
+		res, card := admin.hx("/admin/users/"+erinID+"/sessions/revoke", url.Values{})
+		if res.StatusCode != http.StatusOK || !strings.Contains(card, "Signed out everywhere.") || !strings.Contains(card, "Not signed in anywhere") {
+			t.Fatalf("admin sign-out: %d %s", res.StatusCode, card)
+		}
+		erinWS.expect(5*time.Second, `data-redirect="/login"`)
+		if !signedOut(erin) {
+			t.Fatal("erin's session survived the admin's sign-out")
+		}
+	})
+
+	run("storage quotas bound uploads", func(t *testing.T) {
+		fay, fayName, _ := join(t, admin, "fay")
+		fayID := adminFind(t, admin, fayName)
+		quota := func(c *client, v url.Values) (*http.Response, string) {
+			return c.hx("/admin/users/"+fayID+"/quota", v)
+		}
+		if res, _ := quota(bob, url.Values{"mib": {"100"}}); res.StatusCode != http.StatusNotFound {
+			t.Fatalf("a member set a quota: %d", res.StatusCode)
+		}
+		if res, card := quota(admin, url.Values{"mib": {"1"}}); res.StatusCode != http.StatusOK || !strings.Contains(card, "Quota saved.") || !strings.Contains(card, "0 B used of 1.0 MB") {
+			t.Fatalf("set a quota: %d %s", res.StatusCode, card)
+		}
+		upload := func(sizes ...int) (*http.Response, string) {
+			var buf bytes.Buffer
+			mw := multipart.NewWriter(&buf)
+			for _, size := range sizes {
+				data := make([]byte, size)
+				_, _ = rand.Read(data)
+				fw, _ := mw.CreateFormFile("file", "data.bin")
+				_, _ = fw.Write(data)
+			}
+			_ = mw.Close()
+			return fay.do(http.MethodPost, "/upload?channel="+town, &buf, mw.FormDataContentType(), true)
+		}
+		res, body := upload(700 << 10)
+		m := attRe.FindStringSubmatch(body)
+		if res.StatusCode != http.StatusOK || m == nil {
+			t.Fatalf("an upload within the quota: %d %s", res.StatusCode, body)
+		}
+		if _, page := fay.get("/settings"); !strings.Contains(page, "700.0 KB used of 1.0 MB") {
+			t.Fatalf("usage on the settings page: %s", page)
+		}
+		if res, _ := upload(700 << 10); res.StatusCode == http.StatusOK || !strings.Contains(res.Header.Get("X-Error"), "not enough storage left") {
+			t.Fatalf("an upload passed the quota: %d %q", res.StatusCode, res.Header.Get("X-Error"))
+		}
+
+		ws := live(t, fay)
+		ws.send(map[string]any{"op": "post", "channel_id": town, "content": "big file", "attachment": m[1]})
+		msg := msgIDRe.FindStringSubmatch(ws.expect(5*time.Second, "/files/"+m[1]))[1]
+		if res, _ := fay.hx("/m/"+town+"/"+msg+"/delete", url.Values{}); res.StatusCode != http.StatusOK {
+			t.Fatalf("delete the message: %d", res.StatusCode)
+		}
+		for deadline := time.Now().Add(8 * time.Second); ; time.Sleep(300 * time.Millisecond) {
+			if _, page := fay.get("/settings"); strings.Contains(page, "0 B used of 1.0 MB") {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("deleting the message did not free its space")
+			}
+		}
+		if res, body := upload(700 << 10); res.StatusCode != http.StatusOK {
+			t.Fatalf("an upload after freeing space: %d %s", res.StatusCode, body)
+		}
+		// An upload whose second file fails keeps neither.
+		if res, _ := upload(200<<10, 400<<10); res.StatusCode == http.StatusOK {
+			t.Fatal("an upload past the quota succeeded")
+		}
+		if _, page := fay.get("/settings"); !strings.Contains(page, "700.0 KB used of 1.0 MB") {
+			t.Fatalf("the first file of a failed upload is still stored: %s", page)
+		}
+		if _, card := quota(admin, url.Values{"default": {"1"}}); strings.Contains(card, "of 1.0 MB") || !strings.Contains(card, "Quota saved.") {
+			t.Fatalf("back to the default quota: %s", card)
+		}
+	})
+
+	run("logout revokes the socket", func(t *testing.T) {
 		res, _ := bob.hx("/logout", url.Values{})
 		if res.Header.Get("HX-Redirect") != "/login" {
 			t.Fatalf("logout: %d %v", res.StatusCode, res.Header)

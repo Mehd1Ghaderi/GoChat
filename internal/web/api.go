@@ -36,9 +36,9 @@ import (
 
 const (
 	maxRPCBody = 1 << 20
-	// apiReadLimit bounds what an app may send over its event socket, which
-	// it uses for nothing.
-	apiReadLimit = 1 << 10
+	// apiReadLimit bounds one AppFrame an app sends over its event socket:
+	// the most people it may watch fit.
+	apiReadLimit = 64 << 10
 )
 
 // apiCalls are the calls of the chat API apps may make: the unary calls of
@@ -387,13 +387,24 @@ func (h *Handler) apiGateway(w http.ResponseWriter, r *http.Request) {
 	}
 	ws.SetReadLimit(apiReadLimit)
 	id := h.connSeq.Add(1)
-	pid := h.engine.Spawn(gateway.NewClientSession(h.gw, id, h.apiCall(r), ws), "client", actor.WithID(strconv.FormatUint(id, 36)),
+	in := gateway.NewInflow(h.gw.Cfg)
+	pid := h.engine.Spawn(gateway.NewClientSession(h.gw, id, h.apiCall(r), ws, in), "client", actor.WithID(strconv.FormatUint(id, 36)),
 		actor.WithMiddleware(actors.Recover(h.logger)))
 	defer h.engine.Poison(pid)
-	// The app sends nothing: reading answers its pings and sees it go.
+	// The app says what it shows in binary AppFrames; reading also answers
+	// its pings and sees it go.
 	for {
-		if _, _, err := ws.Read(context.Background()); err != nil {
+		typ, data, err := ws.Read(context.Background())
+		if err != nil {
 			return
 		}
+		if typ != websocket.MessageBinary {
+			continue
+		}
+		if !in.Admit(len(data)) {
+			_ = ws.Close(websocket.StatusPolicyViolation, "too fast")
+			return
+		}
+		h.engine.Send(pid, gateway.Frame{Data: data})
 	}
 }

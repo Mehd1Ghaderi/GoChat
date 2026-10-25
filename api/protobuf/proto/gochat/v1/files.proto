@@ -10,6 +10,12 @@ service FileService {
   // The first message is the header, every other one a chunk.
   rpc Download(DownloadRequest) returns (stream DownloadResponse);
   rpc GetPhoto(GetPhotoRequest) returns (GetPhotoResponse);
+  // GetStorageUsage tells how much the caller's attachments take, or a
+  // user's for a system admin.
+  rpc GetStorageUsage(GetStorageUsageRequest) returns (GetStorageUsageResponse);
+  // DiscardUploads deletes uploads of the caller's that are not posted, such
+  // as those an upload sent before one of its files failed.
+  rpc DiscardUploads(DiscardUploadsRequest) returns (DiscardUploadsResponse);
 }
 
 message UploadHeader {
@@ -34,6 +40,17 @@ message UploadResponse {
 
 message DownloadRequest {
   string attachment_id = 1;
+  // Only these bytes, as an HTTP Range asks; the whole file when unset.
+  ByteRange range = 2;
+}
+
+// ByteRange is one range of bytes as in an HTTP Range header: first to last
+// inclusive, last below zero for the end; or with suffix above zero, the
+// last suffix bytes.
+message ByteRange {
+  int64 first = 1;
+  int64 last = 2;
+  int64 suffix = 3;
 }
 
 message DownloadResponse {
@@ -41,7 +58,17 @@ message DownloadResponse {
     Attachment header = 1;
     bytes chunk = 2;
   }
+  // With the header of a ranged download: the bytes that follow, or
+  // unsatisfiable when the range starts past the end and none follow.
+  ByteRange served = 3;
+  bool unsatisfiable = 4;
 }
+
+message DiscardUploadsRequest {
+  repeated string attachment_ids = 1;
+}
+
+message DiscardUploadsResponse {}
 
 message GetPhotoRequest {
   oneof owner {
@@ -57,4 +84,17 @@ message GetPhotoResponse {
   // The current version, which differs from the one asked for once the photo
   // changed.
   string version = 3;
+}
+
+message GetStorageUsageRequest {
+  // Empty for the caller.
+  string user_id = 1;
+}
+
+message GetStorageUsageResponse {
+  int64 used = 1;
+  // Zero when there is no limit.
+  int64 quota = 2;
+  // The user has a quota of their own rather than the server's default.
+  bool custom = 3;
 }

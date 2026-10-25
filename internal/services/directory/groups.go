@@ -22,12 +22,31 @@ import (
 // maxGroup bounds the people of a group conversation, its starter included.
 const maxGroup = 8
 
-// openGroup opens the conversation of the caller and the people they chose:
-// a direct one with one person, a group one with more. The same people
-// always find the same conversation.
+// peopleKey names a conversation by its people's sorted ids.
+func peopleKey(people []gocql.UUID) string {
+	keys := make([]string, len(people))
+	for i, id := range people {
+		keys[i] = id.String()
+	}
+	slices.Sort(keys)
+	return strings.Join(keys, ":")
+}
+
+func (w *worker) openDirect(ctx context.Context, msg OpenDirect) (*pb.Channel, error) {
+	return w.openGroup(ctx, OpenGroup{P: msg.P, TeamID: msg.TeamID, UserIDs: []string{msg.UserID}})
+}
+
+// openGroup opens the conversation of the caller and the people they chose
+// in a team they all belong to: a direct one with one person, a group one
+// with more. The same people find the same conversation in a team, and
+// another one in each other team.
 func (w *worker) openGroup(ctx context.Context, msg OpenGroup) (*pb.Channel, error) {
 	if !w.Authz.Can(authz.ObjDirect, authz.ActCreate, string(msg.P.Role)) {
 		return nil, ierrors.PermissionDenied()
+	}
+	teamID, err := parseID(msg.TeamID, "team")
+	if err != nil {
+		return nil, err
 	}
 	members := []gocql.UUID{msg.P.UserID}
 	for _, raw := range msg.UserIDs {
@@ -42,40 +61,42 @@ func (w *worker) openGroup(ctx context.Context, msg OpenGroup) (*pb.Channel, err
 	switch {
 	case len(members) == 1:
 		return nil, ierrors.InvalidArgument("pick someone to talk to")
-	case len(members) == 2:
-		return w.openDirect(ctx, OpenDirect{P: msg.P, UserID: members[1].String()})
 	case len(members) > maxGroup:
 		return nil, ierrors.InvalidArgument("a group conversation holds at most 8 people")
 	}
-	mine, err := w.teamsOf(ctx, msg.P.UserID)
-	if err != nil {
+	if _, err := w.membership(ctx, teamID, msg.P.UserID); err != nil {
 		return nil, err
 	}
 	for _, id := range members[1:] {
-		if err := w.reachable(ctx, msg.P, mine, id); err != nil {
+		if err := w.reachable(ctx, teamID, id); err != nil {
 			return nil, err
 		}
 	}
-	keys := make([]string, len(members))
-	for i, id := range members {
-		keys[i] = id.String()
+	kind, display := models.ChannelGroup, "Group"
+	if len(members) == 2 {
+		kind, display = models.ChannelDirect, "Direct"
 	}
-	slices.Sort(keys)
-	key := strings.Join(keys, ":")
 	now := time.Now().UTC()
 	ch := &models.Channel{
-		ID: ids.New(), TeamID: scylla.NoTeam, Name: key, DisplayName: "Group", Kind: models.ChannelGroup,
+		ID: ids.New(), TeamID: teamID, Name: peopleKey(members), DisplayName: display, Kind: kind,
 		CreatedBy: msg.P.UserID, CreatedAt: now,
 	}
 	cms := make([]*models.ChannelMember, len(members))
 	for i, id := range members {
-		cms[i] = &models.ChannelMember{ChannelID: ch.ID, UserID: id, TeamID: scylla.NoTeam, Role: models.ChannelRoleMember, JoinedAt: now}
+		cms[i] = &models.ChannelMember{ChannelID: ch.ID, UserID: id, TeamID: teamID, Role: models.ChannelRoleMember, JoinedAt: now}
 	}
-	chID, err := w.Repo.CreateDirectChannel(ctx, key, ch, cms)
+	chID, err := w.Repo.CreateDirectChannel(ctx, scylla.ConversationKey(teamID, ch.Name), ch, cms)
 	if err != nil {
 		return nil, err
 	}
-	view, err := actors.Ask[*pb.Channel](ctx, w.Engine, w.Channels, channels.View{Target: channels.Target{P: msg.P, ChannelID: chID}})
+	target := channels.Target{P: msg.P, ChannelID: chID}
+	if chID != ch.ID {
+		// Removals from the team took people out of it.
+		if _, err := actors.Ask[channels.Done](ctx, w.Engine, w.Channels, channels.Rejoin{Target: target, UserIDs: members}); err != nil {
+			return nil, err
+		}
+	}
+	view, err := actors.Ask[*pb.Channel](ctx, w.Engine, w.Channels, channels.View{Target: target})
 	if err != nil {
 		return nil, err
 	}
@@ -89,4 +110,19 @@ func (w *worker) openGroup(ctx context.Context, msg OpenGroup) (*pb.Channel, err
 		}
 	}
 	return view, nil
+}
+
+// reachable checks target is an active member of the team.
+func (w *worker) reachable(ctx context.Context, teamID, target gocql.UUID) error {
+	peer, err := w.Users.Get(ctx, target)
+	if err != nil || peer.Deactivated {
+		return ierrors.NotFound("user not found")
+	}
+	if _, err := w.Repo.GetTeamMember(ctx, teamID, target); err != nil {
+		if ierrors.Is(err, ierrors.CodeNotFound) {
+			return ierrors.NotFound("user not found")
+		}
+		return err
+	}
+	return nil
 }

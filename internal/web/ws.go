@@ -15,6 +15,10 @@ import (
 	"github.com/ssenerg/gochat/internal/web/gateway"
 )
 
+// sessionInbox is the starting size of a session's inbox, which grows as
+// needed.
+const sessionInbox = 32
+
 // websocket upgrades a signed-in page's socket and hands it to a session
 // actor; this goroutine stays as the socket's reader.
 func (h *Handler) websocket(w http.ResponseWriter, r *http.Request) {
@@ -31,7 +35,7 @@ func (h *Handler) websocket(w http.ResponseWriter, r *http.Request) {
 	rc := http.NewResponseController(w)
 	_ = rc.SetReadDeadline(time.Time{})
 	_ = rc.SetWriteDeadline(time.Time{})
-	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: []string{u.Host}})
+	ws, err := websocket.Accept(w, r, h.gw.Cfg.AcceptOptions(u.Host))
 	if err != nil {
 		h.logger.Debug("websocket upgrade failed", zap.Error(err))
 		return
@@ -39,16 +43,22 @@ func (h *Handler) websocket(w http.ResponseWriter, r *http.Request) {
 	ws.SetReadLimit(h.gw.Cfg.ReadLimit)
 	id := h.connSeq.Add(1)
 	call := h.call(r)
-	pid := h.engine.Spawn(gateway.NewSession(h.gw, id, call, ws), "session", actor.WithID(strconv.FormatUint(id, 36)),
-		actor.WithMiddleware(actors.Recover(h.logger)))
+	in := gateway.NewInflow(h.gw.Cfg)
+	pid := h.engine.Spawn(gateway.NewSession(h.gw, id, call, ws, in), "session", actor.WithID(strconv.FormatUint(id, 36)),
+		actor.WithMiddleware(actors.Recover(h.logger)), actor.WithInboxSize(sessionInbox))
 	defer h.engine.Poison(pid)
 	for {
 		typ, data, err := ws.Read(context.Background())
 		if err != nil {
 			return
 		}
-		if typ == websocket.MessageText {
-			h.engine.Send(pid, gateway.Frame{Data: data})
+		if typ != websocket.MessageText {
+			continue
 		}
+		if !in.Admit(len(data)) {
+			_ = ws.Close(websocket.StatusPolicyViolation, "too fast")
+			return
+		}
+		h.engine.Send(pid, gateway.Frame{Data: data})
 	}
 }

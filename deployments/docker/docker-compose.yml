@@ -163,6 +163,7 @@ services:
       STORAGE_MINIO_ACCESS_KEY: ${STORAGE_MINIO_ACCESS_KEY}
       STORAGE_MINIO_SECRET_KEY: ${STORAGE_MINIO_SECRET_KEY}
       SERVER_DRPC_GATEWAY_KEY: ${GATEWAY_KEY}
+      SERVER_DRPC_VOICE_SERVER_KEY: ${VOICE_SERVER_KEY:-}
       SERVICES_ACCOUNTS_SECRET_KEY: ${SERVICES_ACCOUNTS_SECRET_KEY}
       SERVICES_ACCOUNTS_SETUP_TOKEN: ${SERVICES_ACCOUNTS_SETUP_TOKEN:-}
     read_only: true
@@ -224,7 +225,9 @@ services:
     restart: unless-stopped
     command: ["voice", "--config-path", "/app/config", "--config-name", "voice"]
     environment:
-      CLIENT_DRPC_GATEWAY_KEY: ${GATEWAY_KEY}
+      # Its own key: the gateway key, which acts for users, stays off this
+      # internet-facing container.
+      CLIENT_DRPC_GATEWAY_KEY: ${VOICE_SERVER_KEY:-}
       VOICE_PUBLIC_URL: ${VOICE_PUBLIC_URL:-ws://localhost:8090/rtc}
       VOICE_ALLOWED_ORIGINS: ${WEB_PUBLIC_URL:-http://localhost:8080}
       VOICE_ICE_PUBLIC_IPS: ${VOICE_PUBLIC_IP:-}

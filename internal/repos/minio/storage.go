@@ -56,6 +56,15 @@ func (s *Storage) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 	return s.client.GetObject(ctx, s.cfg.Bucket, key, minio.GetObjectOptions{})
 }
 
+// GetRange reads the bytes of an object from first to last, inclusive.
+func (s *Storage) GetRange(ctx context.Context, key string, first, last int64) (io.ReadCloser, error) {
+	var opts minio.GetObjectOptions
+	if err := opts.SetRange(first, last); err != nil {
+		return nil, err
+	}
+	return s.client.GetObject(ctx, s.cfg.Bucket, key, opts)
+}
+
 func (s *Storage) Delete(ctx context.Context, key string) error {
 	return s.client.RemoveObject(ctx, s.cfg.Bucket, key, minio.RemoveObjectOptions{})
 }

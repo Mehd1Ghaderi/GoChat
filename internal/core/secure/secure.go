@@ -35,6 +35,40 @@ func ValidToken(s string) bool {
 	return err == nil
 }
 
+// MaskToken hides token behind a fresh random pad, so pages carrying it
+// differ every time and compressing them gives nothing of it away.
+func MaskToken(token string) string {
+	raw, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil || len(raw) != tokenBytes {
+		return token
+	}
+	out := make([]byte, 2*tokenBytes)
+	if _, err := rand.Read(out[:tokenBytes]); err != nil {
+		panic(err)
+	}
+	pad, hidden := out[:tokenBytes], out[tokenBytes:]
+	for i, b := range raw {
+		hidden[i] = b ^ pad[i]
+	}
+	return base64.RawURLEncoding.EncodeToString(out)
+}
+
+// UnmaskToken returns the token MaskToken hid in masked.
+func UnmaskToken(masked string) (string, bool) {
+	if len(masked) != base64.RawURLEncoding.EncodedLen(2*tokenBytes) {
+		return "", false
+	}
+	b, err := base64.RawURLEncoding.DecodeString(masked)
+	if err != nil {
+		return "", false
+	}
+	raw := make([]byte, tokenBytes)
+	for i := range raw {
+		raw[i] = b[tokenBytes+i] ^ b[i]
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), true
+}
+
 // Hash is the stored form of a token: tokens carry 256 bits of entropy, so a
 // fast hash is enough.
 func Hash(token string) []byte {

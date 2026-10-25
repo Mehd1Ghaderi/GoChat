@@ -17,6 +17,7 @@ message ConnectRequest {
     Hello hello = 1;
     Attach attach = 2;
     Detach detach = 3;
+    View view = 4;
   }
 }
 
@@ -31,6 +32,13 @@ message Attach {
 
 message Detach {
   uint64 conn_id = 1;
+}
+
+// View names the channel a connection shows, empty for none: typing goes
+// only to the members who see it.
+message View {
+  uint64 conn_id = 1;
+  string channel_id = 2;
 }
 
 message ConnectResponse {
@@ -65,8 +73,11 @@ message SessionsRevoked {
 }
 
 message Event {
-  // Recipients on this gateway; ignored when broadcast is set.
-  repeated string user_ids = 1;
+  reserved 1;
+  reserved "user_ids";
+  // The connections on this gateway it is for; ignored when broadcast is
+  // set.
+  repeated uint64 conn_ids = 19;
   bool broadcast = 2;
   oneof payload {
     MessagePosted message_posted = 3;
@@ -136,6 +147,10 @@ message MessagePosted {
   Message message = 1;
   // For a reply: the people taking part in its thread.
   repeated string participant_ids = 2;
+  // The team of the message's channel.
+  string team_id = 3;
+  // Set for a direct or group conversation.
+  bool conversation = 4;
 }
 
 message MessageEdited {
@@ -162,6 +177,8 @@ message ChannelLeft {
   string team_id = 2;
   // Set when the person left, rather than being removed.
   bool own = 3;
+  // Set when the conversation was deleted.
+  bool deleted = 4;
 }
 
 message Presence {

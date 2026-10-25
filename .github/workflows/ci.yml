@@ -71,6 +71,7 @@ jobs:
         run: |
           # Scylla needs more asynchronous I/O than the runner allows.
           sudo sysctl -w fs.aio-max-nr=1048576
+          setup=$(openssl rand -hex 24)
           (umask 077 && cat > .env <<EOF
           DOCKER_REGISTRY=docker.io/
           DATABASE_SCYLLA_ADMIN_USERNAME=gochat_admin
@@ -82,12 +83,15 @@ jobs:
           STORAGE_MINIO_ACCESS_KEY=gochat
           STORAGE_MINIO_SECRET_KEY=$(openssl rand -hex 24)
           GATEWAY_KEY=$(openssl rand -hex 32)
+          VOICE_SERVER_KEY=$(openssl rand -hex 32)
           SERVICES_ACCOUNTS_SECRET_KEY=$(openssl rand -base64 32)
+          SERVICES_ACCOUNTS_SETUP_TOKEN=$setup
           WEB_PUBLIC_URL=http://localhost:8080
           WEB_PORT=8080
           EOF
           )
           echo "GOCHAT_E2E_ADMIN_PASSWORD=$(openssl rand -hex 16)" >> "$GITHUB_ENV"
+          echo "GOCHAT_E2E_SETUP_TOKEN=$setup" >> "$GITHUB_ENV"
       - name: Compose file
         run: $COMPOSE config --quiet
       - name: Stack

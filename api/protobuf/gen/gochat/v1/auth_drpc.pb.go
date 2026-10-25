@@ -48,6 +48,9 @@ type DRPCAuthServiceClient interface {
 	BeginTOTPSetup(ctx context.Context, in *BeginTOTPSetupRequest) (*BeginTOTPSetupResponse, error)
 	ConfirmTOTPSetup(ctx context.Context, in *ConfirmTOTPSetupRequest) (*ConfirmTOTPSetupResponse, error)
 	DisableTOTP(ctx context.Context, in *DisableTOTPRequest) (*DisableTOTPResponse, error)
+	ListSessions(ctx context.Context, in *ListSessionsRequest) (*ListSessionsResponse, error)
+	RevokeSession(ctx context.Context, in *RevokeSessionRequest) (*RevokeSessionResponse, error)
+	RevokeSessions(ctx context.Context, in *RevokeSessionsRequest) (*RevokeSessionsResponse, error)
 }
 
 type drpcAuthServiceClient struct {
@@ -150,6 +153,33 @@ func (c *drpcAuthServiceClient) DisableTOTP(ctx context.Context, in *DisableTOTP
 	return out, nil
 }
 
+func (c *drpcAuthServiceClient) ListSessions(ctx context.Context, in *ListSessionsRequest) (*ListSessionsResponse, error) {
+	out := new(ListSessionsResponse)
+	err := c.cc.Invoke(ctx, "/gochat.v1.AuthService/ListSessions", drpcEncoding_File_gochat_v1_auth_proto{}, in, out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *drpcAuthServiceClient) RevokeSession(ctx context.Context, in *RevokeSessionRequest) (*RevokeSessionResponse, error) {
+	out := new(RevokeSessionResponse)
+	err := c.cc.Invoke(ctx, "/gochat.v1.AuthService/RevokeSession", drpcEncoding_File_gochat_v1_auth_proto{}, in, out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *drpcAuthServiceClient) RevokeSessions(ctx context.Context, in *RevokeSessionsRequest) (*RevokeSessionsResponse, error) {
+	out := new(RevokeSessionsResponse)
+	err := c.cc.Invoke(ctx, "/gochat.v1.AuthService/RevokeSessions", drpcEncoding_File_gochat_v1_auth_proto{}, in, out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 type DRPCAuthServiceServer interface {
 	GetSignupInfo(context.Context, *GetSignupInfoRequest) (*GetSignupInfoResponse, error)
 	SignUp(context.Context, *SignUpRequest) (*SignUpResponse, error)
@@ -161,6 +191,9 @@ type DRPCAuthServiceServer interface {
 	BeginTOTPSetup(context.Context, *BeginTOTPSetupRequest) (*BeginTOTPSetupResponse, error)
 	ConfirmTOTPSetup(context.Context, *ConfirmTOTPSetupRequest) (*ConfirmTOTPSetupResponse, error)
 	DisableTOTP(context.Context, *DisableTOTPRequest) (*DisableTOTPResponse, error)
+	ListSessions(context.Context, *ListSessionsRequest) (*ListSessionsResponse, error)
+	RevokeSession(context.Context, *RevokeSessionRequest) (*RevokeSessionResponse, error)
+	RevokeSessions(context.Context, *RevokeSessionsRequest) (*RevokeSessionsResponse, error)
 }
 
 type DRPCAuthServiceUnimplementedServer struct{}
@@ -205,9 +238,21 @@ func (s *DRPCAuthServiceUnimplementedServer) DisableTOTP(context.Context, *Disab
 	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
 }
 
+func (s *DRPCAuthServiceUnimplementedServer) ListSessions(context.Context, *ListSessionsRequest) (*ListSessionsResponse, error) {
+	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
+}
+
+func (s *DRPCAuthServiceUnimplementedServer) RevokeSession(context.Context, *RevokeSessionRequest) (*RevokeSessionResponse, error) {
+	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
+}
+
+func (s *DRPCAuthServiceUnimplementedServer) RevokeSessions(context.Context, *RevokeSessionsRequest) (*RevokeSessionsResponse, error) {
+	return nil, drpcerr.WithCode(errors.New("Unimplemented"), drpcerr.Unimplemented)
+}
+
 type DRPCAuthServiceDescription struct{}
 
-func (DRPCAuthServiceDescription) NumMethods() int { return 10 }
+func (DRPCAuthServiceDescription) NumMethods() int { return 13 }
 
 func (DRPCAuthServiceDescription) Method(n int) (string, drpc.Encoding, drpc.Receiver, interface{}, bool) {
 	switch n {
@@ -301,6 +346,33 @@ func (DRPCAuthServiceDescription) Method(n int) (string, drpc.Encoding, drpc.Rec
 						in1.(*DisableTOTPRequest),
 					)
 			}, DRPCAuthServiceServer.DisableTOTP, true
+	case 10:
+		return "/gochat.v1.AuthService/ListSessions", drpcEncoding_File_gochat_v1_auth_proto{},
+			func(srv interface{}, ctx context.Context, in1, in2 interface{}) (drpc.Message, error) {
+				return srv.(DRPCAuthServiceServer).
+					ListSessions(
+						ctx,
+						in1.(*ListSessionsRequest),
+					)
+			}, DRPCAuthServiceServer.ListSessions, true
+	case 11:
+		return "/gochat.v1.AuthService/RevokeSession", drpcEncoding_File_gochat_v1_auth_proto{},
+			func(srv interface{}, ctx context.Context, in1, in2 interface{}) (drpc.Message, error) {
+				return srv.(DRPCAuthServiceServer).
+					RevokeSession(
+						ctx,
+						in1.(*RevokeSessionRequest),
+					)
+			}, DRPCAuthServiceServer.RevokeSession, true
+	case 12:
+		return "/gochat.v1.AuthService/RevokeSessions", drpcEncoding_File_gochat_v1_auth_proto{},
+			func(srv interface{}, ctx context.Context, in1, in2 interface{}) (drpc.Message, error) {
+				return srv.(DRPCAuthServiceServer).
+					RevokeSessions(
+						ctx,
+						in1.(*RevokeSessionsRequest),
+					)
+			}, DRPCAuthServiceServer.RevokeSessions, true
 	default:
 		return "", nil, nil, nil, false
 	}
@@ -504,6 +576,66 @@ func (x *drpcAuthService_DisableTOTPStream) GetStream() drpc.Stream {
 }
 
 func (x *drpcAuthService_DisableTOTPStream) SendAndClose(m *DisableTOTPResponse) error {
+	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_auth_proto{}); err != nil {
+		return err
+	}
+	return x.CloseSend()
+}
+
+type DRPCAuthService_ListSessionsStream interface {
+	drpc.Stream
+	SendAndClose(*ListSessionsResponse) error
+}
+
+type drpcAuthService_ListSessionsStream struct {
+	drpc.Stream
+}
+
+func (x *drpcAuthService_ListSessionsStream) GetStream() drpc.Stream {
+	return x.Stream
+}
+
+func (x *drpcAuthService_ListSessionsStream) SendAndClose(m *ListSessionsResponse) error {
+	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_auth_proto{}); err != nil {
+		return err
+	}
+	return x.CloseSend()
+}
+
+type DRPCAuthService_RevokeSessionStream interface {
+	drpc.Stream
+	SendAndClose(*RevokeSessionResponse) error
+}
+
+type drpcAuthService_RevokeSessionStream struct {
+	drpc.Stream
+}
+
+func (x *drpcAuthService_RevokeSessionStream) GetStream() drpc.Stream {
+	return x.Stream
+}
+
+func (x *drpcAuthService_RevokeSessionStream) SendAndClose(m *RevokeSessionResponse) error {
+	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_auth_proto{}); err != nil {
+		return err
+	}
+	return x.CloseSend()
+}
+
+type DRPCAuthService_RevokeSessionsStream interface {
+	drpc.Stream
+	SendAndClose(*RevokeSessionsResponse) error
+}
+
+type drpcAuthService_RevokeSessionsStream struct {
+	drpc.Stream
+}
+
+func (x *drpcAuthService_RevokeSessionsStream) GetStream() drpc.Stream {
+	return x.Stream
+}
+
+func (x *drpcAuthService_RevokeSessionsStream) SendAndClose(m *RevokeSessionsResponse) error {
 	if err := x.MsgSend(m, drpcEncoding_File_gochat_v1_auth_proto{}); err != nil {
 		return err
 	}

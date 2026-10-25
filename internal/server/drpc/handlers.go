@@ -19,6 +19,7 @@ import (
 	"github.com/ssenerg/gochat/internal/services/channels"
 	"github.com/ssenerg/gochat/internal/services/convert"
 	"github.com/ssenerg/gochat/internal/services/directory"
+	"github.com/ssenerg/gochat/internal/services/files"
 	"github.com/ssenerg/gochat/internal/services/index"
 )
 
@@ -44,6 +45,7 @@ func Mux(sys *services.System, storage *minio.Storage, cfg *services.Config) (*d
 		func() error { return pb.DRPCRegisterFileService(mux, &fileService{b}) },
 		func() error { return pb.DRPCRegisterUserService(mux, &userService{b}) },
 		func() error { return pb.DRPCRegisterGatewayService(mux, &gatewayService{b}) },
+		func() error { return pb.DRPCRegisterAdminService(mux, &adminService{b}) },
 		func() error { return pb.DRPCRegisterVoiceService(mux, &voiceService{b}) },
 		func() error { return pb.DRPCRegisterVoiceServerService(mux, &voiceServerService{b}) },
 	} {
@@ -60,7 +62,7 @@ func Resolve(sys *services.System) Resolver {
 		if p, ok := sys.Sessions.Cached(token); ok {
 			return p, nil
 		}
-		return actors.Ask[*models.Principal](ctx, sys.Engine, sys.Auth, accounts.Authenticate{Token: token})
+		return actors.Ask[*models.Principal](ctx, sys.Engine, sys.Auth, accounts.Authenticate{Token: token, IP: ClientOf(ctx).IP})
 	}
 }
 
@@ -84,7 +86,8 @@ func (s *authService) GetSignupInfo(ctx context.Context, req *pb.GetSignupInfoRe
 		return nil, err
 	}
 	return &pb.GetSignupInfoResponse{
-		Bootstrap: info.Bootstrap, SetupTokenRequired: info.SetupTokenRequired, Open: info.Open, InviteValid: info.InviteValid, TeamDisplayName: info.TeamDisplayName,
+		Bootstrap: info.Bootstrap, SetupTokenRequired: info.SetupTokenRequired, SetupClosed: info.SetupClosed,
+		Open: info.Open, InviteValid: info.InviteValid, TeamDisplayName: info.TeamDisplayName,
 	}, nil
 }
 
@@ -204,6 +207,78 @@ func (s *authService) DisableTOTP(ctx context.Context, req *pb.DisableTOTPReques
 	return &pb.DisableTOTPResponse{}, nil
 }
 
+func (s *authService) ListSessions(ctx context.Context, req *pb.ListSessionsRequest) (*pb.ListSessionsResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	list, err := actors.Ask[[]*pb.SessionInfo](ctx, s.sys.Engine, s.sys.Accounts, accounts.ListSessions{P: p, UserID: req.UserId})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ListSessionsResponse{Sessions: list}, nil
+}
+
+func (s *authService) RevokeSession(ctx context.Context, req *pb.RevokeSessionRequest) (*pb.RevokeSessionResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := actors.Ask[accounts.Done](ctx, s.sys.Engine, s.sys.Accounts, accounts.RevokeSession{P: p, SessionID: req.SessionId}); err != nil {
+		return nil, err
+	}
+	return &pb.RevokeSessionResponse{}, nil
+}
+
+func (s *authService) RevokeSessions(ctx context.Context, req *pb.RevokeSessionsRequest) (*pb.RevokeSessionsResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	n, err := actors.Ask[accounts.Revoked](ctx, s.sys.Engine, s.sys.Accounts, accounts.RevokeSessions{P: p, UserID: req.UserId})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.RevokeSessionsResponse{Revoked: int32(n)}, nil //nolint:gosec // bounded by the sessions one user holds
+}
+
+type adminService struct{ *base }
+
+func (s *adminService) FindUser(ctx context.Context, req *pb.FindUserRequest) (*pb.FindUserResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	u, err := actors.Ask[*models.User](ctx, s.sys.Engine, s.sys.Accounts, accounts.FindUser{P: p, Login: req.GetLogin(), UserID: req.GetUserId()})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.FindUserResponse{User: convert.User(u), Email: u.Email}, nil
+}
+
+func (s *adminService) SetUserDeactivated(ctx context.Context, req *pb.SetUserDeactivatedRequest) (*pb.SetUserDeactivatedResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	u, err := actors.Ask[*models.User](ctx, s.sys.Engine, s.sys.Accounts, accounts.SetDeactivated{P: p, UserID: req.UserId, Deactivated: req.Deactivated})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.SetUserDeactivatedResponse{User: convert.User(u)}, nil
+}
+
+func (s *adminService) SetStorageQuota(ctx context.Context, req *pb.SetStorageQuotaRequest) (*pb.SetStorageQuotaResponse, error) {
+	p, err := Principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := actors.Ask[files.Done](ctx, s.sys.Engine, s.sys.Files, files.SetQuota{P: p, UserID: req.UserId, Quota: req.Quota}); err != nil {
+		return nil, err
+	}
+	return &pb.SetStorageQuotaResponse{}, nil
+}
+
 type teamService struct{ *base }
 
 func (s *teamService) CreateTeam(ctx context.Context, req *pb.CreateTeamRequest) (*pb.CreateTeamResponse, error) {
@@ -249,13 +324,9 @@ func (s *teamService) ListTeamMembers(ctx context.Context, req *pb.ListTeamMembe
 	if err != nil {
 		return nil, err
 	}
-	members, err := actors.Ask[[]*pb.TeamMember](ctx, s.sys.Engine, s.sys.Directory, directory.ListTeamMembers{
-		P: p, TeamID: req.TeamId, Query: req.Query, Limit: int(req.Limit),
+	return actors.Ask[*pb.ListTeamMembersResponse](ctx, s.sys.Engine, s.sys.Directory, directory.ListTeamMembers{
+		P: p, TeamID: req.TeamId, Query: req.Query, Limit: int(req.Limit), After: req.After,
 	})
-	if err != nil {
-		return nil, err
-	}
-	return &pb.ListTeamMembersResponse{Members: members}, nil
 }
 
 func (s *teamService) RemoveTeamMember(ctx context.Context, req *pb.RemoveTeamMemberRequest) (*pb.RemoveTeamMemberResponse, error) {
@@ -323,11 +394,7 @@ func (s *teamService) ListInvites(ctx context.Context, req *pb.ListInvitesReques
 	if err != nil {
 		return nil, err
 	}
-	invs, err := actors.Ask[[]*pb.InviteSummary](ctx, s.sys.Engine, s.sys.Directory, directory.ListInvites{P: p, TeamID: req.TeamId})
-	if err != nil {
-		return nil, err
-	}
-	return &pb.ListInvitesResponse{Invites: invs}, nil
+	return actors.Ask[*pb.ListInvitesResponse](ctx, s.sys.Engine, s.sys.Directory, directory.ListInvites{P: p, TeamID: req.TeamId, After: req.After})
 }
 
 func (s *teamService) RevokeInvite(ctx context.Context, req *pb.RevokeInviteRequest) (*pb.RevokeInviteResponse, error) {
@@ -498,7 +565,7 @@ func (s *channelService) OpenDirectChannel(ctx context.Context, req *pb.OpenDire
 	if err != nil {
 		return nil, err
 	}
-	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Directory, directory.OpenDirect{P: p, UserID: req.UserId})
+	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Directory, directory.OpenDirect{P: p, TeamID: req.TeamId, UserID: req.UserId})
 	if err != nil {
 		return nil, err
 	}
@@ -541,6 +608,17 @@ func (s *channelService) ArchiveChannel(ctx context.Context, req *pb.ArchiveChan
 	return &pb.ArchiveChannelResponse{Channel: ch}, nil
 }
 
+func (s *channelService) DeleteConversation(ctx context.Context, req *pb.DeleteConversationRequest) (*pb.DeleteConversationResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := actors.Ask[channels.Done](ctx, s.sys.Engine, s.sys.Channels, channels.DeleteConversation{Target: t, Everyone: req.Everyone}); err != nil {
+		return nil, err
+	}
+	return &pb.DeleteConversationResponse{}, nil
+}
+
 func (s *channelService) OpenGroupChannel(ctx context.Context, req *pb.OpenGroupChannelRequest) (*pb.OpenGroupChannelResponse, error) {
 	p, err := Principal(ctx)
 	if err != nil {
@@ -549,7 +627,7 @@ func (s *channelService) OpenGroupChannel(ctx context.Context, req *pb.OpenGroup
 	if len(req.UserIds) > 16 {
 		return nil, ierrors.InvalidArgument("too many people")
 	}
-	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Directory, directory.OpenGroup{P: p, UserIDs: req.UserIds})
+	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Directory, directory.OpenGroup{P: p, TeamID: req.TeamId, UserIDs: req.UserIds})
 	if err != nil {
 		return nil, err
 	}

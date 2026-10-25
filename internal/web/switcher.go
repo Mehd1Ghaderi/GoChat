@@ -45,7 +45,7 @@ func (h *Handler) switcher(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "switcher", switcherView{Team: team, Items: items})
+	h.fragment(w, r, http.StatusOK, "switcher", switcherView{Team: team, Items: items})
 }
 
 func (h *Handler) switcherResults(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +59,7 @@ func (h *Handler) switcherResults(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.fragment(w, http.StatusOK, "switch-results", switcherView{Team: team, Items: items})
+	h.fragment(w, r, http.StatusOK, "switch-results", switcherView{Team: team, Items: items})
 }
 
 // rankOf scores how well q names title: lower is better, -1 not at all.

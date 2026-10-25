@@ -1,6 +1,7 @@
 package scylla
 
 import (
+	"bytes"
 	"context"
 	"slices"
 	"time"
@@ -26,7 +27,20 @@ type TeamMemberEntry struct {
 	DisplayName string `db:"display_name"`
 }
 
-func (r *Repository) CreateTeam(ctx context.Context, t *models.Team) error {
+// NewTeam is a team as it is created: its creator, an admin, in each of its
+// first channels.
+type NewTeam struct {
+	Team                  *models.Team
+	Creator               *models.TeamMember
+	Username, DisplayName string
+	Channels              []*models.Channel
+}
+
+// CreateTeam claims the team's name, then writes the rest in one logged
+// batch, so a team never exists without its creator and channels. The
+// names of a new team's channels cannot be taken yet: they need no claim.
+func (r *Repository) CreateTeam(ctx context.Context, n *NewTeam) error {
+	t, m := n.Team, n.Creator
 	ok, err := r.claim(ctx, "INSERT INTO team_names (name, team_id) VALUES (?, ?) IF NOT EXISTS",
 		"SELECT team_id FROM team_names WHERE name = ?", "team_id", t.ID, t.Name)
 	if err != nil {
@@ -35,11 +49,25 @@ func (r *Repository) CreateTeam(ctx context.Context, t *models.Team) error {
 	if !ok {
 		return ierrors.AlreadyExists("team name is taken")
 	}
-	err = r.query(ctx, "INSERT INTO teams ("+teamWritten+") VALUES (?, ?, ?, ?, ?, ?)",
-		t.ID, t.Name, t.DisplayName, t.Description, t.CreatedBy, t.CreatedAt).ExecRelease()
-	if err != nil {
+	b := r.batch(ctx, true)
+	b.Query("INSERT INTO teams ("+teamWritten+") VALUES (?, ?, ?, ?, ?, ?)",
+		t.ID, t.Name, t.DisplayName, t.Description, t.CreatedBy, t.CreatedAt)
+	b.Query("INSERT INTO team_members (team_id, user_id, role, username, display_name, joined_at) VALUES (?, ?, ?, ?, ?, ?)",
+		m.TeamID, m.UserID, string(m.Role), n.Username, n.DisplayName, m.JoinedAt)
+	b.Query("INSERT INTO user_teams (user_id, team_id, role, joined_at) VALUES (?, ?, ?, ?)",
+		m.UserID, m.TeamID, string(m.Role), m.JoinedAt)
+	for _, ch := range n.Channels {
+		b.Query("INSERT INTO channel_names (team_id, name, channel_id) VALUES (?, ?, ?)", ch.TeamID, ch.Name, ch.ID)
+		b.Query("INSERT INTO channels (id, team_id, name, display_name, purpose, kind, created_by, created_at, voice_disabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			ch.ID, ch.TeamID, ch.Name, ch.DisplayName, ch.Purpose, string(ch.Kind), ch.CreatedBy, ch.CreatedAt, ch.VoiceDisabled)
+		b.Query("INSERT INTO team_channels (team_id, channel_id, kind) VALUES (?, ?, ?)", ch.TeamID, ch.ID, string(ch.Kind))
+		addMemberQueries(b, &models.ChannelMember{ChannelID: ch.ID, UserID: m.UserID, TeamID: t.ID, Role: models.ChannelRoleAdmin, JoinedAt: m.JoinedAt})
+	}
+	// A logged batch that timed out is replayed from the batch log, so its
+	// claim stays.
+	if err := r.execBatch(b); err != nil {
 		r.release(err, "DELETE FROM team_names WHERE name = ? IF team_id = ?", t.Name, t.ID)
-		return wrap(err)
+		return err
 	}
 	return nil
 }
@@ -174,17 +202,53 @@ func (r *Repository) GetInvite(ctx context.Context, hash []byte) (*models.Invite
 	return &inv, nil
 }
 
-// ListTeamInvites returns at most limit of the team's invites, newest first,
-// leaving out those used, expired or revoked.
-func (r *Repository) ListTeamInvites(ctx context.Context, teamID gocql.UUID, limit int) ([]*models.Invite, error) {
+const teamInviteColumns = "team_id, token_hash, created_by, created_at, expires_at"
+
+// ListTeamInvites returns the invites listed for the team and not expired,
+// in no order. Some may have been used: OpenInvites tells.
+func (r *Repository) ListTeamInvites(ctx context.Context, teamID gocql.UUID) ([]*models.Invite, error) {
 	var listed []*models.Invite
-	err := r.query(ctx, "SELECT team_id, token_hash, created_by, created_at, expires_at FROM team_invites WHERE team_id = ? LIMIT ?",
-		teamID, limit).SelectRelease(&listed)
+	err := r.query(ctx, "SELECT "+teamInviteColumns+" FROM team_invites WHERE team_id = ?", teamID).SelectRelease(&listed)
 	if err != nil {
 		return nil, wrap(err)
 	}
-	// The list is cleaned as invites are used, but the invites themselves
-	// decide what is open.
+	now := time.Now()
+	return slices.DeleteFunc(listed, func(inv *models.Invite) bool { return !now.Before(inv.ExpiresAt) }), nil
+}
+
+// FindTeamInvites returns the team's listed invites whose token hash starts
+// with prefix.
+func (r *Repository) FindTeamInvites(ctx context.Context, teamID gocql.UUID, prefix []byte) ([]*models.Invite, error) {
+	var listed []*models.Invite
+	q := "SELECT " + teamInviteColumns + " FROM team_invites WHERE team_id = ? AND token_hash >= ?"
+	args := []any{teamID, prefix}
+	if end := prefixEnd(prefix); end != nil {
+		q += " AND token_hash < ?"
+		args = append(args, end)
+	}
+	if err := r.query(ctx, q, args...).SelectRelease(&listed); err != nil {
+		return nil, wrap(err)
+	}
+	return slices.DeleteFunc(listed, func(inv *models.Invite) bool { return !bytes.HasPrefix(inv.TokenHash, prefix) }), nil
+}
+
+// prefixEnd is the first blob after every blob starting with prefix, nil
+// when there is none.
+func prefixEnd(prefix []byte) []byte {
+	end := bytes.Clone(prefix)
+	for i := len(end) - 1; i >= 0; i-- {
+		if end[i] < 0xff {
+			end[i]++
+			return end[:i+1]
+		}
+	}
+	return nil
+}
+
+// OpenInvites keeps the invites of teamID that are neither used, revoked
+// nor expired. The team's list is cleaned as invites are used, but the
+// invites themselves decide.
+func (r *Repository) OpenInvites(ctx context.Context, teamID gocql.UUID, listed []*models.Invite) ([]*models.Invite, error) {
 	open := make(map[string]bool, len(listed))
 	now := time.Now()
 	for chunk := range slices.Chunk(listed, 100) {
@@ -202,8 +266,12 @@ func (r *Repository) ListTeamInvites(ctx context.Context, teamID gocql.UUID, lim
 			}
 		}
 	}
-	out := slices.DeleteFunc(listed, func(inv *models.Invite) bool { return !open[string(inv.TokenHash)] })
-	slices.SortFunc(out, func(a, b *models.Invite) int { return b.CreatedAt.Compare(a.CreatedAt) })
+	out := make([]*models.Invite, 0, len(listed))
+	for _, inv := range listed {
+		if open[string(inv.TokenHash)] {
+			out = append(out, inv)
+		}
+	}
 	return out, nil
 }
 

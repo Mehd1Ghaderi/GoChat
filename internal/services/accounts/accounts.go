@@ -20,6 +20,7 @@ import (
 	"github.com/ssenerg/gochat/internal/authz"
 	"github.com/ssenerg/gochat/internal/core/cache"
 	"github.com/ssenerg/gochat/internal/core/ids"
+	"github.com/ssenerg/gochat/internal/core/keylock"
 	"github.com/ssenerg/gochat/internal/core/models"
 	"github.com/ssenerg/gochat/internal/core/password"
 	"github.com/ssenerg/gochat/internal/core/secure"
@@ -54,6 +55,9 @@ type Repo interface {
 	GetSession(ctx context.Context, hash []byte) (*models.Session, error)
 	DeleteSession(ctx context.Context, hash []byte, userID gocql.UUID) error
 	DeleteUserSessions(ctx context.Context, userID gocql.UUID, keep []byte) ([][]byte, error)
+	ListUserSessions(ctx context.Context, userID gocql.UUID) ([]*models.Session, error)
+	TouchSession(ctx context.Context, s *models.Session, at time.Time, ip string) error
+	SetDeactivated(ctx context.Context, id gocql.UUID, deactivated bool, now time.Time) error
 	CreateMFAChallenge(ctx context.Context, c *models.MFAChallenge, now time.Time) error
 	GetMFAChallenge(ctx context.Context, hash []byte) (*models.MFAChallenge, error)
 	CountMFAAttempt(ctx context.Context, c *models.MFAChallenge, now time.Time) (bool, error)
@@ -65,73 +69,6 @@ type Repo interface {
 	ConsumeInvite(ctx context.Context, inv *models.Invite, userID gocql.UUID, now time.Time) (bool, error)
 	ReleaseInvite(ctx context.Context, inv *models.Invite, userID gocql.UUID, now time.Time) error
 }
-
-type SignupInfo struct{ InviteToken string }
-
-type SignupInfoResult struct {
-	Bootstrap          bool
-	SetupTokenRequired bool
-	Open               bool
-	InviteValid        bool
-	TeamDisplayName    string
-}
-
-type SignUp struct {
-	Username, Email, DisplayName, Password, InviteToken, SetupToken string
-	IP, UserAgent                                                   string
-}
-
-type SignUpResult struct {
-	Session *pb.Session
-	User    *models.User
-	// InviteTeamID is the team the consumed invite admits the user to, and
-	// InviteHash that invite's.
-	InviteTeamID gocql.UUID
-	InviteHash   []byte
-}
-
-type Login struct {
-	Login, Password, IP, UserAgent string
-}
-
-type LoginResult struct {
-	Session  *pb.Session
-	MFAToken string
-}
-
-type VerifyMFA struct {
-	Token, Code, IP, UserAgent string
-}
-
-type Authenticate struct{ Token string }
-
-type Logout struct{ P *models.Principal }
-
-type ChangePassword struct {
-	P                    *models.Principal
-	Current, NewPassword string
-}
-
-type BeginTOTP struct {
-	P        *models.Principal
-	Password string
-}
-
-type TOTPSetup struct{ Secret, URL string }
-
-type ConfirmTOTP struct {
-	P    *models.Principal
-	Code string
-}
-
-type RecoveryCodes []string
-
-type DisableTOTP struct {
-	P              *models.Principal
-	Password, Code string
-}
-
-type Done struct{}
 
 const recoveryCodeCount = 10
 
@@ -161,6 +98,9 @@ type Deps struct {
 	failures        *window.Counter
 	// accountFailures counts failed sign-ins per account from every address.
 	accountFailures *window.Counter
+	// totp serializes each user's two-factor changes, so the recovery codes
+	// a confirmation shows are the ones it stored.
+	totp *keylock.Locks
 }
 
 func NewDeps(logger *zap.Logger, cfg *Config, repo Repo, userCache *users.Cache, az *authz.Authorizer, engine *actor.Engine, hubPID *actor.PID) (*Deps, error) {
@@ -186,6 +126,7 @@ func NewDeps(logger *zap.Logger, cfg *Config, repo Repo, userCache *users.Cache,
 		revokedSessions: cache.New[string, struct{}](cfg.SessionCacheSize, cfg.SessionCacheTTL+cfg.OpTimeout),
 		failures:        window.New(cfg.LoginFailures, cfg.LoginWindow),
 		accountFailures: window.New(cfg.LoginFailures*accountFailureFactor, cfg.LoginWindow),
+		totp:            keylock.New(),
 	}, nil
 }
 
@@ -226,17 +167,27 @@ func (w *worker) Receive(c *actor.Context) {
 	case VerifyMFA:
 		out, err = w.verifyMFA(ctx, msg)
 	case Authenticate:
-		out, err = w.authenticate(ctx, msg.Token)
+		out, err = w.authenticate(ctx, msg)
 	case Logout:
 		out, err = w.logout(ctx, msg.P)
 	case ChangePassword:
 		out, err = w.changePassword(ctx, msg)
 	case BeginTOTP:
-		out, err = w.beginTOTP(ctx, msg)
+		out, err = lockTOTP(ctx, w, msg.P, msg, w.beginTOTP)
 	case ConfirmTOTP:
-		out, err = w.confirmTOTP(ctx, msg)
+		out, err = lockTOTP(ctx, w, msg.P, msg, w.confirmTOTP)
 	case DisableTOTP:
-		out, err = w.disableTOTP(ctx, msg)
+		out, err = lockTOTP(ctx, w, msg.P, msg, w.disableTOTP)
+	case ListSessions:
+		out, err = w.listSessions(ctx, msg)
+	case RevokeSession:
+		out, err = w.revokeSession(ctx, msg)
+	case RevokeSessions:
+		out, err = w.revokeSessions(ctx, msg)
+	case FindUser:
+		out, err = w.findUser(ctx, msg)
+	case SetDeactivated:
+		out, err = w.setDeactivated(ctx, msg)
 	default:
 		return
 	}
@@ -259,7 +210,12 @@ func (w *worker) signupInfo(ctx context.Context, msg SignupInfo) (*SignupInfoRes
 	if err != nil {
 		return nil, err
 	}
-	out := &SignupInfoResult{Bootstrap: !bootstrapped, SetupTokenRequired: !bootstrapped && w.Cfg.SetupToken != "", Open: w.Cfg.OpenSignup}
+	out := &SignupInfoResult{
+		Bootstrap:          !bootstrapped,
+		SetupTokenRequired: !bootstrapped && w.Cfg.SetupToken != "",
+		SetupClosed:        !bootstrapped && w.setupClosed(),
+		Open:               w.Cfg.OpenSignup,
+	}
 	if msg.InviteToken != "" {
 		if inv, err := w.validInvite(ctx, msg.InviteToken); err == nil {
 			if team, err := w.Repo.GetTeam(ctx, inv.TeamID); err == nil {
@@ -313,6 +269,9 @@ func (w *worker) signUp(ctx context.Context, msg SignUp) (*SignUpResult, error) 
 	}
 	claimed := false
 	if !bootstrapped && inv == nil {
+		if w.setupClosed() {
+			return nil, errSetupClosed
+		}
 		if w.Cfg.SetupToken != "" && !secure.Equal(msg.SetupToken, w.Cfg.SetupToken) {
 			return nil, ierrors.New(ierrors.CodePermissionDenied, "the setup token is not correct")
 		}
@@ -361,6 +320,24 @@ func (w *worker) signUp(ctx context.Context, msg SignUp) (*SignUpResult, error) 
 		out.InviteTeamID, out.InviteHash = inv.TeamID, inv.TokenHash
 	}
 	return out, nil
+}
+
+var errSetupClosed = ierrors.FailedPrecondition("the first account needs a setup token: set services.accounts.setup_token on the server")
+
+// setupClosed reports whether the first account may not be created: without
+// a setup token, whoever reaches the server first would become its admin.
+func (d *Deps) setupClosed() bool {
+	return d.Cfg.SetupToken == "" && !d.Cfg.AllowOpenBootstrap
+}
+
+// WarnIfSetupClosed logs how to create the first account when none can be.
+func (d *Deps) WarnIfSetupClosed(ctx context.Context) {
+	if !d.setupClosed() {
+		return
+	}
+	if done, err := d.Repo.Bootstrapped(ctx); err == nil && !done {
+		d.Logger.Warn("no account exists and no setup token is set: set services.accounts.setup_token to create the first admin")
+	}
 }
 
 func (w *worker) newSession(ctx context.Context, user *models.User, ip, ua string) (*pb.Session, error) {
@@ -571,11 +548,11 @@ func (w *worker) checkSecondFactor(ctx context.Context, user *models.User, code 
 	return w.Repo.AdvanceTOTPStep(ctx, user.ID, step)
 }
 
-func (w *worker) authenticate(ctx context.Context, token string) (*models.Principal, error) {
-	if !secure.ValidToken(token) {
+func (w *worker) authenticate(ctx context.Context, msg Authenticate) (*models.Principal, error) {
+	if !secure.ValidToken(msg.Token) {
 		return nil, ierrors.Unauthenticated()
 	}
-	hash := secure.Hash(token)
+	hash := secure.Hash(msg.Token)
 	now := time.Now()
 	if p, ok := w.sessions.Get(string(hash)); ok && now.Before(p.ExpiresAt) {
 		return p, nil
@@ -590,6 +567,13 @@ func (w *worker) authenticate(ctx context.Context, token string) (*models.Princi
 	if !now.Before(s.ExpiresAt) {
 		return nil, ierrors.Unauthenticated()
 	}
+	if t := w.Cfg.SessionIdleTimeout; t > 0 && now.Sub(lastActive(s)) > t {
+		if err := w.Repo.DeleteSession(ctx, hash, s.UserID); err != nil {
+			w.Logger.Warn("failed to end an idle session", zap.Error(err))
+		}
+		w.revoked(s.UserID, [][]byte{hash}, false)
+		return nil, ierrors.Unauthenticated()
+	}
 	user, err := w.Repo.GetUser(ctx, s.UserID)
 	if err != nil {
 		if ierrors.Is(err, ierrors.CodeNotFound) {
@@ -600,6 +584,7 @@ func (w *worker) authenticate(ctx context.Context, token string) (*models.Princi
 	if user.Deactivated {
 		return nil, ierrors.Unauthenticated()
 	}
+	w.touch(ctx, s, now, msg.IP)
 	p := &models.Principal{
 		UserID:      user.ID,
 		Role:        user.Role,
@@ -615,18 +600,34 @@ func (w *worker) authenticate(ctx context.Context, token string) (*models.Princi
 	return p, nil
 }
 
+// touch records that s is in use, at most every LastSeenInterval unless it
+// moved to another address.
+func (w *worker) touch(ctx context.Context, s *models.Session, now time.Time, ip string) {
+	ip = truncate(ip, 64)
+	if ip == "" {
+		ip = s.LastIP
+	}
+	if now.Sub(s.LastSeen) < w.Cfg.LastSeenInterval && ip == s.LastIP {
+		return
+	}
+	if err := w.Repo.TouchSession(ctx, s, now.UTC(), ip); err != nil {
+		w.Logger.Warn("failed to record a session's use", zap.Error(err))
+	}
+}
+
 func (w *worker) logout(ctx context.Context, p *models.Principal) (Done, error) {
 	if err := w.Repo.DeleteSession(ctx, p.SessionHash, p.UserID); err != nil {
 		return Done{}, err
 	}
 	w.sessions.Delete(string(p.SessionHash))
-	w.revoked(p.UserID, [][]byte{p.SessionHash})
+	w.revoked(p.UserID, [][]byte{p.SessionHash}, false)
 	return Done{}, nil
 }
 
-// revoked forgets revoked sessions and closes the connections they opened.
-func (w *worker) revoked(userID gocql.UUID, hashes [][]byte) {
-	if len(hashes) == 0 {
+// revoked forgets revoked sessions and closes the connections they opened,
+// or with all every connection of the user.
+func (w *worker) revoked(userID gocql.UUID, hashes [][]byte, all bool) {
+	if len(hashes) == 0 && !all {
 		return
 	}
 	idList := make([]string, len(hashes))
@@ -635,9 +636,9 @@ func (w *worker) revoked(userID gocql.UUID, hashes [][]byte) {
 		w.sessions.Delete(string(h))
 		idList[i] = secure.PublicID(h)
 	}
-	w.Engine.Send(w.Hub, hub.RevokeSessions{UserID: userID.String(), SessionIDs: idList})
+	w.Engine.Send(w.Hub, hub.RevokeSessions{UserID: userID.String(), SessionIDs: idList, All: all})
 	if w.Voice != nil {
-		w.Engine.Send(w.Voice, voice.RevokeSessions{UserID: userID, SessionIDs: idList})
+		w.Engine.Send(w.Voice, voice.RevokeSessions{UserID: userID, SessionIDs: idList, All: all})
 	}
 }
 
@@ -676,11 +677,22 @@ func (w *worker) changePassword(ctx context.Context, msg ChangePassword) (Done, 
 		return Done{}, err
 	}
 	revoked, err := w.Repo.DeleteUserSessions(ctx, user.ID, msg.P.SessionHash)
-	w.revoked(user.ID, revoked)
+	w.revoked(user.ID, revoked, false)
 	if err != nil {
 		return Done{}, err
 	}
 	return Done{}, nil
+}
+
+// lockTOTP runs fn holding the caller's two-factor settings.
+func lockTOTP[M, T any](ctx context.Context, w *worker, p *models.Principal, msg M, fn func(context.Context, M) (T, error)) (T, error) {
+	unlock, err := w.totp.Lock(ctx, p.UserID.String())
+	if err != nil {
+		var zero T
+		return zero, ierrors.Unavailable("busy, try again")
+	}
+	defer unlock()
+	return fn(ctx, msg)
 }
 
 func (w *worker) beginTOTP(ctx context.Context, msg BeginTOTP) (*TOTPSetup, error) {

@@ -37,6 +37,8 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.time.TimeSource
@@ -116,6 +118,13 @@ class ChatSession internal constructor(
 
     internal fun start() {
         scope.launch { gateway.messages.collect { handle(it) } }
+        // Presence reaches only the sockets that show the person: the
+        // sidebar shows the conversations' people.
+        scope.launch {
+            _state.map { st -> st.channels.flatMap { ch -> listOfNotNull(ch.peer?.id) + ch.peers.map { it.id } }.distinct().sorted() }
+                .distinctUntilChanged()
+                .collect { gateway.watch(it) }
+        }
         scope.launch {
             gateway.connection.collect { c ->
                 _state.update { it.copy(connection = c) }
@@ -229,6 +238,8 @@ class ChatSession internal constructor(
     fun setVisible(channelId: String?, rootId: String? = null) {
         visibleChannel = channelId
         visibleThread = rootId
+        // Who types reaches only the sockets that show the channel.
+        gateway.view(channelId)
         if (channelId != null) markRead(channelId)
         if (channelId != null && rootId != null) {
             scope.launch { runCatching { api.markThreadRead(channelId, rootId) } }
@@ -294,9 +305,10 @@ class ChatSession internal constructor(
         threads[rootId]?.setFollowing(follow)
     }
 
-    /** Opens, or creates, the conversation with [userIds]. */
+    /** Opens, or creates, the conversation with [userIds] in the team on screen. */
     suspend fun openConversation(userIds: List<String>): Channel {
-        val ch = if (userIds.size == 1) api.openDirect(userIds[0]) else api.openGroup(userIds)
+        val team = _state.value.teamId ?: throw ApiException(0, "Pick a team first.")
+        val ch = if (userIds.size == 1) api.openDirect(team, userIds[0]) else api.openGroup(team, userIds)
         if (ch != null) addChannel(ch)
         return ch ?: throw ApiException(0, "The server opened no conversation.")
     }
@@ -369,7 +381,8 @@ class ChatSession internal constructor(
         }
         ev.reactions_changed?.let { applyReactions(it.channel_id, it.message_id, it.root_id, it.reactions) }
         ev.channel_joined?.channel?.let { ch ->
-            if (ch.isConversation || ch.team_id == st.teamId) addChannel(ch)
+            // Conversations belong to a team, as channels do.
+            if (ch.team_id == st.teamId || (ch.isConversation && ch.team_id.isEmpty())) addChannel(ch)
         }
         ev.channel_left?.let { left ->
             _state.update { s -> s.copy(channels = s.channels.filter { it.id != left.channel_id }) }

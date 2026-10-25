@@ -51,7 +51,8 @@ iosApp/      the Xcode project: a SwiftUI shell that shows the shared screens
 - Voice messages: record, send and play. Both apps record AAC in MP4,
   which the server takes and every platform plays.
 - Browse, create, mute and leave channels; moderators rename them, change
-  their privacy, turn voice messages on or off and archive them.
+  their privacy, turn voice messages on or off and archive them. Conversations
+  belong to the team they were opened in, as on the web.
 - Profile name and photo, status with do not disturb, custom status,
   password, sign-out.
 
@@ -126,8 +127,9 @@ on a phone is the phone. In `.env`, with your address:
 
 ```bash
 WEB_BIND=0.0.0.0
-# Voice channels: the signaling websocket and the voice itself, at this
-# computer's address.
+# Voice channels: on with a key of their own (`openssl rand -hex 32`), the
+# signaling websocket and the voice itself at this computer's address.
+VOICE_SERVER_KEY=...
 VOICE_BIND=0.0.0.0
 VOICE_PUBLIC_URL=ws://192.168.1.20:8090/rtc
 WEB_VOICE_ORIGINS=ws://192.168.1.20:8090

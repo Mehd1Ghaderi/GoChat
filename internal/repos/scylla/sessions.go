@@ -27,13 +27,26 @@ func (r *Repository) CreateSession(ctx context.Context, s *models.Session) error
 	return r.execBatch(b)
 }
 
+const sessionColumns = "token_hash, user_id, created_at, expires_at, ip, user_agent, last_seen, last_ip"
+
 func (r *Repository) GetSession(ctx context.Context, hash []byte) (*models.Session, error) {
 	var s models.Session
-	err := r.query(ctx, "SELECT token_hash, user_id, created_at, expires_at, ip, user_agent FROM sessions WHERE token_hash = ?", hash).GetRelease(&s)
+	err := r.query(ctx, "SELECT "+sessionColumns+" FROM sessions WHERE token_hash = ?", hash).GetRelease(&s)
 	if err != nil {
 		return nil, wrap(err)
 	}
 	return &s, nil
+}
+
+// TouchSession records when s was last used, and from where. A session revoked
+// meanwhile leaves a row with no user and no expiry, which reads as gone and
+// lives no longer than the session would have.
+func (r *Repository) TouchSession(ctx context.Context, s *models.Session, at time.Time, ip string) error {
+	ttl := ttlSeconds(s.ExpiresAt, at)
+	b := r.batch(ctx, false)
+	b.Query("UPDATE sessions USING TTL ? SET last_seen = ?, last_ip = ? WHERE token_hash = ?", ttl, at, ip, s.TokenHash)
+	b.Query("UPDATE user_sessions USING TTL ? SET last_seen = ?, last_ip = ? WHERE user_id = ? AND token_hash = ?", ttl, at, ip, s.UserID, s.TokenHash)
+	return r.execBatch(b)
 }
 
 func (r *Repository) DeleteSession(ctx context.Context, hash []byte, userID gocql.UUID) error {
@@ -45,7 +58,7 @@ func (r *Repository) DeleteSession(ctx context.Context, hash []byte, userID gocq
 
 func (r *Repository) ListUserSessions(ctx context.Context, userID gocql.UUID) ([]*models.Session, error) {
 	var out []*models.Session
-	err := r.query(ctx, "SELECT token_hash, user_id, created_at, expires_at, ip, user_agent FROM user_sessions WHERE user_id = ?", userID).SelectRelease(&out)
+	err := r.query(ctx, "SELECT "+sessionColumns+" FROM user_sessions WHERE user_id = ?", userID).SelectRelease(&out)
 	return out, wrap(err)
 }
 

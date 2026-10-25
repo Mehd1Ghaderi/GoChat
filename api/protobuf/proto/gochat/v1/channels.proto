@@ -30,7 +30,18 @@ service ChannelService {
   // Lets the channel's members post voice messages, or stops them. Channel
   // and team admins may change it.
   rpc SetChannelVoice(SetChannelVoiceRequest) returns (SetChannelVoiceResponse);
+  // DeleteConversation clears a direct conversation's history for the
+  // caller, who sees it again with the next message; with everyone set it
+  // deletes the conversation for both people.
+  rpc DeleteConversation(DeleteConversationRequest) returns (DeleteConversationResponse);
 }
+
+message DeleteConversationRequest {
+  string channel_id = 1;
+  bool everyone = 2;
+}
+
+message DeleteConversationResponse {}
 
 message SetChannelVoiceRequest {
   string channel_id = 1;
@@ -165,6 +176,8 @@ message ListChannelMembersResponse {
 
 message OpenDirectChannelRequest {
   string user_id = 1;
+  // The team the conversation belongs to.
+  string team_id = 2;
 }
 
 message OpenDirectChannelResponse {
@@ -173,6 +186,8 @@ message OpenDirectChannelResponse {
 
 message OpenGroupChannelRequest {
   repeated string user_ids = 1;
+  // The team the conversation belongs to.
+  string team_id = 2;
 }
 
 message OpenGroupChannelResponse {
