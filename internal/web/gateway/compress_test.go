@@ -103,12 +103,13 @@ func TestSocketsCompress(t *testing.T) {
 	if ext := res.Header.Get("Sec-WebSocket-Extensions"); !strings.Contains(ext, "permessage-deflate") || !strings.Contains(ext, "server_no_context_takeover") {
 		t.Fatalf("negotiated %q", ext)
 	}
-	before := wire.Load()
+	// Counted from the dial: reading the handshake may take the frame's
+	// first bytes too.
 	_, got, err := conn.Read(context.Background())
 	if err != nil || !bytes.Equal(got, sidebar) {
 		t.Fatalf("read %d bytes, %v", len(got), err)
 	}
-	if sent := wire.Load() - before; sent > int64(len(sidebar))/3 {
+	if sent := wire.Load(); sent > int64(len(sidebar))/3 {
 		t.Fatalf("%d bytes of sidebar took %d on the wire", len(sidebar), sent)
 	}
 	// Without compression, the same bytes go as they are.
@@ -118,11 +119,10 @@ func TestSocketsCompress(t *testing.T) {
 	if ext := res.Header.Get("Sec-WebSocket-Extensions"); ext != "" {
 		t.Fatalf("negotiated %q with compression off", ext)
 	}
-	before = wire.Load()
 	if _, _, err := conn.Read(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if sent := wire.Load() - before; sent < int64(len(sidebar)) {
+	if sent := wire.Load(); sent < int64(len(sidebar)) {
 		t.Fatalf("%d bytes of sidebar took %d on the wire uncompressed", len(sidebar), sent)
 	}
 }
