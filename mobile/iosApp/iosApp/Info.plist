@@ -25,7 +25,14 @@
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>GoChat records the voice messages you send.</string>
+	<string>GoChat records the voice messages you send and carries your voice in voice channels.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>GoChat connects to a GoChat server on your local network.</string>
+	<!-- A voice channel's call goes on with the screen locked or another app open. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<!-- HTTPS everywhere, except a development server on the local network. -->

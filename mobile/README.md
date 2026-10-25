@@ -31,7 +31,9 @@ iosApp/      the Xcode project: a SwiftUI shell that shows the shared screens
   `AVAudioRecorder`/`AVAudioPlayer`), the file picker and sharing. Android
   supplies WebRTC too, from [Stream's build](https://github.com/GetStream/webrtc-android)
   of Google's library, and a foreground service that keeps a call going
-  with the screen off.
+  with the screen off. On iOS, WebRTC comes from [stasel/WebRTC](https://github.com/stasel/WebRTC),
+  a Swift package the Xcode project links: `VoiceRtc.swift` implements the
+  small protocols of `IosRtc.kt`, which adapt it to the core's `RtcEngine`.
 
 ## What the apps do
 
@@ -39,10 +41,10 @@ iosApp/      the Xcode project: a SwiftUI shell that shows the shared screens
   invite link.
 - Teams, channels, voice channels, direct and group conversations, with
   presence, unread marks and mention counts, all live.
-- Voice channels, on Android: join, talk, mute, deafen and leave, see who
-  is talking, and, as a moderator, disconnect people. The call goes on in the
-  background, on the loudspeaker or a headset, rejoins after a network
-  change, and can be left from its notification. The iOS app shows who talks.
+- Voice channels: join, talk, mute, deafen and leave, see who is talking,
+  and, as a moderator, disconnect people. The call goes on in the
+  background, on the loudspeaker or a headset, and rejoins after a network
+  change; on Android it can be left from its notification.
 - Messages with Markdown, mentions, emoji, images, files, reactions,
   threads, edits, deletes, pins and saves; typing indicators; search;
   followed threads; saved messages.
@@ -55,8 +57,6 @@ iosApp/      the Xcode project: a SwiftUI shell that shows the shared screens
 
 Not in the apps yet:
 
-- **Talking in voice channels on iOS.** It needs WebRTC for iOS linked into
-  the app; the core's `VoiceCall` is ready for it.
 - **Push notifications while the app is closed.** The apps show notices
   while they run. Web Push reaches browsers only: the apps would need
   Firebase Cloud Messaging on Android and APNs on iOS.
@@ -77,7 +77,9 @@ cd mobile
 
 **iOS**: a Mac with Xcode 16 or later. Open `iosApp/iosApp.xcodeproj`, choose
 your team under Signing & Capabilities, and run. The project's first build
-phase builds the Kotlin framework with Gradle.
+phase builds the Kotlin framework with Gradle; Xcode fetches the WebRTC
+package itself. Voice channels need a device or a simulator with a
+microphone, and the server's voice settings as for Android below.
 
 **Tests**: the core's tests run anywhere:
 

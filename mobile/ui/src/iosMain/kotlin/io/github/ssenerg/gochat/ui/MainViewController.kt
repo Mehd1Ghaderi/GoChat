@@ -6,8 +6,19 @@ import kotlinx.coroutines.MainScope
 import platform.UIKit.UIViewController
 
 private val scope = MainScope()
-private val platform = IosPlatform(scope)
-private val app = GoChatApp(platform.store, scope, rtc = platform.rtc).also { it.start() }
 
-/** The app's screen, for the Swift side to show. */
-fun MainViewController(): UIViewController = ComposeUIViewController { GoChatRoot(app, platform) }
+/** The app and its platform, made once for the process, as Android's Application does. */
+private var root: Pair<GoChatApp, IosPlatform>? = null
+
+/**
+ * The app's screen, for the Swift side to show, with the WebRTC it supplies
+ * for voice channels.
+ */
+fun MainViewController(rtc: IosRtcEngine?): UIViewController {
+    val (app, platform) = root ?: run {
+        val platform = IosPlatform(scope, rtc?.let(::SwiftRtc))
+        val app = GoChatApp(platform.store, scope, rtc = platform.rtc).also { it.start() }
+        (app to platform).also { root = it }
+    }
+    return ComposeUIViewController { GoChatRoot(app, platform) }
+}

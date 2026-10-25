@@ -3,11 +3,13 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 46;
+	objectVersion = 56;
 	objects = {
 
 /* Begin PBXBuildFile section */
 		2160942AD84B06FCBD9D1C73 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0968D3B03250344309B7C47F /* Assets.xcassets */; };
+		3D6BB364D880B602C25C914E /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = 482CEB50E54D92AE52FBDB98 /* WebRTC */; };
+		44330DABCE1B873CB0ADA4EC /* VoiceRtc.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B14BF9DD6BEC24B385DD0AF /* VoiceRtc.swift */; };
 		C7561F8115B108AEC313FA56 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13594525FD9FAC4BFD20A110 /* ContentView.swift */; };
 		DD0BFB3B8DF5229F268768F2 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 97266CEFE7B147F9F00B1854 /* Foundation.framework */; };
 		E73B2D9216BDE1F0BAE89337 /* iOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCE6F8288756490DF767E337 /* iOSApp.swift */; };
@@ -17,6 +19,7 @@
 		0968D3B03250344309B7C47F /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		13594525FD9FAC4BFD20A110 /* ContentView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		1AF4B9342599A52A407A3245 /* iosApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = iosApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4B14BF9DD6BEC24B385DD0AF /* VoiceRtc.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceRtc.swift; sourceTree = "<group>"; };
 		85B06E93B562B49B7246AA6F /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		97266CEFE7B147F9F00B1854 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		DCE6F8288756490DF767E337 /* iOSApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = iOSApp.swift; sourceTree = "<group>"; };
@@ -28,6 +31,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				DD0BFB3B8DF5229F268768F2 /* Foundation.framework in Frameworks */,
+				3D6BB364D880B602C25C914E /* WebRTC in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -49,6 +53,7 @@
 				13594525FD9FAC4BFD20A110 /* ContentView.swift */,
 				0968D3B03250344309B7C47F /* Assets.xcassets */,
 				85B06E93B562B49B7246AA6F /* Info.plist */,
+				4B14BF9DD6BEC24B385DD0AF /* VoiceRtc.swift */,
 			);
 			name = iosApp;
 			path = iosApp;
@@ -96,6 +101,9 @@
 			dependencies = (
 			);
 			name = iosApp;
+			packageProductDependencies = (
+				482CEB50E54D92AE52FBDB98 /* WebRTC */,
+			);
 			productName = iosApp;
 			productReference = 1AF4B9342599A52A407A3245 /* iosApp.app */;
 			productType = "com.apple.product-type.application";
@@ -110,7 +118,7 @@
 				LastUpgradeCheck = 1600;
 			};
 			buildConfigurationList = DB7479605F5562B865FD00F8 /* Build configuration list for PBXProject "iosApp" */;
-			compatibilityVersion = "Xcode 3.2";
+			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -119,7 +127,10 @@
 			);
 			mainGroup = 44CDD23D71C29DD1D1BD4B82;
 			minimizedProjectReferenceProxies = 0;
-			preferredProjectObjectVersion = 100;
+			packageReferences = (
+				93FC7CD3453C25DCA3AA831C /* XCRemoteSwiftPackageReference "WebRTC" */,
+			);
+			preferredProjectObjectVersion = 56;
 			productRefGroup = CAD198F93DCDF186FAFE4B95 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -169,6 +180,7 @@
 			files = (
 				E73B2D9216BDE1F0BAE89337 /* iOSApp.swift in Sources */,
 				C7561F8115B108AEC313FA56 /* ContentView.swift in Sources */,
+				44330DABCE1B873CB0ADA4EC /* VoiceRtc.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -182,7 +194,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_OBJC_WEAK = NO;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
@@ -194,7 +206,7 @@
 				INFOPLIST_FILE = iosApp/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.2.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-framework",
@@ -269,7 +281,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_OBJC_WEAK = NO;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
@@ -281,7 +293,7 @@
 				INFOPLIST_FILE = iosApp/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.2.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-framework",
@@ -379,6 +391,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		93FC7CD3453C25DCA3AA831C /* XCRemoteSwiftPackageReference "WebRTC" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/stasel/WebRTC";
+			requirement = {
+				kind = exactVersion;
+				version = 155.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		482CEB50E54D92AE52FBDB98 /* WebRTC */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 93FC7CD3453C25DCA3AA831C /* XCRemoteSwiftPackageReference "WebRTC" */;
+			productName = WebRTC;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 4397AB553FDBD346481578AC /* Project object */;
 }

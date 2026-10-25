@@ -53,12 +53,9 @@ import kotlin.coroutines.resume
 import kotlin.math.pow
 
 /** iOS's side of the app. */
-class IosPlatform(scope: CoroutineScope) : Platform {
+class IosPlatform(scope: CoroutineScope, override val rtc: RtcEngine?) : Platform {
     override val store: KeyValueStore = KeychainStore()
     override val player: AudioPlayer = IosAudioPlayer(scope)
-
-    // Talking in voice channels needs WebRTC for iOS, which is next.
-    override val rtc: RtcEngine? = null
 
     override fun openFile(name: String, mimeType: String, bytes: ByteArray) {
         val safe = name.substringAfterLast('/').ifBlank { "file" }
@@ -116,8 +113,12 @@ private class IosAudioPlayer(private val scope: CoroutineScope) : AudioPlayer {
 
     override fun play(id: String, bytes: ByteArray, mimeType: String) {
         stop()
-        AVAudioSession.sharedInstance().setCategory(AVAudioSessionCategoryPlayback, null)
-        AVAudioSession.sharedInstance().setActive(true, null)
+        val session = AVAudioSession.sharedInstance()
+        // In a voice channel's call the session already plays, and records.
+        if (session.category != AVAudioSessionCategoryPlayAndRecord) {
+            session.setCategory(AVAudioSessionCategoryPlayback, null)
+            session.setActive(true, null)
+        }
         // AVAudioPlayer plays the MP4 recordings of the apps and Safari; the
         // WebM of other browsers it does not.
         val p = runCatching { AVAudioPlayer(data = bytes.toNSData(), error = null) }.getOrNull()
