@@ -59,7 +59,7 @@ Not in the apps yet:
 
 You need JDK 17 or later.
 
-**Android**: Android Studio, or the Android SDK with platform 36.
+**Android**: Android Studio, or the Android SDK with platform 37.
 
 ```bash
 cd mobile
