@@ -174,6 +174,13 @@ type Rejoin struct {
 	UserIDs []gocql.UUID
 }
 
+// DeleteConversation clears a direct conversation's history for the
+// caller, or with Everyone deletes the conversation for both people.
+type DeleteConversation struct {
+	Target
+	Everyone bool
+}
+
 // Move gives a conversation of no team to TeamID. Its people outside that
 // team leave it.
 type Move struct {

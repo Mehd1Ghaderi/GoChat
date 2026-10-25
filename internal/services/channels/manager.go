@@ -39,6 +39,10 @@ type Repo interface {
 	RemoveChannelMember(ctx context.Context, m *models.ChannelMember) error
 	MoveChannelMember(ctx context.Context, m *models.ChannelMember, teamID gocql.UUID) error
 	SetChannelTeam(ctx context.Context, id, teamID gocql.UUID) error
+	SetCleared(ctx context.Context, userID, channelID, clearedID gocql.UUID) error
+	GetCleared(ctx context.Context, userID, channelID gocql.UUID) (gocql.UUID, error)
+	DeleteDirectKey(ctx context.Context, key string, channelID gocql.UUID) error
+	DeleteChannel(ctx context.Context, id gocql.UUID) error
 	GetTeamMember(ctx context.Context, teamID, userID gocql.UUID) (*models.TeamMember, error)
 	InsertMessage(ctx context.Context, m *models.Message, newBucket bool) error
 	GetMessage(ctx context.Context, channelID, id gocql.UUID) (*models.Message, error)

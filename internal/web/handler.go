@@ -149,6 +149,8 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("POST /t/{team}/ch/{channel}/privacy", h.csrf(http.HandlerFunc(h.channelPrivacy)))
 	mux.Handle("POST /t/{team}/ch/{channel}/archive", h.csrf(http.HandlerFunc(h.archiveChannel)))
 	mux.Handle("POST /t/{team}/ch/{channel}/voice", h.csrf(http.HandlerFunc(h.setChannelVoice)))
+	mux.HandleFunc("GET /t/{team}/ch/{channel}/delete", h.deleteConversationModal)
+	mux.Handle("POST /t/{team}/ch/{channel}/delete", h.csrf(http.HandlerFunc(h.deleteConversation)))
 	mux.HandleFunc("GET /t/{team}/channels/new", h.newChannelModal)
 	mux.Handle("POST /t/{team}/channels", h.csrf(http.HandlerFunc(h.createChannel)))
 	mux.HandleFunc("GET /t/{team}/channels/browse", h.browseModal)

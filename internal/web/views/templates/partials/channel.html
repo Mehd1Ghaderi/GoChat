@@ -31,6 +31,7 @@
     {{if .Member}}{{template "pins-button" (dict "Team" .Team.Name "Channel" .Channel.Id "Count" .Channel.PinnedCount)}}{{end}}
     {{if .Member}}{{template "mute-button" (dict "Team" .Team.Name "Channel" .Channel.Id "Muted" .Channel.Muted)}}{{end}}
     {{if and .Manage (not .Archived)}}<button class="icon-btn" hx-get="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/settings" hx-target="#modal" aria-label="Channel settings" title="Channel settings">{{icon "settings"}}</button>{{end}}
+    {{if and .Member (isDirect .Channel)}}<button class="icon-btn" hx-get="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/delete" hx-target="#modal" aria-label="Delete conversation" title="Delete conversation">{{icon "trash"}}</button>{{end}}
     {{if and .Member (not (isDirect .Channel))}}
     <button class="icon-btn" hx-get="/t/{{.Team.Name}}/ch/{{.Channel.Id}}/members" hx-target="#modal" aria-label="Members" title="Members">{{icon "members"}}</button>
     {{if and (ne .Channel.Name "town-square") (not (isGroup .Channel))}}

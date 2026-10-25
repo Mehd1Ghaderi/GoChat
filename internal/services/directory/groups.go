@@ -14,6 +14,7 @@ import (
 	"github.com/ssenerg/gochat/internal/core/ids"
 	"github.com/ssenerg/gochat/internal/core/models"
 	ierrors "github.com/ssenerg/gochat/internal/errors"
+	"github.com/ssenerg/gochat/internal/repos/scylla"
 	"github.com/ssenerg/gochat/internal/services/channels"
 	"github.com/ssenerg/gochat/internal/services/convert"
 )
@@ -29,12 +30,6 @@ func peopleKey(people []gocql.UUID) string {
 	}
 	slices.Sort(keys)
 	return strings.Join(keys, ":")
-}
-
-// conversationKey finds a team's conversation of the people a peopleKey
-// names.
-func conversationKey(teamID gocql.UUID, people string) string {
-	return teamID.String() + "/" + people
 }
 
 func (w *worker) openDirect(ctx context.Context, msg OpenDirect) (*pb.Channel, error) {
@@ -90,7 +85,7 @@ func (w *worker) openGroup(ctx context.Context, msg OpenGroup) (*pb.Channel, err
 	for i, id := range members {
 		cms[i] = &models.ChannelMember{ChannelID: ch.ID, UserID: id, TeamID: teamID, Role: models.ChannelRoleMember, JoinedAt: now}
 	}
-	chID, err := w.Repo.CreateDirectChannel(ctx, conversationKey(teamID, ch.Name), ch, cms)
+	chID, err := w.Repo.CreateDirectChannel(ctx, scylla.ConversationKey(teamID, ch.Name), ch, cms)
 	if err != nil {
 		return nil, err
 	}

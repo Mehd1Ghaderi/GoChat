@@ -32,6 +32,7 @@ type teamsRepo struct {
 	keys     map[string]gocql.UUID
 	channels map[gocql.UUID]*models.Channel
 	members  map[gocql.UUID][]*models.ChannelMember
+	cleared  map[gocql.UUID]map[gocql.UUID]gocql.UUID
 }
 
 func newTeamsRepo() *teamsRepo {
@@ -167,6 +168,12 @@ func (f *teamsRepo) CountMentions(context.Context, gocql.UUID) (map[gocql.UUID]i
 
 func (f *teamsRepo) ListMuted(context.Context, gocql.UUID) (map[gocql.UUID]bool, error) {
 	return nil, nil
+}
+
+func (f *teamsRepo) ListCleared(_ context.Context, userID gocql.UUID) (map[gocql.UUID]gocql.UUID, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.cleared[userID], nil
 }
 
 // channelLog records what the stand-in channels actor was asked.
@@ -405,7 +412,7 @@ func TestAdoptGivesOldConversationsATeam(t *testing.T) {
 	if err := a.adopt(ctx, direct); err != nil {
 		t.Fatal(err)
 	}
-	if m := moved(); m.ChannelID != direct.ID || m.TeamID != older || repo.keys[conversationKey(older, direct.Name)] != direct.ID {
+	if m := moved(); m.ChannelID != direct.ID || m.TeamID != older || repo.keys[scylla.ConversationKey(older, direct.Name)] != direct.ID {
 		t.Fatalf("the pair moved %+v", m)
 	}
 	group := legacy(me, bob, carol)
@@ -418,7 +425,7 @@ func TestAdoptGivesOldConversationsATeam(t *testing.T) {
 
 	// A team where the pair opened a new one since is passed over.
 	again := legacy(me, bob)
-	repo.keys[conversationKey(older, again.Name)] = ids.New()
+	repo.keys[scylla.ConversationKey(older, again.Name)] = ids.New()
 	if err := a.adopt(ctx, again); err != nil {
 		t.Fatal(err)
 	}
@@ -437,5 +444,35 @@ func TestAdoptGivesOldConversationsATeam(t *testing.T) {
 	defer log.mu.Unlock()
 	if len(log.moves) != 0 {
 		t.Fatalf("moved %+v", log.moves)
+	}
+}
+
+func TestClearedConversationsWaitForANewMessage(t *testing.T) {
+	repo := newTeamsRepo()
+	me, bob := repo.person("me"), repo.person("bob")
+	acme := ids.New()
+	repo.join(acme, time.Now(), me, bob)
+	w, _ := newTeamsWorker(t, repo)
+	ctx := context.Background()
+	ch, err := w.openDirect(ctx, OpenDirect{P: principal(me), TeamID: acme.String(), UserID: bob.String()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dm := repo.channels[idOf(ch.Id)]
+	dm.LastMessageID = ids.NewTime()
+	repo.cleared = map[gocql.UUID]map[gocql.UUID]gocql.UUID{me: {dm.ID: ids.NewTime()}}
+	listed := func(who gocql.UUID) bool {
+		list, err := w.listChannels(ctx, ListChannels{P: principal(who), TeamID: acme.String()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(list) == 1
+	}
+	if listed(me) || !listed(bob) {
+		t.Fatal("a clear hid the conversation from the wrong person")
+	}
+	dm.LastMessageID = ids.NewTime()
+	if !listed(me) {
+		t.Fatal("a new message did not bring the conversation back")
 	}
 }

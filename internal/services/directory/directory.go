@@ -80,6 +80,7 @@ type Repo interface {
 	ListLastReads(ctx context.Context, userID gocql.UUID) ([]*scylla.ChannelRead, error)
 	CountMentions(ctx context.Context, userID gocql.UUID) (map[gocql.UUID]int, error)
 	ListMuted(ctx context.Context, userID gocql.UUID) (map[gocql.UUID]bool, error)
+	ListCleared(ctx context.Context, userID gocql.UUID) (map[gocql.UUID]gocql.UUID, error)
 	ListThreadFollows(ctx context.Context, userID gocql.UUID, limit int) ([]*scylla.ThreadFollow, error)
 	GetMessage(ctx context.Context, channelID, id gocql.UUID) (*models.Message, error)
 	GetReply(ctx context.Context, channelID, rootID, id gocql.UUID) (*models.Message, error)
@@ -890,6 +891,10 @@ func (w *worker) listChannels(ctx context.Context, msg ListChannels) ([]*pb.Chan
 	if err != nil {
 		return nil, err
 	}
+	cleared, err := w.Repo.ListCleared(ctx, msg.P.UserID)
+	if err != nil {
+		return nil, err
+	}
 	var all []*models.Channel
 	for start := 0; start < len(chIDs); start += 100 {
 		found, err := w.Repo.GetChannels(ctx, chIDs[start:min(start+100, len(chIDs))])
@@ -910,7 +915,8 @@ func (w *worker) listChannels(ctx context.Context, msg ListChannels) ([]*pb.Chan
 	}
 	out := make([]*pb.Channel, 0, len(all))
 	for _, ch := range all {
-		if !ch.ArchivedAt.IsZero() {
+		// A cleared conversation shows again with its next message.
+		if c, ok := cleared[ch.ID]; !ch.ArchivedAt.IsZero() || (ok && !ids.After(ch.LastMessageID, c)) {
 			continue
 		}
 		view := convert.Conversation(ch, roles[ch.ID], lastRead[ch.ID], msg.P.UserID, peers)

@@ -867,7 +867,11 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 	case *pb.Event_ChannelLeft:
 		if p.ChannelLeft.ChannelId == s.channelID {
 			if !p.ChannelLeft.Own {
-				s.toast("error", "You are no longer a member of this channel.")
+				if p.ChannelLeft.Deleted {
+					s.toast("error", "This conversation was deleted.")
+				} else {
+					s.toast("error", "You are no longer a member of this channel.")
+				}
 				s.fragment("ws-control", "/t/"+s.teamName)
 				return
 			}

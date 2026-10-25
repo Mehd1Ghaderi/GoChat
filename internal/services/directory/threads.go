@@ -8,6 +8,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
+	"github.com/ssenerg/gochat/internal/core/ids"
 	"github.com/ssenerg/gochat/internal/core/models"
 	ierrors "github.com/ssenerg/gochat/internal/errors"
 	"github.com/ssenerg/gochat/internal/repos/scylla"
@@ -43,11 +44,18 @@ func (w *worker) listThreads(ctx context.Context, msg ListThreads) (*ThreadsResu
 	for _, m := range mine {
 		member[m.ChannelID] = true
 	}
+	cleared, err := w.Repo.ListCleared(ctx, msg.P.UserID)
+	if err != nil {
+		return nil, err
+	}
 	kept := follows[:0]
 	out := &ThreadsResult{}
 	for _, f := range follows {
 		// Follows from before a conversation joined its team carry none.
 		if f.LastReplyAt.IsZero() || !member[f.ChannelID] || (f.TeamID != teamID && f.TeamID != scylla.NoTeam) {
+			continue
+		}
+		if c, ok := cleared[f.ChannelID]; ok && !ids.After(f.RootID, c) {
 			continue
 		}
 		kept = append(kept, f)

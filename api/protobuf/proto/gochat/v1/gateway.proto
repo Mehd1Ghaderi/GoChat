@@ -177,6 +177,8 @@ message ChannelLeft {
   string team_id = 2;
   // Set when the person left, rather than being removed.
   bool own = 3;
+  // Set when the conversation was deleted.
+  bool deleted = 4;
 }
 
 message Presence {

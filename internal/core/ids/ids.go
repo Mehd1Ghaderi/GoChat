@@ -87,6 +87,12 @@ func BucketOf(id gocql.UUID) int32 {
 	return Bucket(id.Time())
 }
 
+// After reports whether time UUID a is later than b; anything is later
+// than a zero b.
+func After(a, b gocql.UUID) bool {
+	return a.Timestamp() > b.Timestamp()
+}
+
 func IsZero(u gocql.UUID) bool {
 	return u == gocql.UUID{}
 }

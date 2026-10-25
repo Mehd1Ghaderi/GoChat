@@ -30,6 +30,7 @@ type Repo interface {
 	GetTeam(ctx context.Context, id gocql.UUID) (*models.Team, error)
 	GetTeamMember(ctx context.Context, teamID, userID gocql.UUID) (*models.TeamMember, error)
 	ListUserChannels(ctx context.Context, userID, teamID gocql.UUID) ([]*models.ChannelMember, error)
+	ListCleared(ctx context.Context, userID gocql.UUID) (map[gocql.UUID]gocql.UUID, error)
 	ListChannelMembers(ctx context.Context, channelID gocql.UUID) ([]*models.ChannelMember, error)
 	GetChannels(ctx context.Context, ids []gocql.UUID) ([]*models.Channel, error)
 	GetChannelIDByName(ctx context.Context, teamID gocql.UUID, name string) (gocql.UUID, error)
