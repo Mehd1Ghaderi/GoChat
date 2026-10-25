@@ -37,7 +37,7 @@ func TestCheckVoice(t *testing.T) {
 func TestVoiceChannelsCarryNoMessages(t *testing.T) {
 	voice := &channel{ch: &models.Channel{Kind: models.ChannelVoice}}
 	text := &channel{ch: &models.Channel{Kind: models.ChannelPublic}}
-	for _, req := range []Request{Post{}, Edit{}, Delete{}, History{}, GetMessage{}, Thread{}, Typing{}, React{}, Mute{}, MarkRead{}, SetVoice{}, Join{}, AddMember{}, Settings{}, Privacy{}, Archive{}} {
+	for _, req := range []Request{Post{}, Edit{}, Delete{}, History{}, GetMessage{}, Thread{}, ThreadRead{}, Typing{}, React{}, Pin{}, Pins{}, Save{}, Follow{}, Mute{}, MarkRead{}, SetVoice{}, Join{}, AddMember{}, Settings{}, Privacy{}, Archive{}} {
 		if err := voice.voiceRefuses(req); !ierrors.Is(err, ierrors.CodeFailedPrecondition) {
 			t.Errorf("a voice channel took %T: %v", req, err)
 		}

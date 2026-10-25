@@ -228,15 +228,15 @@ services:
       VOICE_PUBLIC_URL: ${VOICE_PUBLIC_URL:-ws://localhost:8090/rtc}
       VOICE_ALLOWED_ORIGINS: ${WEB_PUBLIC_URL:-http://localhost:8080}
       VOICE_ICE_PUBLIC_IPS: ${VOICE_PUBLIC_IP:-}
-      VOICE_ICE_UDP_PORT: ${VOICE_MEDIA_PORT:-50000}
-      VOICE_ICE_TCP_PORT: ${VOICE_MEDIA_PORT:-50000}
+      VOICE_ICE_UDP_PORT: ${VOICE_MEDIA_PORT:-7882}
+      VOICE_ICE_TCP_PORT: ${VOICE_MEDIA_PORT:-7882}
       VOICE_ICE_TURN_URLS: ${VOICE_TURN_URLS:-}
       VOICE_ICE_TURN_SECRET: ${VOICE_TURN_SECRET:-}
     ports:
       - "${VOICE_BIND:-127.0.0.1}:${VOICE_PORT:-8090}:8090"
       # The same port inside and out: it is the port the server announces.
-      - "${VOICE_MEDIA_PORT:-50000}:${VOICE_MEDIA_PORT:-50000}/udp"
-      - "${VOICE_MEDIA_PORT:-50000}:${VOICE_MEDIA_PORT:-50000}/tcp"
+      - "${VOICE_MEDIA_PORT:-7882}:${VOICE_MEDIA_PORT:-7882}/udp"
+      - "${VOICE_MEDIA_PORT:-7882}:${VOICE_MEDIA_PORT:-7882}/tcp"
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]

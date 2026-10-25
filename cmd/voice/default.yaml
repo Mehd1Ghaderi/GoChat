@@ -27,8 +27,9 @@ voice:
     shutdown_timeout: 10s
   ice:
     # Every peer shares these ports. Browsers must reach them at public_ips.
-    udp_port: 50000
-    tcp_port: 50000
+    # They sit below the ephemeral range, which outgoing connections borrow.
+    udp_port: 7882
+    tcp_port: 7882
     public_ips: []
     turn:
       urls: []

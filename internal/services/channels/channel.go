@@ -250,7 +250,7 @@ func (a *channel) voiceRefuses(req Request) error {
 		return nil
 	}
 	switch req.(type) {
-	case Post, Edit, Delete, History, GetMessage, Thread, Typing, React, Mute, MarkRead, SetVoice:
+	case Post, Edit, Delete, History, GetMessage, Thread, ThreadRead, Typing, React, Pin, Pins, Save, Follow, Mute, MarkRead, SetVoice:
 		return ierrors.FailedPrecondition("voice channels carry no messages")
 	case Join, AddMember:
 		return ierrors.FailedPrecondition("everyone in the team may talk in a voice channel: join the talk instead")

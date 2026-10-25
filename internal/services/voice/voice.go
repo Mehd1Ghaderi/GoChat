@@ -196,23 +196,28 @@ type voice struct {
 	servers map[string]*server
 	pending map[string]*pending
 	// held counts each person's unclaimed tokens.
-	held    map[gocql.UUID]int
-	states  map[gocql.UUID]*state
-	rooms   map[gocql.UUID]*room
-	members *cache.Cache[gocql.UUID, []string]
-	sweeper *actor.SendRepeater
+	held   map[gocql.UUID]int
+	states map[gocql.UUID]*state
+	rooms  map[gocql.UUID]*room
+	// versions outlive the rooms: a channel's talk that ends and starts
+	// again keeps counting up, so pages never take a new state for an old
+	// one.
+	versions map[gocql.UUID]uint64
+	members  *cache.Cache[gocql.UUID, []string]
+	sweeper  *actor.SendRepeater
 }
 
 func New(d *Deps) actor.Producer {
 	return func() actor.Receiver {
 		return &voice{
-			Deps:    d,
-			servers: make(map[string]*server),
-			pending: make(map[string]*pending),
-			held:    make(map[gocql.UUID]int),
-			states:  make(map[gocql.UUID]*state),
-			rooms:   make(map[gocql.UUID]*room),
-			members: cache.New[gocql.UUID, []string](10_000, d.Cfg.MembersTTL),
+			Deps:     d,
+			servers:  make(map[string]*server),
+			pending:  make(map[string]*pending),
+			held:     make(map[gocql.UUID]int),
+			states:   make(map[gocql.UUID]*state),
+			rooms:    make(map[gocql.UUID]*room),
+			versions: make(map[gocql.UUID]uint64),
+			members:  cache.New[gocql.UUID, []string](10_000, d.Cfg.MembersTTL),
 		}
 	}
 }
@@ -392,7 +397,8 @@ func (v *voice) changed(channelID gocql.UUID) {
 	if rm == nil {
 		return
 	}
-	rm.version++
+	v.versions[channelID]++
+	rm.version = v.versions[channelID]
 	ev := &pb.Event{Payload: &pb.Event_VoiceChannelUpdate{VoiceChannelUpdate: &pb.VoiceChannelUpdate{
 		TeamId: rm.teamID.String(), Channel: v.snapshot(channelID, rm),
 	}}}

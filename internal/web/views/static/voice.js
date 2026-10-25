@@ -137,6 +137,8 @@
       case "ready":
         state.userID = msg.user_id;
         setup(state, msg.ice_servers || []);
+        // The others see a mute kept from earlier as soon as one is.
+        if (muted || deafened) report();
         return null;
       case "offer":
         return state.pc.setRemoteDescription({ type: "offer", sdp: msg.sdp })
