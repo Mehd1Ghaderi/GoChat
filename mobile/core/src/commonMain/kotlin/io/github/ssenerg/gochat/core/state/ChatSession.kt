@@ -313,6 +313,15 @@ class ChatSession internal constructor(
         return ch ?: throw ApiException(0, "The server opened no conversation.")
     }
 
+    /**
+     * Deletes a direct conversation for the person, who sees it again with
+     * its next message; with [everyone], for both people, for good.
+     */
+    suspend fun deleteConversation(channelId: String, everyone: Boolean): String? = act {
+        api.deleteConversation(channelId, everyone)
+        _state.update { st -> st.copy(channels = st.channels.filter { it.id != channelId }) }
+    }
+
     suspend fun joinChannel(id: String): Channel? = api.joinChannel(id)?.also { addChannel(it) }
 
     /** Takes someone out of a voice channel's talk, for its moderators. */

@@ -116,6 +116,10 @@ class LiveServerTest {
         session.state.first { s -> s.channels.any { it.id == dm.id } }
         assertEquals(st.teamId, dm.team_id, "conversations belong to the team on screen")
 
+        // Deleting it for oneself takes it off the sidebar.
+        assertEquals(null, withContext(scope.coroutineContext) { session.deleteConversation(dm.id, everyone = false) })
+        session.state.first { s -> s.channels.none { it.id == dm.id } }
+
         withContext(scope.coroutineContext) { app.signOut() }
         assertTrue(app.state.value is AppState.SignedOut)
         assertEquals(null, store.get("token"))

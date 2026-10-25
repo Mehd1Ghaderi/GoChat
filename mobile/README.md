@@ -51,8 +51,9 @@ iosApp/      the Xcode project: a SwiftUI shell that shows the shared screens
 - Voice messages: record, send and play. Both apps record AAC in MP4,
   which the server takes and every platform plays.
 - Browse, create, mute and leave channels; moderators rename them, change
-  their privacy, turn voice messages on or off and archive them. Conversations
-  belong to the team they were opened in, as on the web.
+  their privacy, turn voice messages on or off and archive them. Delete a
+  direct conversation for yourself or for both people. Conversations belong
+  to the team they were opened in, as on the web.
 - Profile name and photo, status with do not disturb, custom status,
   password, sign-out.
 

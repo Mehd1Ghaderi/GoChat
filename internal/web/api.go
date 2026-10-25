@@ -49,6 +49,7 @@ var apiCalls = map[string][]string{
 	"gochat.v1.AuthService": {
 		"GetSignupInfo", "SignUp", "Login", "VerifyMFA", "Logout", "Me",
 		"ChangePassword", "BeginTOTPSetup", "ConfirmTOTPSetup", "DisableTOTP",
+		"ListSessions", "RevokeSession", "RevokeSessions",
 	},
 	"gochat.v1.UserService": {
 		"GetUser", "UpdateProfile", "GetPresence", "RemovePhoto", "SetStatus", "SetCustomStatus",
@@ -63,6 +64,7 @@ var apiCalls = map[string][]string{
 		"LeaveChannel", "AddChannelMember", "RemoveChannelMember", "ListChannelMembers",
 		"OpenDirectChannel", "OpenGroupChannel", "MarkChannelRead", "SetChannelMuted",
 		"ListMutedChannels", "UpdateChannel", "SetChannelPrivacy", "ArchiveChannel", "SetChannelVoice",
+		"DeleteConversation",
 	},
 	"gochat.v1.MessageService": {
 		"PostMessage", "EditMessage", "DeleteMessage", "ListMessages", "GetMessage", "SendTyping",

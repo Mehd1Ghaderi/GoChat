@@ -114,6 +114,11 @@ class GoChatApi(val client: ApiClient) {
     suspend fun openGroup(teamId: String, userIds: List<String>) =
         channels("OpenGroupChannel", OpenGroupChannelRequest(user_ids = userIds, team_id = teamId), OpenGroupChannelResponse.ADAPTER).channel
 
+    /** Clears a direct conversation for the caller, or with [everyone] deletes it for both people. */
+    suspend fun deleteConversation(channelId: String, everyone: Boolean) {
+        channels("DeleteConversation", DeleteConversationRequest(channel_id = channelId, everyone = everyone), DeleteConversationResponse.ADAPTER)
+    }
+
     suspend fun markRead(channelId: String, messageId: String) {
         channels("MarkChannelRead", MarkChannelReadRequest(channel_id = channelId, message_id = messageId), MarkChannelReadResponse.ADAPTER)
     }

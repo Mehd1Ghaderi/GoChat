@@ -27,7 +27,7 @@ func TestAPICallsAreUnaryCallsOfPeopleServices(t *testing.T) {
 			t.Errorf("%s belongs to gateways or the file endpoints", full)
 		}
 	}
-	for _, full := range []string{"gochat.v1.UserService/SetPhoto", "gochat.v1.TeamService/SetTeamPhoto"} {
+	for _, full := range []string{"gochat.v1.UserService/SetPhoto", "gochat.v1.TeamService/SetTeamPhoto", "gochat.v1.AdminService/SetUserDeactivated"} {
 		if _, ok := apiMethods[full]; ok {
 			t.Errorf("%s is open to apps", full)
 		}

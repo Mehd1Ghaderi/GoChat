@@ -30,6 +30,8 @@ fun User?.initials(): String {
 val Channel.isConversation: Boolean
     get() = type == ChannelType.CHANNEL_TYPE_DIRECT || type == ChannelType.CHANNEL_TYPE_GROUP
 
+val Channel.isDirect: Boolean get() = type == ChannelType.CHANNEL_TYPE_DIRECT
+
 val Channel.isVoice: Boolean get() = type == ChannelType.CHANNEL_TYPE_VOICE
 
 val Channel.isPrivate: Boolean get() = type == ChannelType.CHANNEL_TYPE_PRIVATE

@@ -19,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
@@ -64,6 +65,7 @@ import gochat.v1.User
 import io.github.ssenerg.gochat.core.api.userMessage
 import io.github.ssenerg.gochat.core.model.displayName
 import io.github.ssenerg.gochat.core.model.isConversation
+import io.github.ssenerg.gochat.core.model.isDirect
 import io.github.ssenerg.gochat.core.model.isPrivate
 import io.github.ssenerg.gochat.core.model.isVoice
 import io.github.ssenerg.gochat.core.model.moderatedBy
@@ -363,6 +365,7 @@ fun ChannelInfoScreen(session: ChatSession, channelId: String) {
     var reload by remember { mutableStateOf(0) }
     var confirmLeave by remember { mutableStateOf(false) }
     var confirmArchive by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
     var edit by remember { mutableStateOf(false) }
     LaunchedEffect(channelId, reload) {
         members = runCatching { session.api.channelMembers(channelId) }.getOrNull()
@@ -427,6 +430,15 @@ fun ChannelInfoScreen(session: ChatSession, channelId: String) {
                     }
                 }
             }
+            if (channel.isDirect) {
+                item {
+                    ListItem(
+                        headlineContent = { Text("Delete conversation", color = MaterialTheme.colorScheme.error) },
+                        leadingContent = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                        modifier = Modifier.clickable { confirmDelete = true },
+                    )
+                }
+            }
             if (!channel.isConversation && channel.name != "town-square") {
                 item {
                     ListItem(
@@ -487,6 +499,40 @@ fun ChannelInfoScreen(session: ChatSession, channelId: String) {
                 }) { Text("Leave", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = { confirmLeave = false }) { Text("Cancel") } },
+        )
+    }
+    if (confirmDelete) {
+        val peer = channel.peer.displayName()
+        var everyone by remember { mutableStateOf(false) }
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete conversation") },
+            text = {
+                Column {
+                    Text("Delete your conversation with $peer? You stop seeing its messages; it comes back, with only new ones, when someone writes in it.")
+                    Row(Modifier.padding(top = 12.dp).clickable { everyone = !everyone }, verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = everyone, onCheckedChange = { everyone = it })
+                        Text("Also delete it for $peer")
+                    }
+                    if (everyone) {
+                        Text(
+                            "Its messages, replies, reactions, pins and files are deleted for good, for both of you.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    scope.launch {
+                        val err = session.deleteConversation(channelId, everyone)
+                        if (err != null) toasts.show(err) else nav.closeChannel(channelId)
+                    }
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
         )
     }
     if (confirmArchive) {
