@@ -565,7 +565,7 @@ func (s *channelService) OpenDirectChannel(ctx context.Context, req *pb.OpenDire
 	if err != nil {
 		return nil, err
 	}
-	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Directory, directory.OpenDirect{P: p, UserID: req.UserId})
+	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Directory, directory.OpenDirect{P: p, TeamID: req.TeamId, UserID: req.UserId})
 	if err != nil {
 		return nil, err
 	}
@@ -616,7 +616,7 @@ func (s *channelService) OpenGroupChannel(ctx context.Context, req *pb.OpenGroup
 	if len(req.UserIds) > 16 {
 		return nil, ierrors.InvalidArgument("too many people")
 	}
-	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Directory, directory.OpenGroup{P: p, UserIDs: req.UserIds})
+	ch, err := actors.Ask[*pb.Channel](ctx, s.sys.Engine, s.sys.Directory, directory.OpenGroup{P: p, TeamID: req.TeamId, UserIDs: req.UserIds})
 	if err != nil {
 		return nil, err
 	}

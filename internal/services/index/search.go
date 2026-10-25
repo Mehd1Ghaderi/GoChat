@@ -150,14 +150,12 @@ func (r *run) prepare(ctx context.Context, p *models.Principal, teamID gocql.UUI
 	if err != nil {
 		return err
 	}
-	direct, err := r.Repo.ListUserChannels(ctx, p.UserID, scylla.NoTeam)
-	if err != nil {
-		return err
-	}
-	r.allowed = make(map[gocql.UUID]bool, len(mine)+len(direct))
-	for _, m := range append(mine, direct...) {
+	r.allowed = make(map[gocql.UUID]bool, len(mine))
+	for _, m := range mine {
 		r.allowed[m.ChannelID] = true
 	}
+	// Conversations are filed by person across teams; allowed keeps this
+	// team's.
 	r.scopes = []gocql.UUID{teamID, p.UserID}
 	if r.q.In != "" {
 		id, err := r.Repo.GetChannelIDByName(ctx, teamID, r.q.In)

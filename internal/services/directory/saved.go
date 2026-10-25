@@ -46,16 +46,13 @@ func (w *worker) listSaved(ctx context.Context, msg ListSaved) (*SavedResult, er
 	if err != nil {
 		return nil, err
 	}
-	direct, err := w.Repo.ListUserChannels(ctx, msg.P.UserID, scylla.NoTeam)
-	if err != nil {
-		return nil, err
-	}
-	member := make(map[gocql.UUID]bool, len(mine)+len(direct))
-	for _, m := range append(mine, direct...) {
+	member := make(map[gocql.UUID]bool, len(mine))
+	for _, m := range mine {
 		member[m.ChannelID] = true
 	}
 	var page []*scylla.Saved
 	for _, s := range saves {
+		// Saves from before a conversation joined its team carry none.
 		if member[s.ChannelID] && (s.TeamID == teamID || s.TeamID == scylla.NoTeam) {
 			if page = append(page, s); len(page) == maxSavedShow {
 				break

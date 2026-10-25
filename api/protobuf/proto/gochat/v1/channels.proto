@@ -165,6 +165,8 @@ message ListChannelMembersResponse {
 
 message OpenDirectChannelRequest {
   string user_id = 1;
+  // The team the conversation belongs to.
+  string team_id = 2;
 }
 
 message OpenDirectChannelResponse {
@@ -173,6 +175,8 @@ message OpenDirectChannelResponse {
 
 message OpenGroupChannelRequest {
   repeated string user_ids = 1;
+  // The team the conversation belongs to.
+  string team_id = 2;
 }
 
 message OpenGroupChannelResponse {

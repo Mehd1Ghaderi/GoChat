@@ -167,4 +167,18 @@ type RemoveMember struct {
 // Members replies with []*pb.ChannelMember.
 type Members struct{ Target }
 
+// Rejoin brings back those of a conversation's people among UserIDs who
+// left it with its team and belong to the team again.
+type Rejoin struct {
+	Target
+	UserIDs []gocql.UUID
+}
+
+// Move gives a conversation of no team to TeamID. Its people outside that
+// team leave it.
+type Move struct {
+	Target
+	TeamID gocql.UUID
+}
+
 type Done struct{}

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/coder/websocket"
 	"go.uber.org/zap"
 
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
@@ -55,5 +56,46 @@ func TestUnreadOnceUntilRead(t *testing.T) {
 	s.event(nil, posted("4", "there"))
 	if got := s.frames(); len(got) != 1 {
 		t.Fatalf("frames after reading %q", got)
+	}
+}
+
+func TestOtherTeamsConversationsStayThere(t *testing.T) {
+	s := quietSession(t)
+	s.teamID = "acme"
+	s.sidebar["dm"], s.directs["dm"] = true, true
+	ev := func(channel, team string, conversation bool, root string) *pb.Event {
+		e := posted("1", channel)
+		p := e.GetMessagePosted()
+		p.TeamId, p.Conversation, p.Message.Content = team, conversation, "@me look"
+		if root != "" {
+			p.Message.RootId, p.ParticipantIds = root, []string{"me"}
+		}
+		return e
+	}
+	cases := []struct {
+		name          string
+		ev            *pb.Event
+		notify, inbox bool
+	}{
+		{"this team's conversation", ev("dm", "acme", true, ""), true, false},
+		{"another team's conversation", ev("other-dm", "beta", true, ""), false, false},
+		{"another team's channel", ev("other", "beta", false, ""), true, false},
+		{"a thread in this team", ev("there", "acme", false, "r"), true, true},
+		{"a thread in another team's conversation", ev("other-dm", "beta", true, "r"), false, false},
+		{"a thread in another team's channel", ev("other", "beta", false, "r"), true, false},
+	}
+	for _, c := range cases {
+		s.event(nil, c.ev)
+		// A closed outbox hands over what it holds without waiting.
+		s.out.close(websocket.StatusNormalClosure)
+		var notify, inbox bool
+		for _, f := range s.frames() {
+			notify = notify || strings.Contains(f, `id="notify"`)
+			inbox = inbox || strings.Contains(f, `id="threads-unread"`)
+		}
+		if notify != c.notify || inbox != c.inbox {
+			t.Errorf("%s: notified %v, marked the threads %v", c.name, notify, inbox)
+		}
+		s.out = newOutbox(1 << 20)
 	}
 }

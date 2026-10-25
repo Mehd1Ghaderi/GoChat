@@ -10,15 +10,13 @@ import (
 	"github.com/ssenerg/gochat/internal/actors"
 	"github.com/ssenerg/gochat/internal/core/ids"
 	ierrors "github.com/ssenerg/gochat/internal/errors"
-	"github.com/ssenerg/gochat/internal/repos/scylla"
-	"github.com/ssenerg/gochat/internal/services/convert"
 	"github.com/ssenerg/gochat/internal/services/hub"
 )
 
 const maxPresence = 200
 
-// presence answers for those of msg's people the caller shares a
-// conversation or a team with, and no one else.
+// presence answers for those of msg's people the caller shares a team
+// with, and no one else.
 func (w *worker) presence(ctx context.Context, msg Presence) (map[string]pb.Status, error) {
 	if len(msg.UserIDs) > maxPresence {
 		return nil, ierrors.InvalidArgument("too many users")
@@ -41,8 +39,8 @@ func (w *worker) presence(ctx context.Context, msg Presence) (map[string]pb.Stat
 	return actors.Ask[map[string]pb.Status](ctx, w.Engine, w.Hub, hub.Statuses{UserIDs: known})
 }
 
-// acquainted returns those of want userID shares a conversation or a team
-// with. Conversations go first: they are whom pages ask about.
+// acquainted returns those of want userID shares a team with. Their
+// conversations belong to teams too.
 func (w *worker) acquainted(ctx context.Context, userID gocql.UUID, want map[gocql.UUID]bool) ([]string, error) {
 	out := make([]string, 0, len(want))
 	take := func(id gocql.UUID) {
@@ -52,28 +50,6 @@ func (w *worker) acquainted(ctx context.Context, userID gocql.UUID, want map[goc
 		}
 	}
 	take(userID)
-	if len(want) == 0 {
-		return out, nil
-	}
-	convs, err := w.Repo.ListUserChannels(ctx, userID, scylla.NoTeam)
-	if err != nil {
-		return nil, err
-	}
-	chIDs := make([]gocql.UUID, len(convs))
-	for i, m := range convs {
-		chIDs[i] = m.ChannelID
-	}
-	for start := 0; start < len(chIDs) && len(want) > 0; start += 100 {
-		chans, err := w.Repo.GetChannels(ctx, chIDs[start:min(start+100, len(chIDs))])
-		if err != nil {
-			return nil, err
-		}
-		for _, ch := range chans {
-			for _, id := range convert.PeerIDs(ch, userID) {
-				take(id)
-			}
-		}
-	}
 	if len(want) == 0 {
 		return out, nil
 	}

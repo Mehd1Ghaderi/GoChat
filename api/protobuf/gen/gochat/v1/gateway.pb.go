@@ -1379,8 +1379,12 @@ type MessagePosted struct {
 	Message *Message               `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
 	// For a reply: the people taking part in its thread.
 	ParticipantIds []string `protobuf:"bytes,2,rep,name=participant_ids,json=participantIds,proto3" json:"participant_ids,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// The team of the message's channel.
+	TeamId string `protobuf:"bytes,3,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	// Set for a direct or group conversation.
+	Conversation  bool `protobuf:"varint,4,opt,name=conversation,proto3" json:"conversation,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *MessagePosted) Reset() {
@@ -1425,6 +1429,20 @@ func (x *MessagePosted) GetParticipantIds() []string {
 		return x.ParticipantIds
 	}
 	return nil
+}
+
+func (x *MessagePosted) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
+func (x *MessagePosted) GetConversation() bool {
+	if x != nil {
+		return x.Conversation
+	}
+	return false
 }
 
 type MessageEdited struct {
@@ -1930,10 +1948,12 @@ const file_gochat_v1_gateway_proto_rawDesc = "" +
 	"\n" +
 	"message_id\x18\x02 \x01(\tR\tmessageId\x12\x17\n" +
 	"\aroot_id\x18\x03 \x01(\tR\x06rootId\x121\n" +
-	"\treactions\x18\x04 \x03(\v2\x13.gochat.v1.ReactionR\treactions\"f\n" +
+	"\treactions\x18\x04 \x03(\v2\x13.gochat.v1.ReactionR\treactions\"\xa3\x01\n" +
 	"\rMessagePosted\x12,\n" +
 	"\amessage\x18\x01 \x01(\v2\x12.gochat.v1.MessageR\amessage\x12'\n" +
-	"\x0fparticipant_ids\x18\x02 \x03(\tR\x0eparticipantIds\"=\n" +
+	"\x0fparticipant_ids\x18\x02 \x03(\tR\x0eparticipantIds\x12\x17\n" +
+	"\ateam_id\x18\x03 \x01(\tR\x06teamId\x12\"\n" +
+	"\fconversation\x18\x04 \x01(\bR\fconversation\"=\n" +
 	"\rMessageEdited\x12,\n" +
 	"\amessage\x18\x01 \x01(\v2\x12.gochat.v1.MessageR\amessage\"g\n" +
 	"\x0eMessageDeleted\x12\x1d\n" +

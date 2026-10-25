@@ -39,17 +39,14 @@ func (w *worker) listThreads(ctx context.Context, msg ListThreads) (*ThreadsResu
 	if err != nil {
 		return nil, err
 	}
-	direct, err := w.Repo.ListUserChannels(ctx, msg.P.UserID, scylla.NoTeam)
-	if err != nil {
-		return nil, err
-	}
-	member := make(map[gocql.UUID]bool, len(mine)+len(direct))
-	for _, m := range append(mine, direct...) {
+	member := make(map[gocql.UUID]bool, len(mine))
+	for _, m := range mine {
 		member[m.ChannelID] = true
 	}
 	kept := follows[:0]
 	out := &ThreadsResult{}
 	for _, f := range follows {
+		// Follows from before a conversation joined its team carry none.
 		if f.LastReplyAt.IsZero() || !member[f.ChannelID] || (f.TeamID != teamID && f.TeamID != scylla.NoTeam) {
 			continue
 		}

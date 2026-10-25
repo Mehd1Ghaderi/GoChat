@@ -632,7 +632,7 @@ func (h *Handler) openDirect(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, ierrors.InvalidArgument("pick one to seven people"))
 		return
 	}
-	res, err := h.client.Channels.OpenGroupChannel(ctx, &pb.OpenGroupChannelRequest{UserIds: picked})
+	res, err := h.client.Channels.OpenGroupChannel(ctx, &pb.OpenGroupChannelRequest{TeamId: team.Id, UserIds: picked})
 	if err != nil {
 		h.fail(w, r, err)
 		return
