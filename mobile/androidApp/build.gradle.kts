@@ -15,6 +15,16 @@ android {
         versionCode = 1
         versionName = "0.1.0"
     }
+    signingConfigs {
+        // The same debug key on every machine and CI runner, so a newer
+        // debug build installs over an older one. Never used for release.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
     buildTypes {
         release {
             isMinifyEnabled = true

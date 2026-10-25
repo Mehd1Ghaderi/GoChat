@@ -89,6 +89,21 @@ GOCHAT_E2E_ADMIN_PASSWORD=... GOCHAT_E2E_TEAM=acme ./gradlew :core:jvmTest
 CI (`.github/workflows/mobile.yml`) runs the core's tests on the JVM and the
 iOS simulator, builds the Android app and builds the iOS app.
 
+## Trying it on a phone
+
+1. **The APK.** Each push to `feature/mobile` publishes a debug build as the
+   `android-preview` pre-release on GitHub (Releases), once GitHub Actions
+   is enabled for the repository. Open it on the phone, download
+   `GoChat-debug.apk` and install it (Android asks to allow installs from
+   the browser once). Or build it with `./gradlew :androidApp:assembleDebug`
+   and find it in `androidApp/build/outputs/apk/debug/`.
+2. **A server with the client API**, that is, built from this branch:
+   - your server, deployed from it, at its HTTPS address; or
+   - the Docker stack on your computer, with `WEB_BIND=0.0.0.0` in `.env` so
+     the local network reaches it: `just up`, then sign in on the phone, on
+     the same Wi-Fi, to `http://<the computer's IP>:8080`. Debug builds take
+     plain HTTP to any address for this; release builds take HTTPS only.
+
 ## Servers
 
 The apps take the server's address on the sign-in screen: `chat.example.com`

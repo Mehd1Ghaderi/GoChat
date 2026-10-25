@@ -2,7 +2,7 @@ name: Mobile
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/mobile]
     paths:
       - "mobile/**"
       - "api/protobuf/proto/**"
@@ -37,6 +37,30 @@ jobs:
         run: ./gradlew --no-daemon :core:jvmTest
       - name: Android app
         run: ./gradlew --no-daemon :androidApp:assembleDebug
+
+  # A debug APK to install on a phone, as the android-preview pre-release,
+  # replaced by each push to feature/mobile.
+  android-preview:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/mobile'
+    needs: android
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Debug APK
+        run: ./gradlew --no-daemon :androidApp:assembleDebug
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp androidApp/build/outputs/apk/debug/androidApp-debug.apk GoChat-debug.apk
+          gh release delete android-preview --yes --cleanup-tag 2>/dev/null || true
+          gh release create android-preview GoChat-debug.apk --prerelease --target "$GITHUB_SHA" \
+            --title "GoChat for Android (debug preview)" \
+            --notes "Debug build of ${GITHUB_SHA::7} from feature/mobile. Install it on the phone, then sign in to a server that runs the client API."
 
   ios:
     runs-on: macos-latest

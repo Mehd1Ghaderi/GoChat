@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only: plain HTTP to any host, to test against a server on
+     the local network (http://192.168.x.x:8080). Release builds take HTTPS
+     only, as src/main says. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
