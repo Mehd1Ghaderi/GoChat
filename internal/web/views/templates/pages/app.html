@@ -1,7 +1,7 @@
 {{define "content"}}
 <div class="shell" hx-ext="ws" ws-connect="/ws">
   <input type="checkbox" id="nav-toggle" class="nav-toggle" aria-label="Toggle navigation">
-  <aside class="sidebar" aria-label="Navigation">
+  <aside class="sidebar" id="sidebar" aria-label="Navigation">
     {{template "team-rail" .}}
     <div class="sidebar-main">
       <header class="team-header">
@@ -39,6 +39,8 @@
         </form>
       </footer>
     </div>
+    <div class="sidebar-resize" role="separator" tabindex="0" aria-orientation="vertical" aria-controls="sidebar"
+         aria-label="Resize the sidebar" aria-valuenow="300" aria-valuemin="280" aria-valuemax="520"></div>
   </aside>
   <label for="nav-toggle" class="scrim" aria-hidden="true"></label>
   <main id="main" class="main">
