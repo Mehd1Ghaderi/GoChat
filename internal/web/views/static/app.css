@@ -36,6 +36,9 @@
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --sidebar-w: 300px;
+  /* The bounds leave the main pane room. */
+  --sidebar-min: 248px;
+  --sidebar-max: min(520px, 100vw - 420px);
   color-scheme: light dark;
 }
 
@@ -196,9 +199,19 @@ fieldset.choice legend { font-weight: 600; font-size: .92rem; padding: 0 .3rem; 
 .shell { display: flex; height: 100vh; height: 100dvh; overflow: hidden; }
 .nav-toggle { display: none; }
 .sidebar {
-  display: flex; width: var(--sidebar-w); flex: none; background: var(--side-bg); color: var(--side-fg);
-  padding-left: env(safe-area-inset-left); border-right: 1px solid var(--side-border);
+  display: flex; position: relative; width: clamp(var(--sidebar-min), var(--sidebar-w), var(--sidebar-max)); flex: none;
+  background: var(--side-bg); color: var(--side-fg); padding-left: env(safe-area-inset-left); border-right: 1px solid var(--side-border);
 }
+/* The sidebar's edge: drag it, or focus it and use the arrow keys. */
+.sidebar-resize { position: absolute; top: 0; bottom: 0; right: -5px; z-index: 5; width: 9px; cursor: col-resize; touch-action: none; }
+.sidebar-resize::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 3px; border-radius: 2px;
+  background: var(--accent); opacity: 0; transition: opacity .15s ease;
+}
+@media (hover: hover) { .sidebar-resize:hover::after { opacity: 1; transition-delay: .15s; } }
+.sidebar-resize:focus-visible { outline: none; }
+.sidebar-resize:focus-visible::after, .resizing .sidebar-resize::after { opacity: 1; transition-delay: 0s; }
+.resizing, .resizing * { cursor: col-resize !important; -webkit-user-select: none; user-select: none; }
 .team-rail {
   display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 9px;
   padding-top: max(12px, env(safe-area-inset-top)); background: var(--rail-bg); overflow-y: auto; width: 62px; flex: none;
@@ -678,6 +691,10 @@ kbd {
   background: var(--accent-soft); color: var(--accent-soft-ink); font-size: .88rem; font-weight: 650; text-decoration: none;
 }
 @media (hover: hover) { .jump-recent a:hover { background: var(--accent-fill); color: var(--accent-ink); } }
+@media (min-width: 1181px) {
+  /* An open thread takes 400px beside the main pane. */
+  :root { --sidebar-max: min(520px, 100vw - 760px); }
+}
 @media (max-width: 1180px) {
   .thread-pane:not(:empty) {
     position: fixed; inset: 0 0 0 auto; z-index: 45; width: min(440px, 100vw); box-shadow: var(--shadow);
@@ -687,8 +704,9 @@ kbd {
 
 /* Phones and small tablets: the sidebar becomes a drawer. */
 @media (max-width: 820px) {
+  :root { --sidebar-min: min(248px, 88vw); --sidebar-max: 88vw; }
   .sidebar {
-    position: fixed; inset: 0 auto 0 0; z-index: 40; width: min(88vw, var(--sidebar-w));
+    position: fixed; inset: 0 auto 0 0; z-index: 40;
     transform: translateX(-100%); transition: transform .22s cubic-bezier(.2, .8, .2, 1); box-shadow: var(--shadow);
   }
   .nav-toggle:checked ~ .sidebar { transform: none; }
@@ -712,6 +730,8 @@ kbd {
 @media (pointer: coarse) {
   .icon-btn.sm { width: 36px; height: 36px; }
   .btn.sm { min-height: 36px; }
+  .sidebar-resize { right: -10px; width: 19px; }
+  .sidebar-resize::after { left: 8px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
