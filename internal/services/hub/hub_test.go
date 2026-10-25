@@ -208,8 +208,8 @@ func TestPresenceGoesToItsUserAndWatchers(t *testing.T) {
 		slices.Sort(out)
 		return out
 	}
-	h.engine.Send(h.pid, Watch{GatewayID: "gw1", ConnID: 2, Seq: 1, UserIDs: []string{"a"}})
-	h.engine.Send(h.pid, Watch{GatewayID: "gw2", ConnID: 7, Seq: 1, UserIDs: []string{"a", "c"}})
+	h.engine.Send(h.pid, Watch{GatewayID: "gw1", ConnID: 2, Seq: 1, UserIDs: []string{"a"}, Checked: []string{"a"}})
+	h.engine.Send(h.pid, Watch{GatewayID: "gw2", ConnID: 7, Seq: 1, UserIDs: []string{"a", "c"}, Checked: []string{"a", "c"}})
 	// An older watch, checked later, changes nothing.
 	h.engine.Send(h.pid, Watch{GatewayID: "gw2", ConnID: 7, Seq: 0, UserIDs: nil})
 	if got := ask(WatchersOf{UserID: "a"}); !slices.Equal(got, []string{"b", "d"}) {
@@ -244,6 +244,55 @@ func TestPresenceGoesToItsUserAndWatchers(t *testing.T) {
 		t.Fatalf("gw1 after: %v", got)
 	}
 	h.wires["gw2"].noneOf(t, func(ev *pb.Event) bool { return ev.GetPresence().GetUserId() == "a" })
+}
+
+func TestWatchesKeepOnlyWhatWasChecked(t *testing.T) {
+	h := startHub(t, "gw1")
+	h.attach("gw1", 1, "a")
+	toCheck := func(users ...string) Unchecked {
+		t.Helper()
+		out, err := actors.Ask[Unchecked](context.Background(), h.engine, h.pid, ToCheck{GatewayID: "gw1", ConnID: 1, UserIDs: users})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	watched := func() []string {
+		t.Helper()
+		out, err := actors.Ask[[]string](context.Background(), h.engine, h.pid, WatchedBy{UserID: "a"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		slices.Sort(out)
+		return out
+	}
+	if got := toCheck("b", "c", "b"); got.UserID != "a" || !slices.Equal(got.UserIDs, []string{"b", "c"}) {
+		t.Fatalf("to check: %+v", got)
+	}
+	// What the directory did not find goes.
+	h.engine.Send(h.pid, Watch{GatewayID: "gw1", ConnID: 1, Seq: 1, UserIDs: []string{"b", "c"}, Checked: []string{"b"}})
+	if got := watched(); !slices.Equal(got, []string{"b"}) {
+		t.Fatalf("watched: %v", got)
+	}
+	// Who is watched already needs no check again, and no one else is taken
+	// unchecked.
+	if got := toCheck("b", "d"); !slices.Equal(got.UserIDs, []string{"d"}) {
+		t.Fatalf("to check again: %+v", got)
+	}
+	h.engine.Send(h.pid, Watch{GatewayID: "gw1", ConnID: 1, Seq: 2, UserIDs: []string{"b", "d"}})
+	if got := watched(); !slices.Equal(got, []string{"b"}) {
+		t.Fatalf("watched again: %v", got)
+	}
+	// An unwatched person comes back only checked.
+	h.engine.Send(h.pid, Unwatch{Watcher: "a", Subjects: []string{"b"}})
+	h.engine.Send(h.pid, Watch{GatewayID: "gw1", ConnID: 1, Seq: 3, UserIDs: []string{"b"}})
+	if got := watched(); len(got) != 0 {
+		t.Fatalf("watched after unwatching: %v", got)
+	}
+	out, err := actors.Ask[Unchecked](context.Background(), h.engine, h.pid, ToCheck{GatewayID: "gw1", ConnID: 9, UserIDs: []string{"b"}})
+	if err != nil || out.UserID != "" || len(out.UserIDs) != 0 {
+		t.Fatalf("an unknown connection: %+v %v", out, err)
+	}
 }
 
 // busyHub has two gateways, 10,000 members of a channel of whom 2,000 are

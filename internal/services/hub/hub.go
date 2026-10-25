@@ -100,20 +100,29 @@ type About struct {
 	Event  *pb.Event
 }
 
-// Watch records the people a connection watches, whom the directory found
-// its user acquainted with; a Watch older than the last, by Seq, is
-// dropped.
+// Watch replaces the people a connection watches with those of UserIDs it
+// watches already or the directory found its user acquainted with, Checked;
+// a Watch older than the last, by Seq, is dropped.
 type Watch struct {
 	GatewayID string
 	ConnID    uint64
 	Seq       uint64
 	UserIDs   []string
+	Checked   []string
 }
 
-// ConnUser replies with the user of a connection, empty when it has none.
-type ConnUser struct {
+// ToCheck replies with Unchecked: the connection's user, empty when it has
+// none, and those of UserIDs it does not watch yet, which a Watch must
+// check first.
+type ToCheck struct {
 	GatewayID string
 	ConnID    uint64
+	UserIDs   []string
+}
+
+type Unchecked struct {
+	UserID  string
+	UserIDs []string
 }
 
 // WatchedBy replies with the people UserID's connections watch, and
@@ -263,17 +272,18 @@ func (h *hub) Receive(c *actor.Context) {
 		if gw := h.gateways[msg.GatewayID]; gw != nil {
 			if cn := gw.conns[msg.ConnID]; cn != nil && msg.Seq > cn.watchSeq {
 				cn.watchSeq = msg.Seq
-				h.watch(gw, msg.ConnID, cn, msg.UserIDs)
+				h.watch(gw, msg.ConnID, cn, within(msg.UserIDs, cn.watches, msg.Checked))
 			}
 		}
-	case ConnUser:
-		var userID string
+	case ToCheck:
+		var out Unchecked
 		if gw := h.gateways[msg.GatewayID]; gw != nil {
 			if cn := gw.conns[msg.ConnID]; cn != nil {
-				userID = cn.userID
+				out.UserID = cn.userID
+				out.UserIDs = without(msg.UserIDs, cn.watches)
 			}
 		}
-		actors.Reply(c, userID)
+		actors.Reply(c, out)
 	case WatchedBy:
 		var out []string
 		for _, r := range h.conns[msg.UserID] {
@@ -499,6 +509,29 @@ func (h *hub) view(gw *gateway, connID uint64, cn *conn, channelID string) {
 		byGW[gw] = make(map[uint64]struct{})
 	}
 	byGW[gw][connID] = struct{}{}
+}
+
+// within returns those of want, once each, that are in any of lists, and
+// without those in none of them.
+func within(want []string, lists ...[]string) []string  { return pick(want, lists, true) }
+func without(want []string, lists ...[]string) []string { return pick(want, lists, false) }
+
+func pick(want []string, lists [][]string, in bool) []string {
+	listed := make(map[string]bool)
+	for _, list := range lists {
+		for _, u := range list {
+			listed[u] = true
+		}
+	}
+	seen := make(map[string]bool, len(want))
+	out := make([]string, 0, len(want))
+	for _, u := range want {
+		if !seen[u] && listed[u] == in {
+			seen[u] = true
+			out = append(out, u)
+		}
+	}
+	return out
 }
 
 // watch replaces the people a connection watches.
