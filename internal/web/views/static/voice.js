@@ -11,6 +11,10 @@
   var deafened = load("deafened");
   // Who speaks, by user id, so redrawn lists keep showing it.
   var speakers = {};
+  // The page's other files sit beside this one, versioned alike.
+  var staticBase = document.currentScript ? document.currentScript.src.replace(/[^/]*$/, "") : "";
+  var noiseModes = ["off", "standard", "strong"];
+  var rnnoise = null;
 
   // Discord's own: why a voice server closed the connection.
   var closeReasons = {
@@ -32,6 +36,34 @@
     try {
       window.localStorage.setItem("gochat.voice." + key, on ? "1" : "0");
     } catch (e) { /* private mode: the choice lasts this page */ }
+  }
+
+  // noiseMode is how much noise to take out of the microphone: none, the
+  // browser's own filter, or RNNoise's.
+  function noiseMode() {
+    var mode = null;
+    try {
+      mode = window.localStorage.getItem("gochat.voice.noise");
+    } catch (e) { /* private mode: the default stands */ }
+    return noiseModes.indexOf(mode) < 0 ? "standard" : mode;
+  }
+
+  function canDenoise() {
+    return !!(window.AudioWorkletNode && window.WebAssembly && staticBase);
+  }
+
+  // showNoiseSetting marks this browser's choice on the settings page.
+  function showNoiseSetting(saved) {
+    var box = document.querySelector("[data-voice-noise]");
+    var state = document.querySelector("[data-voice-noise-state]");
+    if (!box || !state) return;
+    var mode = noiseMode();
+    box.querySelectorAll('input[name="noise"]').forEach(function (input) {
+      if (input.value === "strong") input.disabled = !canDenoise();
+      input.checked = input.value === (mode === "strong" && !canDenoise() ? "standard" : mode);
+    });
+    state.textContent = saved ? "Saved." : canDenoise() ? "" : "This browser cannot run strong suppression.";
+    state.className = "status" + (saved ? " ok" : "");
   }
 
   function toast(text) {
@@ -75,6 +107,75 @@
     if (state.ws && state.ws.readyState === WebSocket.OPEN) state.ws.send(JSON.stringify(msg));
   }
 
+  // denoise runs mic through RNNoise in an audio worklet, at the 48 kHz it
+  // takes, once the worklet says it is ready.
+  function denoise(mic) {
+    var ctx;
+    try {
+      ctx = new AudioContext({ sampleRate: 48000 });
+    } catch (e) {
+      return Promise.reject(e);
+    }
+    if (!rnnoise) {
+      rnnoise = fetch(staticBase + "rnnoise.wasm").then(function (r) {
+        if (!r.ok) throw new Error("rnnoise.wasm: " + r.status);
+        return r.arrayBuffer();
+      });
+    }
+    var wasm = rnnoise;
+    return Promise.all([wasm, ctx.audioWorklet.addModule(staticBase + "denoise.js")])
+      .then(function (loaded) {
+        var node = new AudioWorkletNode(ctx, "gochat-denoise", {
+          numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+          channelCount: 1, channelCountMode: "explicit", processorOptions: { wasm: loaded[0] }
+        });
+        var out = ctx.createMediaStreamDestination();
+        ctx.createMediaStreamSource(mic).connect(node).connect(out);
+        return new Promise(function (resolve, reject) {
+          node.port.onmessage = function (e) {
+            if (e.data && e.data.ready) resolve({ out: out.stream, ctx: ctx });
+            else reject(new Error(e.data && e.data.error));
+          };
+          node.onprocessorerror = function () { reject(new Error("the noise filter failed")); };
+          // A context the browser keeps suspended never builds it.
+          setTimeout(function () { reject(new Error("the noise filter did not start")); }, 5000);
+          ctx.resume().catch(function () {});
+        });
+      })
+      .catch(function (err) {
+        if (wasm === rnnoise) rnnoise = null;
+        ctx.close().catch(function () {});
+        throw err;
+      });
+  }
+
+  // microphone opens the microphone as mode asks, with what to send: the
+  // microphone itself, or what RNNoise makes of it.
+  function microphone(mode) {
+    var audio = { echoCancellation: true, noiseSuppression: mode === "standard", autoGainControl: true };
+    if (mode === "strong") {
+      if (!canDenoise()) return microphone("standard");
+      audio.sampleRate = 48000;
+      audio.channelCount = 1;
+    }
+    return navigator.mediaDevices.getUserMedia({ audio: audio }).then(function (mic) {
+      if (mode !== "strong") return { raw: mic, out: mic };
+      return denoise(mic).then(function (d) {
+        return { raw: mic, out: d.out, ctx: d.ctx };
+      }, function () {
+        stopTracks(mic);
+        toast("Strong noise suppression does not work in this browser: using standard.");
+        return microphone("standard");
+      });
+    });
+  }
+
+  function release(m) {
+    if (m.ctx) m.ctx.close().catch(function () {});
+    if (m.out !== m.raw) stopTracks(m.out);
+    stopTracks(m.raw);
+  }
+
   function join(channelID) {
     if (call && call.channel === channelID) return;
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.RTCPeerConnection) {
@@ -87,13 +188,13 @@
     var state = { channel: channelID, name: "", remote: {}, early: [], queue: Promise.resolve(), connected: false, closing: false };
     call = state;
     render();
-    navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
-      .then(function (mic) {
+    microphone(noiseMode())
+      .then(function (m) {
         if (call !== state) {
-          stopTracks(mic);
+          release(m);
           return null;
         }
-        state.mic = mic;
+        state.mic = m;
         applyMute();
         return post("/voice/join", { channel_id: channelID });
       })
@@ -167,7 +268,7 @@
   function setup(state, iceServers) {
     var pc = new RTCPeerConnection({ iceServers: iceServers });
     state.pc = pc;
-    state.mic.getTracks().forEach(function (t) { pc.addTrack(t, state.mic); });
+    state.mic.out.getTracks().forEach(function (t) { pc.addTrack(t, state.mic.out); });
     pc.onicecandidate = function (e) {
       if (e.candidate) send(state, { op: "candidate", candidate: e.candidate.toJSON() });
     };
@@ -227,7 +328,7 @@
     var ctx = new Ctx();
     var analyser = ctx.createAnalyser();
     analyser.fftSize = 512;
-    ctx.createMediaStreamSource(state.mic).connect(analyser);
+    ctx.createMediaStreamSource(state.mic.out).connect(analyser);
     var data = new Uint8Array(analyser.fftSize);
     var loudAt = 0;
     state.audioCtx = ctx;
@@ -277,7 +378,7 @@
     if (state.audioCtx) state.audioCtx.close().catch(function () {});
     if (state.ws) state.ws.close(1000);
     if (state.pc) state.pc.close();
-    stopTracks(state.mic);
+    if (state.mic) release(state.mic);
     Object.keys(state.remote).forEach(function (id) { state.remote[id].remove(); });
     speakers = {};
     showSpeakers();
@@ -292,7 +393,9 @@
 
   function applyMute() {
     var silent = muted || deafened;
-    if (call && call.mic) call.mic.getAudioTracks().forEach(function (t) { t.enabled = !silent; });
+    if (call && call.mic) {
+      call.mic.raw.getAudioTracks().concat(call.mic.out.getAudioTracks()).forEach(function (t) { t.enabled = !silent; });
+    }
     if (call) Object.keys(call.remote).forEach(function (id) { call.remote[id].muted = deafened; });
     document.querySelectorAll("[data-voice-mute]").forEach(function (b) {
       b.setAttribute("aria-pressed", silent ? "true" : "false");
@@ -375,6 +478,15 @@
     if (t.closest("[data-voice-deaf]")) toggleDeaf();
   });
 
+  document.addEventListener("change", function (e) {
+    var t = e.target;
+    if (!(t instanceof HTMLInputElement) || t.name !== "noise" || !t.closest("[data-voice-noise]")) return;
+    try {
+      window.localStorage.setItem("gochat.voice.noise", t.value);
+    } catch (err) { /* private mode: nothing keeps it */ }
+    showNoiseSetting(true);
+  });
+
   function isVoiceList(el) {
     return el instanceof Element && (el.id.indexOf("voice-members-") === 0 || el.id.indexOf("voice-tiles-") === 0);
   }
@@ -406,4 +518,5 @@
 
   applyMute();
   render();
+  showNoiseSetting(false);
 })();

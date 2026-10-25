@@ -2,11 +2,14 @@ package web
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
+	"github.com/ssenerg/gochat/internal/web/render"
 )
 
 func TestParseRange(t *testing.T) {
@@ -28,6 +31,17 @@ func TestParseRange(t *testing.T) {
 		if got := parseRange(h); !proto.Equal(got, want) {
 			t.Errorf("parseRange(%q) = %v, want %v", h, got, want)
 		}
+	}
+}
+
+func TestPolicyAllowsWebAssemblyOnly(t *testing.T) {
+	r, err := render.New(16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(zap.NewNop(), &Config{PublicURL: "https://chat.example.com", RateLimit: &RateLimitConfig{}}, nil, r, nil, nil)
+	if !strings.Contains(h.csp, "script-src 'self' 'wasm-unsafe-eval';") || strings.Contains(h.csp, "'unsafe-eval'") || strings.Contains(h.csp, "'unsafe-inline'") {
+		t.Fatalf("policy: %s", h.csp)
 	}
 }
 

@@ -85,7 +85,8 @@ func NewHandler(logger *zap.Logger, cfg *Config, client *drpc.Client, r *render.
 	}
 	h.csp = strings.Join([]string{
 		"default-src 'none'",
-		"script-src 'self'",
+		// WebAssembly only, for the voice client's noise filter.
+		"script-src 'self' 'wasm-unsafe-eval'",
 		"style-src 'self'",
 		"img-src 'self' data:",
 		"media-src 'self'",

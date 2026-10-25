@@ -73,6 +73,12 @@ and show to the others. A channel's admins and the team's can disconnect
 anyone. Leaving the team, signing out or the sign-in expiring ends the talk.
 A channel takes at most 25 people.
 
+Each browser picks its noise suppression in its account settings: off, the
+browser's own filter (the default), or strong, which runs
+[RNNoise](third_party/rnnoise-wasm) over the microphone in an audio worklet
+before sending it, adding 20 ms. A browser that cannot run it uses its own
+filter.
+
 ### Storage
 
 - **ScyllaDB** holds everything. Messages are partitioned by
@@ -120,7 +126,8 @@ A channel takes at most 25 people.
   consumed with a lightweight transaction. Team admins see the open invites
   and can revoke them; an invite is suspended while its creator may not
   invite, and creating them is capped per person.
-- Web: strict CSP (no inline script, no eval), CSRF double-submit token plus
+- Web: strict CSP (no inline script, no eval; WebAssembly only for the noise
+  filter), CSRF double-submit token plus
   `Origin` and `Sec-Fetch-Site` checks, `__Host-` `Secure` cookies and HSTS on
   https, `X-Frame-Options: DENY`, `nosniff`, per-IP rate limits. The page may
   use the microphone, for voice messages, and no other device.
