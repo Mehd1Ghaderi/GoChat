@@ -100,20 +100,31 @@ type About struct {
 	Event  *pb.Event
 }
 
-// Watch records the people a connection watches, whom the directory found
-// its user acquainted with; a Watch older than the last, by Seq, is
-// dropped.
+// Watch sets the people a connection watches: those of UserIDs it watched
+// already, whom the directory approved before, and Approved, whom it just
+// found the connection's user acquainted with. A Watch older than the
+// last, by Seq, is dropped.
 type Watch struct {
 	GatewayID string
 	ConnID    uint64
 	Seq       uint64
 	UserIDs   []string
+	Approved  []string
 }
 
-// ConnUser replies with the user of a connection, empty when it has none.
-type ConnUser struct {
+// ToCheck replies with the Unchecked of a connection's new watch list.
+type ToCheck struct {
 	GatewayID string
 	ConnID    uint64
+	UserIDs   []string
+}
+
+// Unchecked holds the user of a connection, empty when it has none, and
+// those of a watch list it does not watch yet: only they need the
+// directory's check.
+type Unchecked struct {
+	UserID string
+	New    []string
 }
 
 // WatchedBy replies with the people UserID's connections watch, and
@@ -263,17 +274,30 @@ func (h *hub) Receive(c *actor.Context) {
 		if gw := h.gateways[msg.GatewayID]; gw != nil {
 			if cn := gw.conns[msg.ConnID]; cn != nil && msg.Seq > cn.watchSeq {
 				cn.watchSeq = msg.Seq
-				h.watch(gw, msg.ConnID, cn, msg.UserIDs)
+				ok := set(cn.watches, msg.Approved)
+				users := make([]string, 0, len(msg.UserIDs))
+				for _, u := range msg.UserIDs {
+					if ok[u] {
+						users = append(users, u)
+					}
+				}
+				h.watch(gw, msg.ConnID, cn, users)
 			}
 		}
-	case ConnUser:
-		var userID string
+	case ToCheck:
+		var out Unchecked
 		if gw := h.gateways[msg.GatewayID]; gw != nil {
 			if cn := gw.conns[msg.ConnID]; cn != nil {
-				userID = cn.userID
+				out.UserID = cn.userID
+				watched := set(cn.watches)
+				for _, u := range msg.UserIDs {
+					if !watched[u] {
+						out.New = append(out.New, u)
+					}
+				}
 			}
 		}
-		actors.Reply(c, userID)
+		actors.Reply(c, out)
 	case WatchedBy:
 		var out []string
 		for _, r := range h.conns[msg.UserID] {
@@ -499,6 +523,21 @@ func (h *hub) view(gw *gateway, connID uint64, cn *conn, channelID string) {
 		byGW[gw] = make(map[uint64]struct{})
 	}
 	byGW[gw][connID] = struct{}{}
+}
+
+// set holds the strings of lists.
+func set(lists ...[]string) map[string]bool {
+	n := 0
+	for _, l := range lists {
+		n += len(l)
+	}
+	out := make(map[string]bool, n)
+	for _, l := range lists {
+		for _, s := range l {
+			out[s] = true
+		}
+	}
+	return out
 }
 
 // watch replaces the people a connection watches.

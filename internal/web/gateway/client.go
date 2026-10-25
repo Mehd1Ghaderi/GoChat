@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"slices"
 	"time"
 
 	"github.com/anthdm/hollywood/actor"
@@ -136,8 +135,10 @@ func (s *clientSession) frame(c *actor.Context, data []byte) {
 			ids = ids[:MaxWatched]
 		}
 		users := make([]string, 0, len(ids))
+		seen := make(map[string]bool, len(ids))
 		for _, id := range ids {
-			if uuidRe.MatchString(id) && !slices.Contains(users, id) {
+			if !seen[id] && uuidRe.MatchString(id) {
+				seen[id] = true
 				users = append(users, id)
 			}
 		}

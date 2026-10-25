@@ -304,7 +304,7 @@ func (s *gatewayService) Connect(stream pb.DRPCGatewayService_ConnectStream) err
 		return err
 	}
 
-	var watches uint64
+	checks := newWatchChecks(func(w *pb.Watch, seq uint64) { s.watch(ctx, key, w, seq) })
 	for {
 		req, err := stream.Recv()
 		if err != nil {
@@ -325,26 +325,35 @@ func (s *gatewayService) Connect(stream pb.DRPCGatewayService_ConnectStream) err
 			}
 			s.sys.Engine.Send(s.sys.Hub, hub.View{GatewayID: key, ConnID: f.View.ConnId, ChannelID: ch})
 		case *pb.ConnectRequest_Watch:
-			// The check reads the people's teams: it runs off the stream,
-			// and the hub keeps the latest of a connection's watches.
-			watches++
-			go s.watch(ctx, key, f.Watch, watches)
+			// The check reads the people's teams: it runs off the stream.
+			checks.add(f.Watch)
 		}
 	}
 }
 
 // watch keeps those of a connection's watch list its user shares a team
 // with, as presence answers, so a gateway or an app can follow no one else.
+// The directory checks only the people the connection does not watch yet,
+// for a few connections at a time.
 func (s *gatewayService) watch(ctx context.Context, key string, w *pb.Watch, seq uint64) {
-	userID, err := actors.Ask[string](ctx, s.sys.Engine, s.sys.Hub, hub.ConnUser{GatewayID: key, ConnID: w.ConnId})
-	if err != nil || userID == "" {
+	un, err := actors.Ask[hub.Unchecked](ctx, s.sys.Engine, s.sys.Hub, hub.ToCheck{GatewayID: key, ConnID: w.ConnId, UserIDs: w.UserIds})
+	if err != nil || un.UserID == "" {
 		return
 	}
-	known, err := actors.Ask[[]string](ctx, s.sys.Engine, s.sys.Directory, directory.Acquainted{UserID: userID, UserIDs: w.UserIds})
-	if err != nil {
-		return
+	var approved []string
+	if len(un.New) > 0 {
+		select {
+		case s.watchChecks <- struct{}{}:
+		case <-ctx.Done():
+			return
+		}
+		approved, err = actors.Ask[[]string](ctx, s.sys.Engine, s.sys.Directory, directory.Acquainted{UserID: un.UserID, UserIDs: un.New})
+		<-s.watchChecks
+		if err != nil {
+			return
+		}
 	}
-	s.sys.Engine.Send(s.sys.Hub, hub.Watch{GatewayID: key, ConnID: w.ConnId, Seq: seq, UserIDs: known})
+	s.sys.Engine.Send(s.sys.Hub, hub.Watch{GatewayID: key, ConnID: w.ConnId, Seq: seq, UserIDs: w.UserIds, Approved: approved})
 }
 
 func (s *gatewayService) attach(ctx context.Context, key string, a *pb.Attach) {

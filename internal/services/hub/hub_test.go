@@ -208,8 +208,8 @@ func TestPresenceGoesToItsUserAndWatchers(t *testing.T) {
 		slices.Sort(out)
 		return out
 	}
-	h.engine.Send(h.pid, Watch{GatewayID: "gw1", ConnID: 2, Seq: 1, UserIDs: []string{"a"}})
-	h.engine.Send(h.pid, Watch{GatewayID: "gw2", ConnID: 7, Seq: 1, UserIDs: []string{"a", "c"}})
+	h.engine.Send(h.pid, Watch{GatewayID: "gw1", ConnID: 2, Seq: 1, UserIDs: []string{"a"}, Approved: []string{"a"}})
+	h.engine.Send(h.pid, Watch{GatewayID: "gw2", ConnID: 7, Seq: 1, UserIDs: []string{"a", "c"}, Approved: []string{"a", "c"}})
 	// An older watch, checked later, changes nothing.
 	h.engine.Send(h.pid, Watch{GatewayID: "gw2", ConnID: 7, Seq: 0, UserIDs: nil})
 	if got := ask(WatchersOf{UserID: "a"}); !slices.Equal(got, []string{"b", "d"}) {
@@ -244,6 +244,58 @@ func TestPresenceGoesToItsUserAndWatchers(t *testing.T) {
 		t.Fatalf("gw1 after: %v", got)
 	}
 	h.wires["gw2"].noneOf(t, func(ev *pb.Event) bool { return ev.GetPresence().GetUserId() == "a" })
+}
+
+func TestWatchesNeedCheckingOnlyForNewPeople(t *testing.T) {
+	h := startHub(t, "gw1")
+	h.attach("gw1", 1, "me")
+	check := func(users ...string) Unchecked {
+		t.Helper()
+		return askHub[Unchecked](t, h, ToCheck{GatewayID: "gw1", ConnID: 1, UserIDs: users})
+	}
+	watched := func() []string {
+		t.Helper()
+		out := askHub[[]string](t, h, WatchedBy{UserID: "me"})
+		slices.Sort(out)
+		return out
+	}
+	if got := check("a", "b"); got.UserID != "me" || !slices.Equal(got.New, []string{"a", "b"}) {
+		t.Fatalf("first check: %+v", got)
+	}
+	// The directory approved a, not b.
+	h.engine.Send(h.pid, Watch{GatewayID: "gw1", ConnID: 1, Seq: 1, UserIDs: []string{"a", "b"}, Approved: []string{"a"}})
+	if got := watched(); !slices.Equal(got, []string{"a"}) {
+		t.Fatalf("watched: %v", got)
+	}
+	// Only the people not watched yet need the directory again.
+	if got := check("a", "b", "c"); !slices.Equal(got.New, []string{"b", "c"}) {
+		t.Fatalf("second check: %+v", got)
+	}
+	h.engine.Send(h.pid, Watch{GatewayID: "gw1", ConnID: 1, Seq: 2, UserIDs: []string{"a", "c"}})
+	if got := watched(); !slices.Equal(got, []string{"a"}) {
+		t.Fatalf("an unapproved person was kept: %v", got)
+	}
+	// A watch ended meanwhile, as when a team is left, stays ended.
+	h.engine.Send(h.pid, Unwatch{Watcher: "me", Subjects: []string{"a"}})
+	h.engine.Send(h.pid, Watch{GatewayID: "gw1", ConnID: 1, Seq: 3, UserIDs: []string{"a"}})
+	if got := watched(); len(got) != 0 {
+		t.Fatalf("an ended watch came back: %v", got)
+	}
+	if got := check("a"); !slices.Equal(got.New, []string{"a"}) {
+		t.Fatalf("check after: %+v", got)
+	}
+	if got := askHub[Unchecked](t, h, ToCheck{GatewayID: "gw1", ConnID: 9, UserIDs: []string{"a"}}); got.UserID != "" || len(got.New) != 0 {
+		t.Fatalf("a connection with no user: %+v", got)
+	}
+}
+
+func askHub[T any](t *testing.T, h *testHub, msg any) T {
+	t.Helper()
+	out, err := actors.Ask[T](context.Background(), h.engine, h.pid, msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 // busyHub has two gateways, 10,000 members of a channel of whom 2,000 are

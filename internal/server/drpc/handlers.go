@@ -28,6 +28,8 @@ type base struct {
 	storage *minio.Storage
 	cfg     *services.Config
 	uploads chan struct{}
+	// watchChecks bounds the Watch checks running at once.
+	watchChecks chan struct{}
 	// uploading counts each user's uploads in progress.
 	mu        sync.Mutex
 	uploading map[gocql.UUID]int
@@ -35,7 +37,8 @@ type base struct {
 
 // Mux registers every service on a new mux.
 func Mux(sys *services.System, storage *minio.Storage, cfg *services.Config) (*drpcmux.Mux, error) {
-	b := &base{sys: sys, storage: storage, cfg: cfg, uploads: make(chan struct{}, cfg.Files.MaxUploads), uploading: make(map[gocql.UUID]int)}
+	b := &base{sys: sys, storage: storage, cfg: cfg, uploads: make(chan struct{}, cfg.Files.MaxUploads),
+		watchChecks: make(chan struct{}, maxWatchChecks), uploading: make(map[gocql.UUID]int)}
 	mux := drpcmux.New()
 	for _, reg := range []func() error{
 		func() error { return pb.DRPCRegisterAuthService(mux, &authService{b}) },
