@@ -12,8 +12,12 @@ android {
         applicationId = "io.github.ssenerg.gochat"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
+        // Phones, and the 64-bit emulators; WebRTC's native code is large.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        }
     }
     signingConfigs {
         // The same debug key on every machine and CI runner, so a newer

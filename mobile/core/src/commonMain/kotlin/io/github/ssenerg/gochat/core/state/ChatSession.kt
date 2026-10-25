@@ -24,6 +24,8 @@ import io.github.ssenerg.gochat.core.model.mentions
 import io.github.ssenerg.gochat.core.model.newer
 import io.github.ssenerg.gochat.core.model.title
 import io.github.ssenerg.gochat.core.model.uuidTime
+import io.github.ssenerg.gochat.core.voice.RtcEngine
+import io.github.ssenerg.gochat.core.voice.VoiceCall
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -87,6 +89,7 @@ class ChatSession internal constructor(
     me: User,
     private val store: KeyValueStore,
     parent: CoroutineScope,
+    rtc: RtcEngine?,
     private val onSignedOut: (String) -> Unit,
 ) {
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]))
@@ -94,6 +97,9 @@ class ChatSession internal constructor(
     val state: StateFlow<ChatState> = _state.asStateFlow()
 
     val gateway = Gateway(api.client, scope)
+
+    /** The voice channel the person talks in, if any. */
+    val voice = VoiceCall(api, rtc, store, me.id, scope)
 
     private val _notices = MutableSharedFlow<Notice>(extraBufferCapacity = 16)
     val notices: SharedFlow<Notice> = _notices.asSharedFlow()
@@ -126,6 +132,7 @@ class ChatSession internal constructor(
     }
 
     internal fun stop() {
+        voice.close()
         gateway.stop()
         scope.cancel()
     }
@@ -295,6 +302,9 @@ class ChatSession internal constructor(
     }
 
     suspend fun joinChannel(id: String): Channel? = api.joinChannel(id)?.also { addChannel(it) }
+
+    /** Takes someone out of a voice channel's talk, for its moderators. */
+    suspend fun disconnectVoice(channelId: String, userId: String): String? = act { api.disconnectVoiceMember(channelId, userId) }
 
     suspend fun leaveChannel(id: String): String? = act {
         api.leaveChannel(id)

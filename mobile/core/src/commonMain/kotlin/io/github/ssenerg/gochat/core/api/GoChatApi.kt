@@ -209,8 +209,26 @@ class GoChatApi(val client: ApiClient) {
 
     suspend fun savedIds() = messages("ListSaved", ListSavedRequest(ids_only = true), ListSavedResponse.ADAPTER).message_ids
 
-    // Voice channels: who talks where; talking itself is not in the apps yet.
+    // Voice channels: who talks where, and the calls VoiceCall makes to talk.
 
-    suspend fun voiceStates(teamId: String) =
-        client.call("gochat.v1.VoiceService/ListVoiceStates", ListVoiceStatesRequest(team_id = teamId), ListVoiceStatesResponse.ADAPTER).channels
+    private suspend fun <T : Any> voice(m: String, req: com.squareup.wire.Message<*, *>, res: com.squareup.wire.ProtoAdapter<T>) =
+        client.call("gochat.v1.VoiceService/$m", req, res)
+
+    suspend fun voiceStates(teamId: String) = voice("ListVoiceStates", ListVoiceStatesRequest(team_id = teamId), ListVoiceStatesResponse.ADAPTER).channels
+
+    /** The voice server's address and a token to identify there with. */
+    suspend fun joinVoice(channelId: String) = voice("JoinVoice", JoinVoiceRequest(channel_id = channelId), JoinVoiceResponse.ADAPTER)
+
+    suspend fun leaveVoice() {
+        voice("LeaveVoice", LeaveVoiceRequest(), LeaveVoiceResponse.ADAPTER)
+    }
+
+    suspend fun updateVoiceState(selfMute: Boolean, selfDeaf: Boolean) {
+        voice("UpdateVoiceState", UpdateVoiceStateRequest(self_mute = selfMute, self_deaf = selfDeaf), UpdateVoiceStateResponse.ADAPTER)
+    }
+
+    /** Takes someone out of a voice channel's talk, for its moderators. */
+    suspend fun disconnectVoiceMember(channelId: String, userId: String) {
+        voice("DisconnectVoiceMember", DisconnectVoiceMemberRequest(channel_id = channelId, user_id = userId), DisconnectVoiceMemberResponse.ADAPTER)
+    }
 }

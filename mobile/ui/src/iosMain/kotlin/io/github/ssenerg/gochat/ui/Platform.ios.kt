@@ -6,6 +6,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import com.russhwolf.settings.KeychainSettings
 import io.github.ssenerg.gochat.core.state.KeyValueStore
+import io.github.ssenerg.gochat.core.voice.RtcEngine
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.usePinned
@@ -55,6 +56,9 @@ import kotlin.math.pow
 class IosPlatform(scope: CoroutineScope) : Platform {
     override val store: KeyValueStore = KeychainStore()
     override val player: AudioPlayer = IosAudioPlayer(scope)
+
+    // Talking in voice channels needs WebRTC for iOS, which is next.
+    override val rtc: RtcEngine? = null
 
     override fun openFile(name: String, mimeType: String, bytes: ByteArray) {
         val safe = name.substringAfterLast('/').ifBlank { "file" }
@@ -226,6 +230,11 @@ private class IosVoiceRecorder : VoiceRecorder {
 
 @Composable
 actual fun rememberVoiceRecorder(): VoiceRecorder = remember { IosVoiceRecorder() }
+
+@Composable
+actual fun rememberMicrophoneAccess(): suspend () -> Boolean = remember {
+    suspend { suspendCancellableCoroutine<Boolean> { c -> AVAudioSession.sharedInstance().requestRecordPermission { ok -> c.resume(ok) } } }
+}
 
 private class PickerDelegate(private val onPicked: (NSURL) -> Unit) : NSObject(), UIDocumentPickerDelegateProtocol {
     override fun documentPicker(controller: UIDocumentPickerViewController, didPickDocumentsAtURLs: List<*>) {

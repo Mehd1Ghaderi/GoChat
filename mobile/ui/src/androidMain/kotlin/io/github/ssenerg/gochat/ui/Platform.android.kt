@@ -25,6 +25,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
 import io.github.ssenerg.gochat.core.state.KeyValueStore
+import io.github.ssenerg.gochat.core.voice.RtcEngine
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +43,7 @@ import java.io.File
 class AndroidPlatform(private val context: Context, scope: CoroutineScope) : Platform {
     override val store: KeyValueStore = PreferencesStore(context)
     override val player: AudioPlayer = AndroidAudioPlayer(context, scope)
+    override val rtc: RtcEngine = AndroidRtcEngine(context)
 
     override fun openFile(name: String, mimeType: String, bytes: ByteArray) {
         val dir = File(context.cacheDir, "shared").apply { mkdirs() }
@@ -167,8 +169,7 @@ private class AndroidVoiceRecorder(
     private var startedAt = 0L
 
     override suspend fun start(): Boolean {
-        val granted = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED || askPermission()
-        if (!granted) return false
+        if (!askPermission()) return false
         cancel()
         val f = File(context.cacheDir, "voice-${System.currentTimeMillis()}.m4a")
         val r = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(context) else @Suppress("DEPRECATION") MediaRecorder()
@@ -228,6 +229,13 @@ private class AndroidVoiceRecorder(
 @Composable
 actual fun rememberVoiceRecorder(): VoiceRecorder {
     val context = LocalContext.current
+    val microphone = rememberMicrophoneAccess()
+    return remember(context) { AndroidVoiceRecorder(context.applicationContext, microphone) }
+}
+
+@Composable
+actual fun rememberMicrophoneAccess(): suspend () -> Boolean {
+    val context = LocalContext.current
     val pending = remember { arrayOfNulls<CompletableDeferred<Boolean>>(1) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         pending[0]?.complete(granted)
@@ -235,11 +243,13 @@ actual fun rememberVoiceRecorder(): VoiceRecorder {
     }
     val currentLauncher by rememberUpdatedState(launcher)
     return remember(context) {
-        AndroidVoiceRecorder(context.applicationContext) {
-            val d = CompletableDeferred<Boolean>()
-            pending[0] = d
-            currentLauncher.launch(Manifest.permission.RECORD_AUDIO)
-            d.await()
+        suspend {
+            context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED || run {
+                val d = CompletableDeferred<Boolean>()
+                pending[0] = d
+                currentLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                d.await()
+            }
         }
     }
 }

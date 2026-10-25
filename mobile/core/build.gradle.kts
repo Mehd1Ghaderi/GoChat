@@ -19,6 +19,8 @@ kotlin {
             api(libs.wire.runtime)
             api(libs.ktor.client.core)
             implementation(libs.ktor.client.websockets)
+            // The voice server speaks JSON.
+            implementation(libs.kotlinx.serialization.json)
         }
         jvmMain.dependencies {
             implementation(libs.ktor.client.okhttp)

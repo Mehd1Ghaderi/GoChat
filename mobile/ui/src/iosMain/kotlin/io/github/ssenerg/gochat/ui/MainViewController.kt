@@ -7,7 +7,7 @@ import platform.UIKit.UIViewController
 
 private val scope = MainScope()
 private val platform = IosPlatform(scope)
-private val app = GoChatApp(platform.store, scope).also { it.start() }
+private val app = GoChatApp(platform.store, scope, rtc = platform.rtc).also { it.start() }
 
 /** The app's screen, for the Swift side to show. */
 fun MainViewController(): UIViewController = ComposeUIViewController { GoChatRoot(app, platform) }

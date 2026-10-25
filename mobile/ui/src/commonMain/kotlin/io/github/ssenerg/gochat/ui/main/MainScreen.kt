@@ -40,6 +40,7 @@ import io.github.ssenerg.gochat.ui.people.NewChannelScreen
 import io.github.ssenerg.gochat.ui.people.NewConversationScreen
 import io.github.ssenerg.gochat.ui.settings.SettingsScreen
 import io.github.ssenerg.gochat.ui.thread.ThreadScreen
+import io.github.ssenerg.gochat.ui.voice.VoiceRoomScreen
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -66,6 +67,8 @@ sealed interface Route {
     data object NewChannel : Route
 
     data class ChannelInfo(val id: String) : Route
+
+    data class Voice(val id: String) : Route
 
     data object Settings : Route
 }
@@ -127,6 +130,11 @@ fun MainScreen(app: GoChatApp, session: ChatSession) {
         }
     }
 
+    // Why a call ended or could not start.
+    LaunchedEffect(session) {
+        session.voice.errors.collect { toasts.show(it) }
+    }
+
     // What is on screen is what gets read.
     val top = nav.top
     LaunchedEffect(top) {
@@ -173,6 +181,7 @@ private fun Screen(route: Route, session: ChatSession, app: GoChatApp) {
         Route.Browse -> BrowseChannelsScreen(session)
         Route.NewChannel -> NewChannelScreen(session)
         is Route.ChannelInfo -> ChannelInfoScreen(session, route.id)
+        is Route.Voice -> VoiceRoomScreen(session, route.id)
         Route.Settings -> SettingsScreen(session, app)
     }
 }

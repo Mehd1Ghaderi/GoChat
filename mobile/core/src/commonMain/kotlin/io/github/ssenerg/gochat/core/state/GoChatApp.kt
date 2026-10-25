@@ -6,6 +6,7 @@ import io.github.ssenerg.gochat.core.api.ApiException
 import io.github.ssenerg.gochat.core.api.GoChatApi
 import io.github.ssenerg.gochat.core.api.normalizeServerUrl
 import io.github.ssenerg.gochat.core.api.userMessage
+import io.github.ssenerg.gochat.core.voice.RtcEngine
 import io.ktor.client.engine.HttpClientEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,6 +54,8 @@ class GoChatApp(
     private val store: KeyValueStore,
     private val scope: CoroutineScope,
     private val engine: HttpClientEngine? = null,
+    /** The platform's WebRTC, for voice channels; without it they only show who talks. */
+    private val rtc: RtcEngine? = null,
 ) {
     private val _state = MutableStateFlow<AppState>(AppState.Starting)
     val state: StateFlow<AppState> = _state.asStateFlow()
@@ -173,7 +176,7 @@ class GoChatApp(
     }
 
     private fun open(api: GoChatApi, me: gochat.v1.User) {
-        val s = ChatSession(api, me, store, scope) { notice -> close(notice) }
+        val s = ChatSession(api, me, store, scope, rtc) { notice -> close(notice) }
         session = s
         _state.value = AppState.SignedIn(s)
         s.start()

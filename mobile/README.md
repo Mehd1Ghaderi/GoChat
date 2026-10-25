@@ -21,19 +21,28 @@ iosApp/      the Xcode project: a SwiftUI shell that shows the shared screens
   reconnects; `GoChatApp` restores the session and signs people in;
   `ChatSession` holds teams, channels, presence and voice states and applies
   every event the server sends; `Timeline` and `ThreadView` hold a channel's
-  and a thread's messages. Formatting and the message Markdown live here too,
-  so the screens only draw.
+  and a thread's messages; `VoiceCall` talks in a voice channel, speaking the
+  voice server's signaling protocol as the web's voice client does, over the
+  platform's WebRTC (`RtcEngine`). Formatting and the message Markdown live
+  here too, so the screens only draw.
 - **ui** draws the app with Material 3 in the web's colors, light and dark.
   Each platform supplies storage (Android's private preferences, the iOS
   Keychain), voice recording and playback (`MediaRecorder`/`MediaPlayer`,
-  `AVAudioRecorder`/`AVAudioPlayer`), the file picker and sharing.
+  `AVAudioRecorder`/`AVAudioPlayer`), the file picker and sharing. Android
+  supplies WebRTC too, from [Stream's build](https://github.com/GetStream/webrtc-android)
+  of Google's library, and a foreground service that keeps a call going
+  with the screen off.
 
 ## What the apps do
 
 - Sign in to any GoChat server, with two-factor codes, or sign up with an
   invite link.
-- Teams, channels, voice channels (who talks in them), direct and group
-  conversations, with presence, unread marks and mention counts, all live.
+- Teams, channels, voice channels, direct and group conversations, with
+  presence, unread marks and mention counts, all live.
+- Voice channels, on Android: join, talk, mute, deafen and leave, see who
+  is talking, and, as a moderator, disconnect people. The call goes on in the
+  background, on the loudspeaker or a headset, rejoins after a network
+  change, and can be left from its notification. The iOS app shows who talks.
 - Messages with Markdown, mentions, emoji, images, files, reactions,
   threads, edits, deletes, pins and saves; typing indicators; search;
   followed threads; saved messages.
@@ -46,8 +55,8 @@ iosApp/      the Xcode project: a SwiftUI shell that shows the shared screens
 
 Not in the apps yet:
 
-- **Talking in voice channels.** The apps show who talks; joining needs
-  WebRTC on both platforms and is next.
+- **Talking in voice channels on iOS.** It needs WebRTC for iOS linked into
+  the app; the core's `VoiceCall` is ready for it.
 - **Push notifications while the app is closed.** The apps show notices
   while they run. Web Push reaches browsers only: the apps would need
   Firebase Cloud Messaging on Android and APNs on iOS.
@@ -99,10 +108,45 @@ iOS simulator, builds the Android app and builds the iOS app.
    and find it in `androidApp/build/outputs/apk/debug/`.
 2. **A server with the client API**, that is, built from this branch:
    - your server, deployed from it, at its HTTPS address; or
-   - the Docker stack on your computer, with `WEB_BIND=0.0.0.0` in `.env` so
-     the local network reaches it: `just up`, then sign in on the phone, on
-     the same Wi-Fi, to `http://<the computer's IP>:8080`. Debug builds take
-     plain HTTP to any address for this; release builds take HTTPS only.
+   - the Docker stack on your computer (Linux, or Docker Desktop on Windows
+     or macOS), opened to the local network as below: `just up`, then sign
+     in on the phone, on the same Wi-Fi, to `http://<the computer's IP>:8080`.
+     Debug builds take plain HTTP to any address for this; release builds
+     take HTTPS only.
+
+### The Docker stack, for a phone
+
+The phone reaches the computer at its address on the Wi-Fi, such as
+`192.168.1.20`: `ipconfig` shows it on Windows (the Wi-Fi adapter's IPv4
+address), `ipconfig getifaddr en0` on macOS. By default the stack only
+accepts this computer, and announces its voice server at `localhost`, which
+on a phone is the phone. In `.env`, with your address:
+
+```bash
+WEB_BIND=0.0.0.0
+# Voice channels: the signaling websocket and the voice itself, at this
+# computer's address.
+VOICE_BIND=0.0.0.0
+VOICE_PUBLIC_URL=ws://192.168.1.20:8090/rtc
+WEB_VOICE_ORIGINS=ws://192.168.1.20:8090
+VOICE_PUBLIC_IP=192.168.1.20
+```
+
+Then `just up` again. Keep `WEB_PUBLIC_URL=http://localhost:8080`: browsers
+on the computer still open the chat there, and talk too. The phone needs
+ports 8080 and 8090 (TCP) and 7882 (UDP and TCP, the voice itself): allow
+Docker in the firewall when asked, and on Windows mark the Wi-Fi as a
+private network. If the address changes, change it here too.
+
+When voice does not connect, the app says why:
+
+- *The server announces its voice server at localhost*: `VOICE_PUBLIC_URL`
+  is still the default.
+- *Cannot reach the voice server*: port 8090 is closed, or `VOICE_BIND` is
+  still `127.0.0.1`.
+- *The voice connection failed: your network may block it*: the phone
+  cannot reach port 7882 at `VOICE_PUBLIC_IP`; check the address and the
+  firewall. Some guest and office Wi-Fi networks keep devices apart.
 
 ## Servers
 

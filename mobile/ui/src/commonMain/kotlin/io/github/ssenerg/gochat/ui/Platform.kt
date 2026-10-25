@@ -3,6 +3,7 @@ package io.github.ssenerg.gochat.ui
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.staticCompositionLocalOf
 import io.github.ssenerg.gochat.core.state.KeyValueStore
+import io.github.ssenerg.gochat.core.voice.RtcEngine
 import kotlinx.coroutines.flow.StateFlow
 
 /** What each operating system provides the shared screens. */
@@ -12,6 +13,9 @@ interface Platform {
 
     /** Plays voice messages, one at a time. */
     val player: AudioPlayer
+
+    /** WebRTC, for talking in voice channels, where this platform has it. */
+    val rtc: RtcEngine?
 
     /** Hands a downloaded file to the system, to open it in another app or save it. */
     fun openFile(name: String, mimeType: String, bytes: ByteArray)
@@ -73,6 +77,10 @@ const val MAX_PICKED_BYTES = 100L * 1024 * 1024
 /** The microphone, asking for it when first used. */
 @Composable
 expect fun rememberVoiceRecorder(): VoiceRecorder
+
+/** Returns what asks for the microphone when it is not allowed yet; it answers whether it is. */
+@Composable
+expect fun rememberMicrophoneAccess(): suspend () -> Boolean
 
 /** Returns what opens the system's file picker; [onPicked] gets the file. */
 @Composable

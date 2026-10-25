@@ -1,6 +1,7 @@
 package io.github.ssenerg.gochat.ui.main
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -76,6 +77,7 @@ import io.github.ssenerg.gochat.ui.Loading
 import io.github.ssenerg.gochat.ui.MentionBadge
 import io.github.ssenerg.gochat.ui.ServerImage
 import io.github.ssenerg.gochat.ui.ErrorState
+import io.github.ssenerg.gochat.ui.voice.VoicePanel
 import kotlinx.coroutines.launch
 
 /** The team rail and the team's channels and conversations. */
@@ -87,6 +89,7 @@ fun Sidebar(session: ChatSession, app: GoChatApp, modifier: Modifier = Modifier)
     val active = when (val top = nav.top) {
         is Route.Channel -> top.id
         is Route.Thread -> top.channelId
+        is Route.Voice -> top.id
         else -> null
     }
     Row(modifier.background(colors.sidebar)) {
@@ -104,6 +107,7 @@ fun Sidebar(session: ChatSession, app: GoChatApp, modifier: Modifier = Modifier)
                 }
                 else -> ChannelList(st, active, session, Modifier.weight(1f))
             }
+            VoicePanel(session)
             MeBar(st, onClick = { nav.open(Route.Settings) })
         }
     }
@@ -222,7 +226,7 @@ private fun ConnectionBanner(c: Connection) {
 @Composable
 private fun ChannelList(st: ChatState, active: String?, session: ChatSession, modifier: Modifier) {
     val nav = LocalNavigator.current
-    val toasts = LocalToasts.current
+    val call by session.voice.state.collectAsState()
     LazyColumn(modifier.fillMaxWidth(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 8.dp)) {
         item {
             SidebarLink(Icons.Filled.Forum, "Threads", unread = st.threadsUnread > 0) { nav.open(Route.Threads) }
@@ -237,8 +241,9 @@ private fun ChannelList(st: ChatState, active: String?, session: ChatSession, mo
         if (st.voiceChannels.isNotEmpty()) {
             item { SectionHeader("Voice channels", onAdd = null) }
             items(st.voiceChannels, key = { it.id }) { ch ->
-                VoiceRow(ch, st.voice[ch.id]) {
-                    toasts.show("Talking in voice channels comes to the apps next; join from the web for now.")
+                val here = call?.takeIf { it.channelId == ch.id }
+                VoiceRow(ch, st.voice[ch.id], active == ch.id, here?.connected == true, here?.speaking.orEmpty()) {
+                    nav.open(Route.Voice(ch.id))
                 }
             }
         }
@@ -325,18 +330,24 @@ private fun ChannelRow(ch: Channel, st: ChatState, active: Boolean, onClick: () 
 }
 
 @Composable
-private fun VoiceRow(ch: Channel, state: VoiceChannelState?, onClick: () -> Unit) {
+private fun VoiceRow(ch: Channel, state: VoiceChannelState?, active: Boolean, connected: Boolean, speaking: Set<String>, onClick: () -> Unit) {
     val colors = LocalChatColors.current
-    RowShell(false, onClick) {
+    RowShell(active, onClick) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = "Voice channel", tint = colors.sidebarMuted, modifier = Modifier.size(18.dp))
+                Icon(
+                    Icons.AutoMirrored.Filled.VolumeUp,
+                    contentDescription = "Voice channel",
+                    tint = if (connected) colors.online else colors.sidebarMuted,
+                    modifier = Modifier.size(18.dp),
+                )
                 Spacer(Modifier.width(10.dp))
                 Text(ch.title(), color = colors.sidebarText.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             state?.states?.forEach { vs ->
                 Row(Modifier.padding(start = 28.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Avatar(vs.user, size = 22.dp)
+                    val ring = if (vs.user?.id in speaking) colors.online else androidx.compose.ui.graphics.Color.Transparent
+                    Avatar(vs.user, size = 22.dp, modifier = Modifier.border(2.dp, ring, CircleShape))
                     Spacer(Modifier.width(8.dp))
                     Text(vs.user.displayName(), color = colors.sidebarText, fontSize = 13.sp, modifier = Modifier.weight(1f, fill = false))
                     if (vs.self_mute || vs.self_deaf) {
