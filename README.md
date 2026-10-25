@@ -6,14 +6,16 @@ invite links, attachments, voice messages, presence and typing indicators,
 all delivered in real time. The whole application runs on
 the [hollywood](https://github.com/anthdm/hollywood) actor engine, on both the
 server and the web gateway, and the browser UI is server-rendered HTML driven
-by [htmx](https://htmx.org) over a WebSocket.
+by [htmx](https://htmx.org) over a WebSocket. Native apps for Android and iOS,
+in Kotlin, live in [mobile](mobile).
 
 ## Architecture
 
 ```
  browser ──HTTPS/WS──▶ gochat web ──DRPC (protobuf)──▶ gochat server ──▶ ScyllaDB
   (htmx)               gateway actors                    service actors    MinIO
-    │                                                         ▲
+ apps ──/api/v1──────▶    ▲                                   ▲
+ (Android, iOS)                                               │
     │ signaling WS + WebRTC (Opus over UDP/TCP)               │ DRPC stream
     └──────────────────────────────────────────▶ gochat voice ┘
                                                   SFU actors
@@ -55,7 +57,7 @@ each channel's talk runs on one of them, the least loaded when it starts.
 As in Discord, the chat server keeps the voice states and voice servers
 carry the voice:
 
-1. A page asks to join (`JoinVoice`). The chat server checks the person may,
+1. A page or an app asks to join (`JoinVoice`). The chat server checks the person may,
    picks the channel's voice server and hands back its signaling endpoint and
    a single-use token valid for 30 seconds.
 2. The page opens the voice server's websocket and identifies with the token,
@@ -78,6 +80,42 @@ browser's own filter (the default), or strong, which runs
 [RNNoise](third_party/rnnoise-wasm) over the microphone in an audio worklet
 before sending it, adding 20 ms. A browser that cannot run it uses its own
 filter.
+
+### Client API for native apps
+
+The web gateway also serves the [mobile apps](mobile) at `/api/v1`, the way
+Discord's apps use its REST API and gateway. It forwards calls of the same
+chat API the pages use, so the server checks every one as it does for the
+web:
+
+- `POST /api/v1/rpc/<service>/<method>` makes one call, such as
+  `/api/v1/rpc/gochat.v1.ChannelService/GetChannel`, with the request as
+  protobuf (`application/proto`) or JSON (`application/json`) and the
+  answer in the same encoding, or an `ApiError`.
+- `GET /api/v1/gateway` is the event socket: binary `ClientFrame`s carrying
+  the person's events as the server sends them. The app answers with
+  `AppFrame`s naming the channel it shows and the people whose presence it
+  shows, as pages do, since typing and presence go only to those. The chat
+  server keeps, of those people, the ones the person shares a team with, as
+  `GetPresence` does.
+- `POST /api/v1/files`, `GET /api/v1/files/<id>`, `GET /api/v1/photos/...`
+  and `POST /api/v1/photo` move attachments and photos.
+- `GET /api/v1/info` answers, without a token, the server's version and the
+  oldest app it takes, `min_app_version` in the web's configuration; an
+  older app asks its person to update it.
+
+Apps sign in with `AuthService/Login` (and `VerifyMFA` for two-factor
+accounts) and send the session token as `Authorization: Bearer <token>`.
+Their sessions show in the web's session list by the device the app names
+in its User-Agent, such as "GoChat app on Pixel 8", and are revoked there
+like any other; each session has its own request budget.
+They talk in voice channels as pages do: `VoiceService/JoinVoice` hands
+them the voice server's websocket and a token for it. The
+API never reads cookies, so no page can make a browser call it for a
+signed-in person, and it opens only the calls people make: not the gateways'
+streams, nor the photo calls that expect a picture the gateway has already
+processed. [client.proto](api/protobuf/proto/gochat/v1/client.proto)
+documents it, close codes included.
 
 ### Storage
 
@@ -137,7 +175,8 @@ filter.
   `Content-Disposition: attachment` unless they are safe images or voice
   messages, which play in place with the audio type the server detected.
 - Voice: join tokens are single-use, short-lived, stored hashed and bound to
-  one voice server; its websocket takes only the web gateway's origins. Only
+  one voice server; its websocket takes the web gateway's pages and no other
+  site's (the apps, which are not pages, send no origin). Only
   Opus is negotiated, and each voice is capped at 512 kbit/s so the room
   cannot be made to repeat a flood. Connections that have not identified and
   signaling messages are bounded. The voice server is ICE lite: it answers
@@ -394,10 +433,11 @@ just test
 The end-to-end suite in [test/e2e](test/e2e) drives a running stack through the
 web gateway: invites, real-time delivery, typing, attachments, voice messages
 and their channel setting, voice channels (with Pion peers that talk through
-the voice server), private channel isolation, CSRF, TOTP with recovery codes,
-session revocation, deactivation and storage quotas. It needs an existing
-admin account and team, or with `GOCHAT_E2E_BOOTSTRAP=1` and the server's
-token in `GOCHAT_E2E_SETUP_TOKEN` creates them on a fresh server:
+the voice server), the client API the apps use, private channel isolation,
+CSRF, TOTP with recovery codes, session revocation, deactivation and storage
+quotas. It needs an existing admin account and team, or with
+`GOCHAT_E2E_BOOTSTRAP=1` and the server's token in `GOCHAT_E2E_SETUP_TOKEN`
+creates them on a fresh server:
 
 ```bash
 GOCHAT_E2E_URL=http://localhost:8080 GOCHAT_E2E_ADMIN=admin GOCHAT_E2E_ADMIN_PASSWORD=... GOCHAT_E2E_TEAM=acme go test ./test/e2e -count=1
@@ -420,5 +460,6 @@ internal/services  hub, accounts, directory, channels, files, voice
 internal/voiceserver  the voice server: signaling, rooms, media
 internal/web       HTTP handlers, gateway actors, templates and static assets
 migrations/scylla  CQL migrations
+mobile/            the Android and iOS apps (Kotlin Multiplatform, Compose)
 test/e2e           end-to-end tests
 ```

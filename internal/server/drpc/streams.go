@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gocql/gocql"
 
@@ -304,6 +306,7 @@ func (s *gatewayService) Connect(stream pb.DRPCGatewayService_ConnectStream) err
 		return err
 	}
 
+	checks := newWatchChecks(watchSlots, watchGap)
 	for {
 		req, err := stream.Recv()
 		if err != nil {
@@ -323,6 +326,90 @@ func (s *gatewayService) Connect(stream pb.DRPCGatewayService_ConnectStream) err
 				ch = id.String()
 			}
 			s.sys.Engine.Send(s.sys.Hub, hub.View{GatewayID: key, ConnID: f.View.ConnId, ChannelID: ch})
+		case *pb.ConnectRequest_Watch:
+			// The check reads the people's teams: it runs off the stream.
+			checks.add(ctx, f.Watch, func(ctx context.Context, w *pb.Watch, seq uint64) { s.watch(ctx, key, w, seq) })
+		}
+	}
+}
+
+// watch keeps those of a connection's watch list its user shares a team
+// with, as presence answers, so a gateway or an app can follow no one else.
+// Only the people it does not watch yet need checking.
+func (s *gatewayService) watch(ctx context.Context, key string, w *pb.Watch, seq uint64) {
+	todo, err := actors.Ask[hub.Unchecked](ctx, s.sys.Engine, s.sys.Hub, hub.ToCheck{GatewayID: key, ConnID: w.ConnId, UserIDs: w.UserIds})
+	if err != nil || todo.UserID == "" {
+		return
+	}
+	var known []string
+	if len(todo.UserIDs) > 0 {
+		known, err = actors.Ask[[]string](ctx, s.sys.Engine, s.sys.Directory, directory.Acquainted{UserID: todo.UserID, UserIDs: todo.UserIDs})
+		if err != nil {
+			return
+		}
+	}
+	s.sys.Engine.Send(s.sys.Hub, hub.Watch{GatewayID: key, ConnID: w.ConnId, Seq: seq, UserIDs: w.UserIds, Checked: known})
+}
+
+// A gateway's stream runs watchSlots checks at once, and a connection's
+// one after another, at least watchGap apart: one that keeps sending lists
+// has its latest checked.
+const (
+	watchSlots = 8
+	watchGap   = time.Second
+)
+
+type watchChecks struct {
+	gap   time.Duration
+	slots chan struct{}
+	mu    sync.Mutex
+	seq   uint64
+	// latest holds each connection's newest list not yet checked, and
+	// running the connections whose checks are under way.
+	latest  map[uint64]*pb.Watch
+	running map[uint64]bool
+}
+
+func newWatchChecks(slots int, gap time.Duration) *watchChecks {
+	return &watchChecks{gap: gap, slots: make(chan struct{}, slots), latest: map[uint64]*pb.Watch{}, running: map[uint64]bool{}}
+}
+
+// add takes a connection's newest list, starting its checks unless they run.
+func (w *watchChecks) add(ctx context.Context, f *pb.Watch, check func(context.Context, *pb.Watch, uint64)) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.latest[f.ConnId] = f
+	if !w.running[f.ConnId] {
+		w.running[f.ConnId] = true
+		go w.run(ctx, f.ConnId, check)
+	}
+}
+
+// run checks a connection's latest list until none is left.
+func (w *watchChecks) run(ctx context.Context, conn uint64, check func(context.Context, *pb.Watch, uint64)) {
+	for {
+		w.mu.Lock()
+		f := w.latest[conn]
+		delete(w.latest, conn)
+		if f == nil {
+			delete(w.running, conn)
+			w.mu.Unlock()
+			return
+		}
+		w.seq++
+		seq := w.seq
+		w.mu.Unlock()
+		select {
+		case w.slots <- struct{}{}:
+		case <-ctx.Done():
+			return
+		}
+		check(ctx, f, seq)
+		<-w.slots
+		select {
+		case <-time.After(w.gap):
+		case <-ctx.Done():
+			return
 		}
 	}
 }

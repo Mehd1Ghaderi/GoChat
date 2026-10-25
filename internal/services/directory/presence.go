@@ -2,8 +2,11 @@ package directory
 
 import (
 	"context"
+	"slices"
+	"time"
 
 	"github.com/gocql/gocql"
+	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
@@ -14,6 +17,12 @@ import (
 )
 
 const maxPresence = 200
+
+// maxWatched bounds the people one connection may watch.
+const maxWatched = 1000
+
+// recheckTimeout bounds rechecking the watches of someone who left a team.
+const recheckTimeout = time.Minute
 
 // presence answers for those of msg's people the caller shares a team
 // with, and no one else.
@@ -37,6 +46,68 @@ func (w *worker) presence(ctx context.Context, msg Presence) (map[string]pb.Stat
 		return map[string]pb.Status{}, nil
 	}
 	return actors.Ask[map[string]pb.Status](ctx, w.Engine, w.Hub, hub.Statuses{UserIDs: known})
+}
+
+// acquaintances answers which of msg's people msg's user shares a team with,
+// for the connection watching them.
+func (w *worker) acquaintances(ctx context.Context, msg Acquainted) ([]string, error) {
+	userID, ok := ids.Parse(msg.UserID)
+	if !ok {
+		return nil, ierrors.InvalidArgument("invalid user id")
+	}
+	want := make(map[gocql.UUID]bool, min(len(msg.UserIDs), maxWatched))
+	for _, raw := range msg.UserIDs {
+		if len(want) == maxWatched {
+			break
+		}
+		if id, ok := ids.Parse(raw); ok {
+			want[id] = true
+		}
+	}
+	return w.acquainted(ctx, userID, want)
+}
+
+// recheckWatches drops the watches that someone who left a team no longer
+// has a reason for, both ways: theirs of the people they no longer share a
+// team with, and those people's of them.
+func (w *worker) recheckWatches(ctx context.Context, userID gocql.UUID) {
+	ctx, cancel := context.WithTimeout(ctx, recheckTimeout)
+	defer cancel()
+	id := userID.String()
+	if watched, err := actors.Ask[[]string](ctx, w.Engine, w.Hub, hub.WatchedBy{UserID: id}); err == nil && len(watched) > 0 {
+		want := make(map[gocql.UUID]bool, len(watched))
+		for _, raw := range watched {
+			if u, ok := ids.Parse(raw); ok {
+				want[u] = true
+			}
+		}
+		known, err := w.acquainted(ctx, userID, want)
+		if err != nil {
+			w.Logger.Warn("failed to recheck watches", zap.String("user", id), zap.Error(err))
+			return
+		}
+		if drop := slices.DeleteFunc(watched, func(u string) bool { return slices.Contains(known, u) }); len(drop) > 0 {
+			w.Engine.Send(w.Hub, hub.Unwatch{Watcher: id, Subjects: drop})
+		}
+	}
+	watchers, err := actors.Ask[[]string](ctx, w.Engine, w.Hub, hub.WatchersOf{UserID: id})
+	if err != nil {
+		return
+	}
+	for _, raw := range watchers {
+		watcher, ok := ids.Parse(raw)
+		if !ok {
+			continue
+		}
+		known, err := w.acquainted(ctx, watcher, map[gocql.UUID]bool{userID: true})
+		if err != nil {
+			w.Logger.Warn("failed to recheck a watcher", zap.String("user", id), zap.Error(err))
+			continue
+		}
+		if len(known) == 0 {
+			w.Engine.Send(w.Hub, hub.Unwatch{Watcher: raw, Subjects: []string{id}})
+		}
+	}
 }
 
 // acquainted returns those of want userID shares a team with. Their

@@ -8,6 +8,7 @@ import (
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
 	"github.com/ssenerg/gochat/internal/client/drpc"
 	"github.com/ssenerg/gochat/internal/core/secure"
+	ierrors "github.com/ssenerg/gochat/internal/errors"
 )
 
 const mfaCookieTTL = 5 * time.Minute
@@ -109,7 +110,7 @@ func (h *Handler) mfa(w http.ResponseWriter, r *http.Request) {
 	res, err := h.client.Auth.VerifyMFA(ctx, &pb.VerifyMFARequest{MfaToken: token, Code: r.PostFormValue("code")})
 	if err != nil {
 		e := drpc.Err(err)
-		if e.Message == "the sign-in attempt expired, sign in again" {
+		if e.Code == ierrors.CodeFailedPrecondition {
 			h.clearCookie(w, "mfa")
 			h.page(w, r, http.StatusUnauthorized, "login", loginData{Page: Page{Title: "Sign in", CSRF: h.csrfToken(w, r), Error: e.Message}, Next: next})
 			return

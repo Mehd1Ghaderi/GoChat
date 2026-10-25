@@ -10,6 +10,8 @@ import (
 	"net"
 	"os"
 
+	"google.golang.org/protobuf/proto"
+	"storj.io/drpc"
 	"storj.io/drpc/drpcconn"
 	"storj.io/drpc/drpcerr"
 	"storj.io/drpc/drpcmanager"
@@ -34,6 +36,7 @@ type Client struct {
 	cfg  *Config
 	tls  *tls.Config
 	pool *drpcpool.Pool[string, *drpcconn.Conn]
+	conn drpc.Conn
 
 	Auth     pb.DRPCAuthServiceClient
 	Teams    pb.DRPCTeamServiceClient
@@ -59,6 +62,7 @@ func New(cfg *Config) (*Client, error) {
 		Expiration: cfg.PoolExpiration,
 	})
 	conn := c.pool.Get(context.Background(), cfg.Address, c.dial)
+	c.conn = conn
 	c.Auth = pb.NewDRPCAuthServiceClient(conn)
 	c.Teams = pb.NewDRPCTeamServiceClient(conn)
 	c.Channels = pb.NewDRPCChannelServiceClient(conn)
@@ -112,6 +116,32 @@ func (c *Client) dial(ctx context.Context, addr string) (*drpcconn.Conn, error) 
 	return drpcconn.NewWithOptions(utils.WriteTimeoutConn(raw, c.cfg.WriteTimeout), drpcconn.Options{
 		Manager: drpcmanager.Options{Reader: drpcwire.ReaderOptions{MaximumBufferSize: c.cfg.MaxMessageSize}},
 	}), nil
+}
+
+// Invoke makes the unary call rpc, such as
+// "/gochat.v1.ChannelService/GetChannel", with any request and response
+// messages: the client API forwards calls it does not know the types of at
+// compile time.
+func (c *Client) Invoke(ctx context.Context, rpc string, in, out proto.Message) error {
+	return c.conn.Invoke(ctx, rpc, protoEncoding{}, in, out)
+}
+
+type protoEncoding struct{}
+
+func (protoEncoding) Marshal(msg drpc.Message) ([]byte, error) {
+	m, ok := msg.(proto.Message)
+	if !ok {
+		return nil, fmt.Errorf("not a protobuf message: %T", msg)
+	}
+	return proto.Marshal(m)
+}
+
+func (protoEncoding) Unmarshal(buf []byte, msg drpc.Message) error {
+	m, ok := msg.(proto.Message)
+	if !ok {
+		return fmt.Errorf("not a protobuf message: %T", msg)
+	}
+	return proto.Unmarshal(buf, m)
 }
 
 // Dial opens a connection of its own, for a long-lived stream.

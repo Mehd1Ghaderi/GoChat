@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -238,20 +239,21 @@ func TestEventsGoToTheirConnections(t *testing.T) {
 	s[0].none(t)
 }
 
-func TestPresenceGoesToWatchers(t *testing.T) {
-	stream := newFakeStream()
-	engine, router := startRouter(t, testConfig(), stream)
-	s := attachAll(t, engine, router, stream, "a", "b", "c")
-	engine.Send(router, watching{connID: 2, users: []string{"a"}})
-	engine.Send(router, watching{connID: 3, users: []string{"a"}})
-	engine.Send(router, watching{connID: 3, users: []string{"x"}})
-	stream.recv <- event(&pb.Event{Broadcast: true, Payload: &pb.Event_Presence{Presence: &pb.Presence{UserId: "a"}}})
-	s[0].expect(t, time.Second)
-	s[1].expect(t, time.Second)
-	s[2].none(t)
-	stream.recv <- event(&pb.Event{Broadcast: true, Payload: &pb.Event_ProfileChanged{ProfileChanged: &pb.ProfileChanged{User: &pb.User{Id: "x"}}}})
-	s[2].expect(t, time.Second)
-	s[0].none(t)
+func TestWatchesReachTheServer(t *testing.T) {
+	first, second := newFakeStream(), newFakeStream()
+	engine, router := startRouter(t, testConfig(), first, second)
+	attachAll(t, engine, router, first, "a")
+	engine.Send(router, watching{connID: 1, users: []string{"b", "c"}})
+	if w := next[*pb.ConnectRequest_Watch](t, first, time.Second); w.Watch.ConnId != 1 || !slices.Equal(w.Watch.UserIds, []string{"b", "c"}) {
+		t.Fatalf("watch %+v", w.Watch)
+	}
+	// After a reconnect the watch follows the attach.
+	_ = first.Close()
+	a := next[*pb.ConnectRequest_Attach](t, second, time.Second)
+	second.recv <- attached(a.Attach.ConnId, "a")
+	if w := next[*pb.ConnectRequest_Watch](t, second, time.Second); !slices.Equal(w.Watch.UserIds, []string{"b", "c"}) {
+		t.Fatalf("watch after a reconnect %+v", w.Watch)
+	}
 }
 
 func TestViewsReachTheServer(t *testing.T) {

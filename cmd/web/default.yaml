@@ -24,6 +24,9 @@ web:
   voice_origins: []
   upload_limit: 52428800
   render_cache_size: 20000
+  # The oldest version of the apps the client API takes, such as "0.3";
+  # empty takes any. Older apps ask their people to update.
+  min_app_version: ""
   http:
     address: "0.0.0.0:8080"
     read_header_timeout: 5s

@@ -5,6 +5,21 @@ import "strings"
 // Device names the browser and system a user agent claims, for people to
 // tell their sessions apart.
 func Device(ua string) string {
+	// The apps say "GoChat/0.2.0 (Android 16; Pixel 8)" or
+	// "GoChat/0.2.0 (iOS 18.4; iPhone)".
+	if rest, ok := strings.CutPrefix(ua, "GoChat/"); ok {
+		_, about, _ := strings.Cut(rest, "(")
+		about, _, _ = strings.Cut(about, ")")
+		system, model, _ := strings.Cut(about, ";")
+		system, _, _ = strings.Cut(strings.TrimSpace(system), " ")
+		if model = strings.TrimSpace(model); model != "" && len(model) <= 40 {
+			return "GoChat app on " + model
+		}
+		if system != "" && len(system) <= 20 {
+			return "GoChat app on " + system
+		}
+		return "GoChat app"
+	}
 	browser := ""
 	switch {
 	case strings.Contains(ua, "Edg"):

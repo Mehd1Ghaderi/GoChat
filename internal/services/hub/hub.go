@@ -93,6 +93,51 @@ type View struct {
 
 type Broadcast struct{ Event *pb.Event }
 
+// About sends Event, about UserID, to the user's own connections and to
+// those watching them.
+type About struct {
+	UserID string
+	Event  *pb.Event
+}
+
+// Watch replaces the people a connection watches with those of UserIDs it
+// watches already or the directory found its user acquainted with, Checked;
+// a Watch older than the last, by Seq, is dropped.
+type Watch struct {
+	GatewayID string
+	ConnID    uint64
+	Seq       uint64
+	UserIDs   []string
+	Checked   []string
+}
+
+// ToCheck replies with Unchecked: the connection's user, empty when it has
+// none, and those of UserIDs it does not watch yet, which a Watch must
+// check first.
+type ToCheck struct {
+	GatewayID string
+	ConnID    uint64
+	UserIDs   []string
+}
+
+type Unchecked struct {
+	UserID  string
+	UserIDs []string
+}
+
+// WatchedBy replies with the people UserID's connections watch, and
+// WatchersOf with the users whose connections watch UserID.
+type (
+	WatchedBy  struct{ UserID string }
+	WatchersOf struct{ UserID string }
+)
+
+// Unwatch stops Watcher's connections watching Subjects.
+type Unwatch struct {
+	Watcher  string
+	Subjects []string
+}
+
 // RevokeSessions closes the connections of SessionIDs, or with All every
 // connection of UserID.
 type RevokeSessions struct {
@@ -138,6 +183,9 @@ type conn struct {
 	userID    string
 	sessionID string
 	viewing   string
+	// watches are the people the connection watches, as of watchSeq.
+	watches  []string
+	watchSeq uint64
 }
 
 type gateway struct {
@@ -170,6 +218,8 @@ type hub struct {
 	// channel.
 	conns   map[string][]connRef
 	viewers map[string]map[*gateway]map[uint64]struct{}
+	// watchers holds the connections watching each user.
+	watchers map[string]map[*gateway]map[uint64]struct{}
 }
 
 func New(logger *zap.Logger, cfg *Config) actor.Producer {
@@ -184,6 +234,7 @@ func New(logger *zap.Logger, cfg *Config) actor.Producer {
 			revoked:   make(map[string]time.Time),
 			conns:     make(map[string][]connRef),
 			viewers:   make(map[string]map[*gateway]map[uint64]struct{}),
+			watchers:  make(map[string]map[*gateway]map[uint64]struct{}),
 		}
 	}
 }
@@ -214,6 +265,50 @@ func (h *hub) Receive(c *actor.Context) {
 		resp := &pb.ConnectResponse{Frame: &pb.ConnectResponse_Event{Event: msg.Event}}
 		for _, gw := range h.gateways {
 			h.send(c, gw, resp)
+		}
+	case About:
+		h.about(c, msg.UserID, msg.Event)
+	case Watch:
+		if gw := h.gateways[msg.GatewayID]; gw != nil {
+			if cn := gw.conns[msg.ConnID]; cn != nil && msg.Seq > cn.watchSeq {
+				cn.watchSeq = msg.Seq
+				h.watch(gw, msg.ConnID, cn, within(msg.UserIDs, cn.watches, msg.Checked))
+			}
+		}
+	case ToCheck:
+		var out Unchecked
+		if gw := h.gateways[msg.GatewayID]; gw != nil {
+			if cn := gw.conns[msg.ConnID]; cn != nil {
+				out.UserID = cn.userID
+				out.UserIDs = without(msg.UserIDs, cn.watches)
+			}
+		}
+		actors.Reply(c, out)
+	case WatchedBy:
+		var out []string
+		for _, r := range h.conns[msg.UserID] {
+			for _, u := range r.gw.conns[r.id].watches {
+				if !slices.Contains(out, u) {
+					out = append(out, u)
+				}
+			}
+		}
+		actors.Reply(c, out)
+	case WatchersOf:
+		var out []string
+		for gw, conns := range h.watchers[msg.UserID] {
+			for id := range conns {
+				if u := gw.conns[id].userID; !slices.Contains(out, u) {
+					out = append(out, u)
+				}
+			}
+		}
+		actors.Reply(c, out)
+	case Unwatch:
+		for _, r := range h.conns[msg.Watcher] {
+			cn := r.gw.conns[r.id]
+			kept := slices.DeleteFunc(slices.Clone(cn.watches), func(u string) bool { return slices.Contains(msg.Subjects, u) })
+			h.watch(r.gw, r.id, cn, kept)
 		}
 	case RevokeSessions:
 		h.revoke(c, msg)
@@ -366,6 +461,7 @@ func (h *hub) removeConn(c *actor.Context, gw *gateway, connID uint64) {
 		return
 	}
 	h.view(gw, connID, cn, "")
+	h.watch(gw, connID, cn, nil)
 	delete(gw.conns, connID)
 	mine := slices.DeleteFunc(h.conns[cn.userID], func(r connRef) bool { return r.gw == gw && r.id == connID })
 	if len(mine) == 0 {
@@ -413,6 +509,75 @@ func (h *hub) view(gw *gateway, connID uint64, cn *conn, channelID string) {
 		byGW[gw] = make(map[uint64]struct{})
 	}
 	byGW[gw][connID] = struct{}{}
+}
+
+// within returns those of want, once each, that are in any of lists, and
+// without those in none of them.
+func within(want []string, lists ...[]string) []string  { return pick(want, lists, true) }
+func without(want []string, lists ...[]string) []string { return pick(want, lists, false) }
+
+func pick(want []string, lists [][]string, in bool) []string {
+	listed := make(map[string]bool)
+	for _, list := range lists {
+		for _, u := range list {
+			listed[u] = true
+		}
+	}
+	seen := make(map[string]bool, len(want))
+	out := make([]string, 0, len(want))
+	for _, u := range want {
+		if !seen[u] && listed[u] == in {
+			seen[u] = true
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
+// watch replaces the people a connection watches.
+func (h *hub) watch(gw *gateway, connID uint64, cn *conn, users []string) {
+	for _, u := range cn.watches {
+		if byGW := h.watchers[u]; byGW != nil {
+			if delete(byGW[gw], connID); len(byGW[gw]) == 0 {
+				if delete(byGW, gw); len(byGW) == 0 {
+					delete(h.watchers, u)
+				}
+			}
+		}
+	}
+	cn.watches = users
+	for _, u := range users {
+		byGW := h.watchers[u]
+		if byGW == nil {
+			byGW = make(map[*gateway]map[uint64]struct{})
+			h.watchers[u] = byGW
+		}
+		if byGW[gw] == nil {
+			byGW[gw] = make(map[uint64]struct{})
+		}
+		byGW[gw][connID] = struct{}{}
+	}
+}
+
+// about sends an event about userID to their own connections and those
+// watching them, and no one else.
+func (h *hub) about(c *actor.Context, userID string, event *pb.Event) {
+	byGateway := make(map[*gateway][]uint64)
+	for _, r := range h.conns[userID] {
+		byGateway[r.gw] = append(byGateway[r.gw], r.id)
+	}
+	for gw, conns := range h.watchers[userID] {
+		for id := range conns {
+			if gw.conns[id].userID != userID {
+				byGateway[gw] = append(byGateway[gw], id)
+			}
+		}
+	}
+	for gw, ids := range byGateway {
+		ev := shallowEvent(event)
+		ev.ConnIds = ids
+		h.send(c, gw, &pb.ConnectResponse{Frame: &pb.ConnectResponse_Event{Event: ev}})
+	}
 }
 
 // eachOnline calls fn for the members with a connection, walking the
@@ -530,7 +695,8 @@ func (h *hub) revoke(c *actor.Context, msg RevokeSessions) {
 	}
 }
 
-// announce tells everyone a user's status, when it changed.
+// announce tells a user's status, when it changed, to the connections
+// that show it.
 func (h *hub) announce(c *actor.Context, userID string) {
 	s := h.status(userID)
 	if was, ok := h.announced[userID]; (ok && was == s) || (!ok && s == pb.Status_STATUS_OFFLINE) {
@@ -541,13 +707,9 @@ func (h *hub) announce(c *actor.Context, userID string) {
 	} else {
 		h.announced[userID] = s
 	}
-	ev := &pb.Event{Broadcast: true, Payload: &pb.Event_Presence{Presence: &pb.Presence{
+	h.about(c, userID, &pb.Event{Payload: &pb.Event_Presence{Presence: &pb.Presence{
 		UserId: userID, Online: s != pb.Status_STATUS_OFFLINE, Status: s,
-	}}}
-	resp := &pb.ConnectResponse{Frame: &pb.ConnectResponse_Event{Event: ev}}
-	for _, gw := range h.gateways {
-		h.send(c, gw, resp)
-	}
+	}}})
 }
 
 // send queues resp for the gateway, dropping a gateway that has fallen too far

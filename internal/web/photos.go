@@ -205,26 +205,32 @@ func (h *Handler) servePhoto(w http.ResponseWriter, r *http.Request) {
 	if h.signedIn(w, r) == nil {
 		return
 	}
-	id, version := r.PathValue("id"), r.PathValue("version")
-	if !uuidRe.MatchString(id) || !photo.ValidVersion(version) {
-		h.notFound(w, r)
+	h.sendPhoto(w, r, h.call(r), func(err error) { h.fail(w, r, err) })
+}
+
+// sendPhoto answers the photo of the request's {id} and {version}, on
+// behalf of call.
+func (h *Handler) sendPhoto(w http.ResponseWriter, r *http.Request, call drpc.Call, fail func(error)) {
+	kind, id, version := r.PathValue("kind"), r.PathValue("id"), r.PathValue("version")
+	if (kind != "u" && kind != "t") || !uuidRe.MatchString(id) || !photo.ValidVersion(version) {
+		fail(errNoPage)
 		return
 	}
 	req := &pb.GetPhotoRequest{Version: version}
-	if strings.HasPrefix(r.URL.Path, "/photos/t/") {
+	if kind == "t" {
 		req.Owner = &pb.GetPhotoRequest_TeamId{TeamId: id}
 	} else {
 		req.Owner = &pb.GetPhotoRequest_UserId{UserId: id}
 	}
-	ctx, cancel := h.ctx(r)
+	ctx, cancel := h.client.Context(r.Context(), call)
 	defer cancel()
 	res, err := h.client.Files.GetPhoto(ctx, req)
 	if err != nil {
-		h.fail(w, r, err)
+		fail(err)
 		return
 	}
 	if res.ContentType != "image/jpeg" && res.ContentType != "image/png" {
-		h.notFound(w, r)
+		fail(errNoPage)
 		return
 	}
 	hd := w.Header()

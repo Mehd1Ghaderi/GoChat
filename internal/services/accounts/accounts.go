@@ -466,7 +466,9 @@ func (w *worker) login(ctx context.Context, msg Login) (*LoginResult, error) {
 	return &LoginResult{Session: sess}, nil
 }
 
-var errBadChallenge = ierrors.New(ierrors.CodeUnauthenticated, "the sign-in attempt expired, sign in again")
+// errBadChallenge has a code of its own, apart from a wrong code's
+// unauthenticated, so clients tell the two apart without reading the text.
+var errBadChallenge = ierrors.New(ierrors.CodeFailedPrecondition, "the sign-in attempt expired, sign in again")
 
 func (w *worker) verifyMFA(ctx context.Context, msg VerifyMFA) (*LoginResult, error) {
 	if !secure.ValidToken(msg.Token) {

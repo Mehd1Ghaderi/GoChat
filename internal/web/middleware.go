@@ -10,7 +10,9 @@ import (
 
 	"go.uber.org/zap"
 
+	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
 	"github.com/ssenerg/gochat/internal/core/secure"
+	ierrors "github.com/ssenerg/gochat/internal/errors"
 )
 
 const (
@@ -26,6 +28,10 @@ func (h *Handler) recover(next http.Handler) http.Handler {
 					panic(v)
 				}
 				h.logger.Error("handler panicked", zap.String("path", r.URL.Path), zap.Any("panic", v), zap.Stack("stack"))
+				if isAPI(r) {
+					h.apiWrite(w, answerEncoding(r), http.StatusInternalServerError, &pb.ApiError{Code: apiCode(ierrors.CodeInternal), Message: "internal error"})
+					return
+				}
 				http.Error(w, "internal error", http.StatusInternalServerError)
 			}
 		}()
@@ -56,13 +62,44 @@ func (h *Handler) headers(next http.Handler) http.Handler {
 
 func (h *Handler) throttle(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if ok, wait := h.reqs.Allow(h.clientIP(r)); !ok {
+		if ok, wait := h.allow(r); !ok {
 			retryAfter(w, wait)
+			if isAPI(r) {
+				h.apiWrite(w, answerEncoding(r), http.StatusTooManyRequests, &pb.ApiError{
+					Code: apiCode(ierrors.CodeResourceExhausted), Message: "too many requests, slow down",
+				})
+				return
+			}
 			http.Error(w, "too many requests", http.StatusTooManyRequests)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// apiSharedFactor is how many sessions' worth of signed-in API calls one
+// address may make: phones behind a carrier's address share it.
+const apiSharedFactor = 10
+
+// allow takes a request from its budget. An app's signed-in calls count
+// against its session, so the phones sharing a carrier's address do not
+// share one budget, and against a larger one of the address, so tokens made
+// up to get fresh budgets buy little.
+func (h *Handler) allow(r *http.Request) (bool, time.Duration) {
+	ip := h.clientIP(r)
+	if token := apiToken(r); token != "" && isAPI(r) {
+		if ok, wait := h.apiShared.Allow(ip); !ok {
+			return false, wait
+		}
+		return h.apiSessions.Allow("session:" + secure.PublicID(secure.Hash(token)))
+	}
+	return h.reqs.Allow(ip)
+}
+
+// isAPI reports whether r is a call of the client API, which answers
+// ApiErrors.
+func isAPI(r *http.Request) bool {
+	return strings.HasPrefix(r.URL.Path, "/api/v1/")
 }
 
 func retryAfter(w http.ResponseWriter, wait time.Duration) {

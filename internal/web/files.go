@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	pb "github.com/ssenerg/gochat/api/protobuf/gen/gochat/v1"
+	"github.com/ssenerg/gochat/internal/client/drpc"
 	"github.com/ssenerg/gochat/internal/core/audio"
 	ierrors "github.com/ssenerg/gochat/internal/errors"
 	"github.com/ssenerg/gochat/internal/web/render"
@@ -195,12 +196,32 @@ func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
 	if h.signedIn(w, r) == nil {
 		return
 	}
+	mode := downloadAttachment
+	if strings.HasSuffix(r.URL.Path, "/inline") {
+		mode = downloadInline
+	}
+	h.sendDownload(w, r, h.call(r), mode, func(err error) { h.fail(w, r, err) })
+}
+
+type downloadMode int
+
+const (
+	downloadAttachment downloadMode = iota
+	// downloadInline shows a picture or plays a voice message in place.
+	downloadInline
+	// downloadAPI hands an app the file with its type: an app sends the
+	// token in a header, which a page cannot make a browser send.
+	downloadAPI
+)
+
+// sendDownload streams the attachment of the request's {id} to w, on behalf
+// of call.
+func (h *Handler) sendDownload(w http.ResponseWriter, r *http.Request, call drpc.Call, mode downloadMode, fail func(error)) {
 	id := r.PathValue("id")
 	if !uuidRe.MatchString(id) {
-		h.notFound(w, r)
+		fail(errNoPage)
 		return
 	}
-	inline := strings.HasSuffix(r.URL.Path, "/inline")
 	etag := `"` + id + `"`
 	req := &pb.DownloadRequest{AttachmentId: id}
 	// An attachment never changes, so its id is its validator.
@@ -211,34 +232,37 @@ func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
 	_ = rc.SetWriteDeadline(time.Now().Add(h.cfg.HTTP.TransferTimeout))
 	ctx, cancel := context.WithTimeout(r.Context(), h.cfg.HTTP.TransferTimeout)
 	defer cancel()
-	stream, err := h.client.Files.Download(h.client.Stream(ctx, h.call(r)), req)
+	stream, err := h.client.Files.Download(h.client.Stream(ctx, call), req)
 	if err != nil {
-		h.fail(w, r, err)
+		fail(err)
 		return
 	}
 	defer func() { _ = stream.Close() }()
 	first, err := stream.Recv()
 	if err != nil {
-		h.fail(w, r, err)
+		fail(err)
 		return
 	}
 	att := first.GetHeader()
 	if att == nil {
-		h.fail(w, r, ierrors.Internal(errors.New("download began without a header")))
+		fail(ierrors.Internal(errors.New("download began without a header")))
 		return
 	}
 	// Pictures show in place and voice messages play there; anything else
 	// only downloads.
 	inPlace := render.IsImage(att.ContentType) || (att.Voice && audio.Playable(att.ContentType))
-	if inline && !inPlace {
-		h.notFound(w, r)
+	if mode == downloadInline && !inPlace {
+		fail(errNoPage)
 		return
 	}
 	hd := w.Header()
 	disposition := "attachment"
 	ctype := "application/octet-stream"
-	if inline {
+	switch mode {
+	case downloadInline:
 		disposition, ctype = "inline", att.ContentType
+	case downloadAPI:
+		ctype = att.ContentType
 	}
 	hd.Set("Content-Type", ctype)
 	cd := mime.FormatMediaType(disposition, map[string]string{"filename": att.Name})
@@ -250,8 +274,9 @@ func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
 	hd.Set("Accept-Ranges", "bytes")
 	hd.Set("ETag", etag)
 	// A download is kept out of the browser's cache, where it would outlive
-	// the access to it; a preview in a channel is kept briefly.
-	if inline {
+	// the access to it; a preview in a channel, or in an app, is kept
+	// briefly.
+	if mode != downloadAttachment {
 		hd.Set("Cache-Control", "private, max-age=300")
 	} else {
 		hd.Set("Cache-Control", "private, no-store")

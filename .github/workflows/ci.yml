@@ -43,6 +43,25 @@ jobs:
       - name: Test
         run: go test -race -count=1 ./...
 
+  # The protos are the apps' public API at /api/v1: they lint, and a pull
+  # request may not break what installed apps send and read.
+  proto:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Lint
+        run: go run github.com/bufbuild/buf/cmd/buf@v1.50.0 lint
+      - name: Breaking changes
+        if: github.event_name == 'pull_request'
+        env:
+          AGAINST: https://github.com/${{ github.repository }}.git#branch=${{ github.base_ref }}
+        run: go run github.com/bufbuild/buf/cmd/buf@v1.50.0 breaking --against "$AGAINST"
+
   vulncheck:
     runs-on: ubuntu-latest
     steps:
@@ -103,6 +122,15 @@ jobs:
           GOCHAT_E2E_TEAM: acme
           GOCHAT_E2E_BOOTSTRAP: "1"
         run: go test -count=1 -v ./test/e2e
+      # The apps' core drives the same stack as the apps do, a voice call
+      # included.
+      - name: Apps' core against the stack
+        env:
+          GOCHAT_E2E_URL: http://localhost:8080
+          GOCHAT_E2E_ADMIN: admin
+          GOCHAT_E2E_TEAM: acme
+        working-directory: mobile
+        run: ./gradlew --no-daemon :core:jvmTest
       - name: Logs
         if: failure()
         run: $COMPOSE logs --no-color --tail 200

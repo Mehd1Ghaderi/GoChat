@@ -47,9 +47,13 @@ func (c *client) voiceTicket(channelID string) voiceTicket {
 	return tk
 }
 
+// dialVoice opens the voice server's websocket as a page of origin would,
+// or as an app does, with no origin, when origin is empty.
 func dialVoice(endpoint, origin string) (*websocket.Conn, error) {
 	h := http.Header{}
-	h.Set("Origin", origin)
+	if origin != "" {
+		h.Set("Origin", origin)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	conn, _, err := websocket.Dial(ctx, endpoint, &websocket.DialOptions{HTTPHeader: h})
@@ -58,8 +62,13 @@ func dialVoice(endpoint, origin string) (*websocket.Conn, error) {
 
 func joinVoice(t *testing.T, c *client, channelID string) *voicePeer {
 	t.Helper()
-	tk := c.voiceTicket(channelID)
-	ws, err := dialVoice(tk.Endpoint, baseURL)
+	return connectVoice(t, c.voiceTicket(channelID), baseURL)
+}
+
+// connectVoice connects to the voice server with a ticket, from origin.
+func connectVoice(t *testing.T, tk voiceTicket, origin string) *voicePeer {
+	t.Helper()
+	ws, err := dialVoice(tk.Endpoint, origin)
 	if err != nil {
 		t.Fatalf("voice websocket: %v", err)
 	}
