@@ -108,14 +108,16 @@ type CreateChannel struct {
 	VoiceDisabled                      bool
 }
 
+// OpenDirect opens the conversation of the caller and UserID in TeamID.
 type OpenDirect struct {
-	P      *models.Principal
-	UserID string
+	P              *models.Principal
+	TeamID, UserID string
 }
 
-// OpenGroup opens the conversation of the caller and UserIDs.
+// OpenGroup opens the conversation of the caller and UserIDs in TeamID.
 type OpenGroup struct {
 	P       *models.Principal
+	TeamID  string
 	UserIDs []string
 }
 

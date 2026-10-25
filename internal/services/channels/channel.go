@@ -236,6 +236,10 @@ func (a *channel) handle(c *actor.Context, req Request) {
 		out, err = a.removeMember(msg)
 	case Members:
 		err = a.listMembers(c, msg)
+	case Rejoin:
+		out, err = a.rejoin(msg)
+	case Move:
+		out, err = a.move(msg)
 	default:
 		return
 	}
@@ -498,7 +502,7 @@ func (a *channel) post(msg Post) (*pb.Message, error) {
 	delete(a.typing, msg.P.UserID)
 
 	out := convert.Message(m, convert.PublicUser(author), atts)
-	a.broadcast(&pb.Event{Payload: &pb.Event_MessagePosted{MessagePosted: &pb.MessagePosted{Message: out}}})
+	a.broadcast(&pb.Event{Payload: &pb.Event_MessagePosted{MessagePosted: a.posted(out, nil)}})
 	a.recordMentions(m)
 	a.file(index.Add{Doc: a.doc(m)})
 	return out, nil
@@ -598,7 +602,7 @@ func (a *channel) reply(ctx context.Context, root, m *models.Message, author *mo
 		}
 	}
 	out := convert.Message(m, convert.PublicUser(author), atts)
-	a.broadcast(&pb.Event{Payload: &pb.Event_MessagePosted{MessagePosted: &pb.MessagePosted{Message: out, ParticipantIds: notify}}})
+	a.broadcast(&pb.Event{Payload: &pb.Event_MessagePosted{MessagePosted: a.posted(out, notify)}})
 	a.recordMentions(m)
 	a.file(index.Add{Doc: a.doc(m)})
 
@@ -1294,8 +1298,8 @@ func (a *channel) addTeamMember(ctx context.Context, userID gocql.UUID) error {
 	if err := a.addLocal(ctx, userID, models.ChannelRoleMember); err != nil {
 		return err
 	}
-	tr, err := a.teamRole(ctx, userID)
-	if err == nil && tr != "" {
+	in, err := a.inTeam(ctx, a.ch.TeamID, userID)
+	if err == nil && in {
 		return nil
 	}
 	if rerr := a.removeLocal(ctx, userID); rerr != nil {

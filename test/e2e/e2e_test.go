@@ -948,6 +948,94 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
+	run("each team keeps its own direct messages", func(t *testing.T) {
+		one, oneName, _ := join(t, admin, "pair-one")
+		two, twoName, _ := join(t, admin, "pair-two")
+		other := "pair-" + random(6)
+		if res, body := one.form("/teams", url.Values{"name": {other}, "display_name": {"Pairs"}}); res.StatusCode != http.StatusSeeOther {
+			t.Fatalf("create a team: %d %s", res.StatusCode, body)
+		}
+		_, body := one.hx("/t/"+other+"/invites", url.Values{})
+		link := inviteRe.FindStringSubmatch(body)
+		if link == nil {
+			t.Fatalf("no invite link in %s", body)
+		}
+		two.form("/join/"+link[1], url.Values{})
+		oneID, twoID := userIDOf(t, two, oneName), userIDOf(t, one, twoName)
+		open := func(c *client, team, peer string) string {
+			t.Helper()
+			res, body := c.hx("/t/"+team+"/dm", url.Values{"user_id": {peer}})
+			m := channelRe.FindStringSubmatch(res.Header.Get("HX-Location"))
+			if m == nil {
+				t.Fatalf("open a conversation in %s: %d %s", team, res.StatusCode, body)
+			}
+			return m[1]
+		}
+		dms := map[string]string{teamName: open(one, teamName, twoID), other: open(one, other, twoID)}
+		if dms[teamName] == dms[other] {
+			t.Fatal("two teams share a direct conversation")
+		}
+		for team, dm := range dms {
+			if again := open(two, team, oneID); again != dm {
+				t.Fatalf("in %s the pair found %s, then %s", team, dm, again)
+			}
+		}
+		_, page := two.get("/t/" + other + "/ch/" + dms[other])
+		teams := map[string]string{teamName: teamID, other: teamIDRe.FindStringSubmatch(page)[1]}
+		elsewhere := map[string]string{teamName: other, other: teamName}
+
+		// Two watches acme: only acme's conversation reaches it.
+		oneWS, _, err := one.socket(baseURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		twoWS, _, err := two.socket(baseURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		view(twoWS, town)
+		word := "zq" + random(4)
+		post := func(team string) {
+			t.Helper()
+			oneWS.send(map[string]string{"op": "view", "team_id": teams[team], "team_name": team, "channel_id": dms[team]})
+			oneWS.send(map[string]string{"op": "post", "channel_id": dms[team], "content": word + " in " + team})
+			oneWS.expect(5*time.Second, word+" in "+team)
+		}
+		post(other)
+		twoWS.refuse(2*time.Second, dms[other])
+		post(teamName)
+		twoWS.expect(5*time.Second, `id="notify"`, word+" in "+teamName)
+
+		search := func(team string) string {
+			t.Helper()
+			var body string
+			for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(500 * time.Millisecond) {
+				_, body = two.do(http.MethodGet, "/t/"+team+"/search?q="+url.QueryEscape(word), nil, "", true)
+				_, body, _ = strings.Cut(body, `id="search-results"`)
+				if strings.Contains(body, "<mark>"+word+"</mark>") {
+					return body
+				}
+			}
+			t.Fatalf("search in %s did not find %s: %s", team, word, body)
+			return ""
+		}
+		for team, dm := range dms {
+			away := dms[elsewhere[team]]
+			if _, page := two.get("/t/" + team + "/ch/" + dm); !strings.Contains(page, word+" in "+team) || strings.Contains(page, away) {
+				t.Fatalf("two's %s conversation shows the other team's: %s", team, page)
+			}
+			if res, _ := two.get("/t/" + team + "/ch/" + away); res.StatusCode != http.StatusNotFound {
+				t.Fatalf("%s opened the other team's conversation: %d", team, res.StatusCode)
+			}
+			if _, list := two.do(http.MethodGet, "/t/"+team+"/switch/results?q=pair-one", nil, "", true); !strings.Contains(list, "/ch/"+dm) || strings.Contains(list, away) {
+				t.Fatalf("the switcher in %s: %s", team, list)
+			}
+			if body := search(team); !strings.Contains(body, "</mark> in "+team) || strings.Contains(body, "</mark> in "+elsewhere[team]) {
+				t.Fatalf("search in %s: %s", team, body)
+			}
+		}
+	})
+
 	run("channel settings, privacy and archiving", func(t *testing.T) {
 		res, _ := admin.hx("/t/"+teamName+"/channels", url.Values{"name": {"proj-" + random(3)}, "display_name": {"Project"}, "type": {"public"}})
 		proj := channelRe.FindStringSubmatch(res.Header.Get("HX-Location"))[1]

@@ -40,6 +40,7 @@ type System struct {
 	janitor   *actor.PID
 	filing    *actor.PID
 	backfill  *actor.PID
+	adopter   *actor.PID
 	events    *actor.PID
 }
 
@@ -76,10 +77,12 @@ func Start(logger *zap.Logger, cfg *Config, repo *scylla.Repository, storage *mi
 	}
 	s.Files = engine.Spawn(files.Pool(fileDeps), "files", actor.WithID("main"))
 	s.janitor = engine.Spawn(files.Janitor(fileDeps), "janitor", actor.WithID("main"), recovered)
-	s.Directory = engine.Spawn(directory.Pool(&directory.Deps{
+	directoryDeps := &directory.Deps{
 		Logger: logger.Named("directory"), Cfg: cfg.Directory, Repo: repo, Storage: storage, Authz: az,
 		Users: userCache, Engine: engine, Hub: s.Hub, Channels: s.Channels, Voice: s.Voice,
-	}), "directory", actor.WithID("main"))
+	}
+	s.Directory = engine.Spawn(directory.Pool(directoryDeps), "directory", actor.WithID("main"))
+	s.adopter = engine.Spawn(directory.Adopt(directoryDeps), "directory", actor.WithID("adopt"), recovered)
 	accountDeps, err := accounts.NewDeps(logger.Named("accounts"), cfg.Accounts, repo, userCache, az, engine, s.Hub)
 	if err != nil {
 		return nil, err
@@ -102,7 +105,7 @@ func (s *System) Stop(timeout time.Duration) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	for _, pid := range []*actor.PID{s.Accounts, s.Auth, s.Directory, s.Files, s.Search, s.backfill, s.janitor, s.Channels, s.Voice, s.filing, s.Hub, s.events} {
+	for _, pid := range []*actor.PID{s.Accounts, s.Auth, s.Directory, s.Files, s.Search, s.backfill, s.adopter, s.janitor, s.Channels, s.Voice, s.filing, s.Hub, s.events} {
 		if pid == nil {
 			continue
 		}

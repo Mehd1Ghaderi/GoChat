@@ -1428,8 +1428,10 @@ func (x *ListChannelMembersResponse) GetMembers() []*ChannelMember {
 }
 
 type OpenDirectChannelRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	UserId string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	// The team the conversation belongs to.
+	TeamId        string `protobuf:"bytes,2,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1467,6 +1469,13 @@ func (*OpenDirectChannelRequest) Descriptor() ([]byte, []int) {
 func (x *OpenDirectChannelRequest) GetUserId() string {
 	if x != nil {
 		return x.UserId
+	}
+	return ""
+}
+
+func (x *OpenDirectChannelRequest) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
 	}
 	return ""
 }
@@ -1516,8 +1525,10 @@ func (x *OpenDirectChannelResponse) GetChannel() *Channel {
 }
 
 type OpenGroupChannelRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserIds       []string               `protobuf:"bytes,1,rep,name=user_ids,json=userIds,proto3" json:"user_ids,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	UserIds []string               `protobuf:"bytes,1,rep,name=user_ids,json=userIds,proto3" json:"user_ids,omitempty"`
+	// The team the conversation belongs to.
+	TeamId        string `protobuf:"bytes,2,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1557,6 +1568,13 @@ func (x *OpenGroupChannelRequest) GetUserIds() []string {
 		return x.UserIds
 	}
 	return nil
+}
+
+func (x *OpenGroupChannelRequest) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
 }
 
 type OpenGroupChannelResponse struct {
@@ -1777,13 +1795,15 @@ const file_gochat_v1_channels_proto_rawDesc = "" +
 	"\n" +
 	"channel_id\x18\x01 \x01(\tR\tchannelId\"P\n" +
 	"\x1aListChannelMembersResponse\x122\n" +
-	"\amembers\x18\x01 \x03(\v2\x18.gochat.v1.ChannelMemberR\amembers\"3\n" +
+	"\amembers\x18\x01 \x03(\v2\x18.gochat.v1.ChannelMemberR\amembers\"L\n" +
 	"\x18OpenDirectChannelRequest\x12\x17\n" +
-	"\auser_id\x18\x01 \x01(\tR\x06userId\"I\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x17\n" +
+	"\ateam_id\x18\x02 \x01(\tR\x06teamId\"I\n" +
 	"\x19OpenDirectChannelResponse\x12,\n" +
-	"\achannel\x18\x01 \x01(\v2\x12.gochat.v1.ChannelR\achannel\"4\n" +
+	"\achannel\x18\x01 \x01(\v2\x12.gochat.v1.ChannelR\achannel\"M\n" +
 	"\x17OpenGroupChannelRequest\x12\x19\n" +
-	"\buser_ids\x18\x01 \x03(\tR\auserIds\"H\n" +
+	"\buser_ids\x18\x01 \x03(\tR\auserIds\x12\x17\n" +
+	"\ateam_id\x18\x02 \x01(\tR\x06teamId\"H\n" +
 	"\x18OpenGroupChannelResponse\x12,\n" +
 	"\achannel\x18\x01 \x01(\v2\x12.gochat.v1.ChannelR\achannel\"V\n" +
 	"\x16MarkChannelReadRequest\x12\x1d\n" +

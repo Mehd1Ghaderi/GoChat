@@ -67,7 +67,12 @@ type Repo interface {
 	SpendInvite(ctx context.Context, hash []byte, userID gocql.UUID) error
 
 	CreateChannel(ctx context.Context, ch *models.Channel, creator *models.ChannelMember) error
-	CreateDirectChannel(ctx context.Context, pair string, ch *models.Channel, members []*models.ChannelMember) (gocql.UUID, error)
+	CreateDirectChannel(ctx context.Context, key string, ch *models.Channel, members []*models.ChannelMember) (gocql.UUID, error)
+	ClaimDirectKey(ctx context.Context, key string, id gocql.UUID) (gocql.UUID, error)
+	ChannelsAfter(ctx context.Context, after gocql.UUID, limit int) ([]*models.Channel, error)
+	ListChannelMembers(ctx context.Context, channelID gocql.UUID) ([]*models.ChannelMember, error)
+	GetState(ctx context.Context, key string) (string, error)
+	SetState(ctx context.Context, key, value string) error
 	GetChannels(ctx context.Context, ids []gocql.UUID) ([]*models.Channel, error)
 	GetChannelIDByName(ctx context.Context, teamID gocql.UUID, name string) (gocql.UUID, error)
 	ListTeamChannels(ctx context.Context, teamID gocql.UUID) ([]*scylla.TeamChannel, error)
@@ -840,36 +845,19 @@ func (w *worker) joinTeam(ctx context.Context, userID, teamID gocql.UUID) (*pb.T
 	return out, nil
 }
 
-func directPair(a, b gocql.UUID) string {
-	x, y := a.String(), b.String()
-	if x > y {
-		x, y = y, x
-	}
-	return x + ":" + y
-}
-
 func (w *worker) listChannels(ctx context.Context, msg ListChannels) ([]*pb.Channel, error) {
-	var (
-		memberships []*models.ChannelMember
-		teamID      gocql.UUID
-	)
-	if msg.TeamID != "" {
-		var err error
-		if teamID, err = parseID(msg.TeamID, "team"); err != nil {
-			return nil, err
-		}
-		if _, err := w.membership(ctx, teamID, msg.P.UserID); err != nil {
-			return nil, err
-		}
-		if memberships, err = w.Repo.ListUserChannels(ctx, msg.P.UserID, teamID); err != nil {
-			return nil, err
-		}
-	}
-	direct, err := w.Repo.ListUserChannels(ctx, msg.P.UserID, scylla.NoTeam)
+	teamID, err := parseID(msg.TeamID, "team")
 	if err != nil {
 		return nil, err
 	}
-	memberships = append(memberships, direct...)
+	if _, err := w.membership(ctx, teamID, msg.P.UserID); err != nil {
+		return nil, err
+	}
+	// A team's conversations are its own, filed with its channels.
+	memberships, err := w.Repo.ListUserChannels(ctx, msg.P.UserID, teamID)
+	if err != nil {
+		return nil, err
+	}
 	roles := make(map[gocql.UUID]models.ChannelRole, len(memberships))
 	chIDs := make([]gocql.UUID, 0, len(memberships))
 	for _, m := range memberships {
@@ -877,15 +865,13 @@ func (w *worker) listChannels(ctx context.Context, msg ListChannels) ([]*pb.Chan
 		chIDs = append(chIDs, m.ChannelID)
 	}
 	// Every member of a team sees its voice channels, as rooms to talk in.
-	if msg.TeamID != "" {
-		listed, err := w.Repo.ListTeamChannels(ctx, teamID)
-		if err != nil {
-			return nil, err
-		}
-		for _, tc := range listed {
-			if _, mine := roles[tc.ChannelID]; tc.Kind == models.ChannelVoice && !mine {
-				chIDs = append(chIDs, tc.ChannelID)
-			}
+	listed, err := w.Repo.ListTeamChannels(ctx, teamID)
+	if err != nil {
+		return nil, err
+	}
+	for _, tc := range listed {
+		if _, mine := roles[tc.ChannelID]; tc.Kind == models.ChannelVoice && !mine {
+			chIDs = append(chIDs, tc.ChannelID)
 		}
 	}
 	reads, err := w.Repo.ListLastReads(ctx, msg.P.UserID)
@@ -1073,88 +1059,6 @@ func (w *worker) announce(ctx context.Context, ch *models.Channel, creator gocql
 	}
 	view := convert.Channel(ch, "", gocql.UUID{}, nil)
 	w.Engine.Send(w.Hub, hub.Deliver{UserIDs: ids, Event: &pb.Event{Payload: &pb.Event_ChannelJoined{ChannelJoined: &pb.ChannelJoined{Channel: view}}}})
-}
-
-// teamsOf returns the teams a user belongs to.
-func (w *worker) teamsOf(ctx context.Context, userID gocql.UUID) (map[gocql.UUID]bool, error) {
-	list, err := w.Repo.ListUserTeams(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	set := make(map[gocql.UUID]bool, len(list))
-	for _, t := range list {
-		set[t.TeamID] = true
-	}
-	return set, nil
-}
-
-// reachable checks p may start a conversation with target: an active user
-// who shares one of mine, p's teams, unless p is an admin.
-func (w *worker) reachable(ctx context.Context, p *models.Principal, mine map[gocql.UUID]bool, target gocql.UUID) error {
-	peer, err := w.Users.Get(ctx, target)
-	if err != nil || peer.Deactivated {
-		return ierrors.NotFound("user not found")
-	}
-	if p.Role == models.SystemRoleAdmin {
-		return nil
-	}
-	theirs, err := w.teamsOf(ctx, target)
-	if err != nil {
-		return err
-	}
-	for id := range theirs {
-		if mine[id] {
-			return nil
-		}
-	}
-	return ierrors.NotFound("user not found")
-}
-
-func (w *worker) openDirect(ctx context.Context, msg OpenDirect) (*pb.Channel, error) {
-	if !w.Authz.Can(authz.ObjDirect, authz.ActCreate, string(msg.P.Role)) {
-		return nil, ierrors.PermissionDenied()
-	}
-	target, err := parseID(msg.UserID, "user")
-	if err != nil {
-		return nil, err
-	}
-	if target == msg.P.UserID {
-		return nil, ierrors.InvalidArgument("pick someone else")
-	}
-	mine, err := w.teamsOf(ctx, msg.P.UserID)
-	if err != nil {
-		return nil, err
-	}
-	if err := w.reachable(ctx, msg.P, mine, target); err != nil {
-		return nil, err
-	}
-	now := time.Now().UTC()
-	pair := directPair(msg.P.UserID, target)
-	ch := &models.Channel{
-		ID: ids.New(), TeamID: scylla.NoTeam, Name: pair, DisplayName: "Direct", Kind: models.ChannelDirect,
-		CreatedBy: msg.P.UserID, CreatedAt: now,
-	}
-	members := []*models.ChannelMember{
-		{ChannelID: ch.ID, UserID: msg.P.UserID, TeamID: scylla.NoTeam, Role: models.ChannelRoleMember, JoinedAt: now},
-		{ChannelID: ch.ID, UserID: target, TeamID: scylla.NoTeam, Role: models.ChannelRoleMember, JoinedAt: now},
-	}
-	chID, err := w.Repo.CreateDirectChannel(ctx, pair, ch, members)
-	if err != nil {
-		return nil, err
-	}
-	view, err := actors.Ask[*pb.Channel](ctx, w.Engine, w.Channels, channels.View{Target: channels.Target{P: msg.P, ChannelID: chID}})
-	if err != nil {
-		return nil, err
-	}
-	if chID == ch.ID {
-		self, err := w.Users.Get(ctx, msg.P.UserID)
-		if err == nil {
-			peerView := convert.Channel(ch, models.ChannelRoleMember, gocql.UUID{}, convert.PublicUser(self))
-			w.deliver(target, &pb.Event{Payload: &pb.Event_ChannelJoined{ChannelJoined: &pb.ChannelJoined{Channel: peerView}}})
-		}
-		w.deliver(msg.P.UserID, &pb.Event{Payload: &pb.Event_ChannelJoined{ChannelJoined: &pb.ChannelJoined{Channel: view}}})
-	}
-	return view, nil
 }
 
 func (w *worker) getUser(ctx context.Context, msg GetUser) (*pb.User, error) {

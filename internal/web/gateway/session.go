@@ -727,7 +727,9 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 	case *pb.Event_MessagePosted:
 		m := p.MessagePosted.Message
 		mine := m.GetAuthor().GetId() == me
-		if !mine {
+		// Another team's conversations and threads are shown there alone.
+		elsewhere := p.MessagePosted.TeamId != s.teamID
+		if !mine && (!elsewhere || !p.MessagePosted.Conversation) {
 			s.notify(m, p.MessagePosted.ParticipantIds)
 		}
 		if m.RootId != "" {
@@ -739,7 +741,7 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 			} else if !mine && m.ChannelId != s.channelID && render.Mentions(m, s.user) {
 				s.mentioned(m.ChannelId)
 			}
-			if !mine && m.RootId != s.threadID && slices.Contains(p.MessagePosted.ParticipantIds, me) {
+			if !mine && !elsewhere && m.RootId != s.threadID && slices.Contains(p.MessagePosted.ParticipantIds, me) {
 				s.fragment("threads-unread", true)
 				if s.inThreads {
 					s.fragment("threads-refresh", s.teamName)
