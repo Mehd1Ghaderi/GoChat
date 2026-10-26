@@ -38,6 +38,9 @@ message LeaveVoiceResponse {}
 message UpdateVoiceStateRequest {
   bool self_mute = 1;
   bool self_deaf = 2;
+  // Whether the caller sends its camera, and its screen.
+  bool self_video = 3;
+  bool self_stream = 4;
 }
 
 message UpdateVoiceStateResponse {}

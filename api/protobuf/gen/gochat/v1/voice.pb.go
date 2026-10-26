@@ -200,9 +200,12 @@ func (*LeaveVoiceResponse) Descriptor() ([]byte, []int) {
 }
 
 type UpdateVoiceStateRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SelfMute      bool                   `protobuf:"varint,1,opt,name=self_mute,json=selfMute,proto3" json:"self_mute,omitempty"`
-	SelfDeaf      bool                   `protobuf:"varint,2,opt,name=self_deaf,json=selfDeaf,proto3" json:"self_deaf,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	SelfMute bool                   `protobuf:"varint,1,opt,name=self_mute,json=selfMute,proto3" json:"self_mute,omitempty"`
+	SelfDeaf bool                   `protobuf:"varint,2,opt,name=self_deaf,json=selfDeaf,proto3" json:"self_deaf,omitempty"`
+	// Whether the caller sends its camera, and its screen.
+	SelfVideo     bool `protobuf:"varint,3,opt,name=self_video,json=selfVideo,proto3" json:"self_video,omitempty"`
+	SelfStream    bool `protobuf:"varint,4,opt,name=self_stream,json=selfStream,proto3" json:"self_stream,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -247,6 +250,20 @@ func (x *UpdateVoiceStateRequest) GetSelfMute() bool {
 func (x *UpdateVoiceStateRequest) GetSelfDeaf() bool {
 	if x != nil {
 		return x.SelfDeaf
+	}
+	return false
+}
+
+func (x *UpdateVoiceStateRequest) GetSelfVideo() bool {
+	if x != nil {
+		return x.SelfVideo
+	}
+	return false
+}
+
+func (x *UpdateVoiceStateRequest) GetSelfStream() bool {
+	if x != nil {
+		return x.SelfStream
 	}
 	return false
 }
@@ -1019,10 +1036,14 @@ const file_gochat_v1_voice_proto_rawDesc = "" +
 	"\x05token\x18\x02 \x01(\tR\x05token\x12,\n" +
 	"\achannel\x18\x03 \x01(\v2\x12.gochat.v1.ChannelR\achannel\"\x13\n" +
 	"\x11LeaveVoiceRequest\"\x14\n" +
-	"\x12LeaveVoiceResponse\"S\n" +
+	"\x12LeaveVoiceResponse\"\x93\x01\n" +
 	"\x17UpdateVoiceStateRequest\x12\x1b\n" +
 	"\tself_mute\x18\x01 \x01(\bR\bselfMute\x12\x1b\n" +
-	"\tself_deaf\x18\x02 \x01(\bR\bselfDeaf\"\x1a\n" +
+	"\tself_deaf\x18\x02 \x01(\bR\bselfDeaf\x12\x1d\n" +
+	"\n" +
+	"self_video\x18\x03 \x01(\bR\tselfVideo\x12\x1f\n" +
+	"\vself_stream\x18\x04 \x01(\bR\n" +
+	"selfStream\"\x1a\n" +
 	"\x18UpdateVoiceStateResponse\"V\n" +
 	"\x1cDisconnectVoiceMemberRequest\x12\x1d\n" +
 	"\n" +

@@ -97,9 +97,11 @@ type (
 	}
 	Ticket struct{ Endpoint, Token string }
 	Leave  struct{ UserID gocql.UUID }
+	// Update sets what a person in a voice channel sends: Video is their
+	// camera and Stream their screen.
 	Update struct {
-		UserID     gocql.UUID
-		Mute, Deaf bool
+		UserID                    gocql.UUID
+		Mute, Deaf, Video, Stream bool
 	}
 	Kick struct{ ChannelID, UserID gocql.UUID }
 	// List replies with the []*pb.VoiceChannelState of TeamID when the
@@ -174,6 +176,8 @@ type state struct {
 	gwExpires  time.Time
 	server     string
 	mute, deaf bool
+	// video and stream say they send their camera, and their screen.
+	video, stream bool
 }
 
 type room struct {
@@ -339,9 +343,10 @@ func (v *voice) update(msg Update) (Done, error) {
 	if st == nil {
 		return Done{}, ierrors.FailedPrecondition("you are not in a voice channel")
 	}
-	if st.mute != msg.Mute || st.deaf != msg.Deaf {
-		// Deafened people cannot be heard either, as in Discord.
-		st.mute, st.deaf = msg.Mute || msg.Deaf, msg.Deaf
+	// Deafened people cannot be heard either, as in Discord.
+	mute := msg.Mute || msg.Deaf
+	if st.mute != mute || st.deaf != msg.Deaf || st.video != msg.Video || st.stream != msg.Stream {
+		st.mute, st.deaf, st.video, st.stream = mute, msg.Deaf, msg.Video, msg.Stream
 		v.changed(st.channelID)
 	}
 	return Done{}, nil
@@ -388,7 +393,9 @@ func (v *voice) snapshot(id gocql.UUID, rm *room) *pb.VoiceChannelState {
 	out := &pb.VoiceChannelState{ChannelId: id.String(), Version: rm.version}
 	for _, uid := range rm.users {
 		st := v.states[uid]
-		out.States = append(out.States, &pb.VoiceState{User: st.user, ChannelId: out.ChannelId, SelfMute: st.mute, SelfDeaf: st.deaf})
+		out.States = append(out.States, &pb.VoiceState{
+			User: st.user, ChannelId: out.ChannelId, SelfMute: st.mute, SelfDeaf: st.deaf, SelfVideo: st.video, SelfStream: st.stream,
+		})
 	}
 	return out
 }
