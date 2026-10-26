@@ -65,7 +65,9 @@ func (s *voiceService) UpdateVoiceState(ctx context.Context, req *pb.UpdateVoice
 	if err != nil {
 		return nil, err
 	}
-	if _, err := actors.Ask[voice.Done](ctx, s.sys.Engine, s.sys.Voice, voice.Update{UserID: p.UserID, Mute: req.SelfMute, Deaf: req.SelfDeaf}); err != nil {
+	if _, err := actors.Ask[voice.Done](ctx, s.sys.Engine, s.sys.Voice, voice.Update{
+		UserID: p.UserID, Mute: req.SelfMute, Deaf: req.SelfDeaf, Video: req.SelfVideo, Stream: req.SelfStream,
+	}); err != nil {
 		return nil, err
 	}
 	return &pb.UpdateVoiceStateResponse{}, nil

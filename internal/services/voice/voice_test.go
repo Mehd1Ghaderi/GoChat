@@ -305,6 +305,12 @@ func TestMuteKickRevokeAndDrop(t *testing.T) {
 	if !s.States[0].SelfDeaf || !s.States[0].SelfMute {
 		t.Fatalf("deafened but not muted: %+v", s.States[0])
 	}
+	if _, err := r.ask(Update{UserID: a.UserID, Deaf: true, Video: true, Stream: true}); err != nil {
+		t.Fatal(err)
+	}
+	if s := r.hub.last(t, room, 5); !s.States[0].SelfVideo || !s.States[0].SelfStream || !s.States[0].SelfDeaf {
+		t.Fatalf("the camera and screen do not show: %+v", s.States[0])
+	}
 	if _, err := r.ask(Update{UserID: ids.New()}); !ierrors.Is(err, ierrors.CodeFailedPrecondition) {
 		t.Fatalf("updated someone not talking: %v", err)
 	}
