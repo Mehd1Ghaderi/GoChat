@@ -258,8 +258,12 @@ class GoChatApi(val client: ApiClient) {
         voice("LeaveVoice", LeaveVoiceRequest(), LeaveVoiceResponse.ADAPTER)
     }
 
-    suspend fun updateVoiceState(selfMute: Boolean, selfDeaf: Boolean) {
-        voice("UpdateVoiceState", UpdateVoiceStateRequest(self_mute = selfMute, self_deaf = selfDeaf), UpdateVoiceStateResponse.ADAPTER)
+    suspend fun updateVoiceState(selfMute: Boolean, selfDeaf: Boolean, selfVideo: Boolean = false, selfStream: Boolean = false) {
+        voice(
+            "UpdateVoiceState",
+            UpdateVoiceStateRequest(self_mute = selfMute, self_deaf = selfDeaf, self_video = selfVideo, self_stream = selfStream),
+            UpdateVoiceStateResponse.ADAPTER,
+        )
     }
 
     /** Takes someone out of a voice channel's talk, for its moderators. */
