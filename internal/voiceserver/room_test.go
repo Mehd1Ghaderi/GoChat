@@ -88,15 +88,26 @@ type client struct {
 	out     *sender
 	mu      sync.Mutex
 	got     map[string]int // packets received by the stream id that sent them
+	remotes map[string]*webrtc.TrackRemote
 	speak   []outbound
 	offers  int
 	closed  *closeFrame
 	// early is set when a candidate came before any offer, which a browser
 	// would drop.
 	early bool
+	// slots are those of every offer, and beforeAnswer runs on each once
+	// it is set, as a browser puts its camera and screen on the slots.
+	slots        []*slots
+	beforeAnswer func(*webrtc.PeerConnection, *slots)
 }
 
 func (s *sfu) join(session, userID string, send bool) (*client, error) {
+	return s.joinWith(session, userID, send, false, nil)
+}
+
+// joinWith joins a client that says it sends and shows video when video is
+// set.
+func (s *sfu) joinWith(session, userID string, send, video bool, beforeAnswer func(*webrtc.PeerConnection, *slots)) (*client, error) {
 	se := webrtc.SettingEngine{}
 	se.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
 	pc, err := webrtc.NewAPI(webrtc.WithSettingEngine(se)).NewPeerConnection(webrtc.Configuration{})
@@ -104,7 +115,10 @@ func (s *sfu) join(session, userID string, send bool) (*client, error) {
 		s.t.Fatal(err)
 	}
 	s.t.Cleanup(func() { _ = pc.Close() })
-	c := &client{t: s.t, s: s, session: session, userID: userID, pc: pc, out: newSender(256), got: map[string]int{}}
+	c := &client{
+		t: s.t, s: s, session: session, userID: userID, pc: pc, out: newSender(256),
+		got: map[string]int{}, remotes: map[string]*webrtc.TrackRemote{}, beforeAnswer: beforeAnswer,
+	}
 	if send {
 		track, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus, ClockRate: 48000, Channels: 2}, "mic", "local")
 		if err != nil {
@@ -126,6 +140,9 @@ func (s *sfu) join(session, userID string, send bool) (*client, error) {
 		}()
 	}
 	pc.OnTrack(func(remote *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
+		c.mu.Lock()
+		c.remotes[remote.StreamID()] = remote
+		c.mu.Unlock()
 		for {
 			if _, _, err := remote.ReadRTP(); err != nil {
 				return
@@ -144,7 +161,7 @@ func (s *sfu) join(session, userID string, send bool) (*client, error) {
 	go c.pump()
 	ctx, cancel := context.WithTimeout(context.Background(), patience)
 	defer cancel()
-	_, err = actors.Ask[joined](ctx, s.engine, s.rooms, addPeer{session: session, userID: userID, channelID: "room", out: c.out})
+	_, err = actors.Ask[joined](ctx, s.engine, s.rooms, addPeer{session: session, userID: userID, channelID: "room", video: video, out: c.out})
 	return c, err
 }
 
@@ -161,6 +178,12 @@ func (c *client) pump() {
 			case opOffer:
 				if err := c.pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: m.SDP}); err != nil {
 					continue
+				}
+				c.mu.Lock()
+				c.slots = append(c.slots, m.Slots)
+				c.mu.Unlock()
+				if c.beforeAnswer != nil && m.Slots != nil {
+					c.beforeAnswer(c.pc, m.Slots)
 				}
 				ans, err := c.pc.CreateAnswer(nil)
 				if err != nil || c.pc.SetLocalDescription(ans) != nil {
