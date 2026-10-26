@@ -6,14 +6,15 @@ import (
 	"time"
 
 	"github.com/pion/rtcp"
+	"github.com/pion/sdp/v3"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 )
 
 // camera plays a browser's camera and screen: on its first offer it puts
-// both on the slots, and keeps sending them, whether the room forwards
-// them or not, as a browser does. It counts the requests for a keyframe
-// each gets.
+// both on the slots, which it answers sendonly, and keeps sending them,
+// whether the room forwards them or not, as a browser does. It counts the
+// requests for a keyframe each gets.
 type camera struct {
 	t    *testing.T
 	pc   *webrtc.PeerConnection
@@ -22,29 +23,41 @@ type camera struct {
 	plis map[string]int
 }
 
-func (cam *camera) attach(pc *webrtc.PeerConnection, sl *slots) {
+func (cam *camera) attach(c *client, sl *slots) {
 	cam.mu.Lock()
 	defer cam.mu.Unlock()
 	if cam.mids != nil {
 		return
 	}
-	cam.pc, cam.mids, cam.plis = pc, map[string]string{}, map[string]int{}
-	for _, source := range []string{sourceCamera, sourceScreen} {
+	cam.pc, cam.mids, cam.plis = c.pc, map[string]string{}, map[string]int{}
+	for source, mid := range map[string]string{sourceCamera: sl.Camera, sourceScreen: sl.Screen} {
 		track, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8, ClockRate: 90000}, source, "local")
 		if err != nil {
 			cam.t.Error(err)
 			return
 		}
-		s, err := cam.pc.AddTrack(track)
+		// Pion made the slot sendonly when it took the offer, as the
+		// recvonly side's peer; the track keeps it so.
+		var slot *webrtc.RTPTransceiver
+		for _, tr := range cam.pc.GetTransceivers() {
+			if tr.Mid() == mid {
+				slot = tr
+			}
+		}
+		if slot == nil || slot.Direction() != webrtc.RTPTransceiverDirectionSendonly {
+			cam.t.Errorf("no sendonly slot for the %s at mid %q", source, mid)
+			return
+		}
+		s, err := c.api.NewRTPSender(track, cam.pc.SCTP().Transport())
 		if err != nil {
 			cam.t.Error(err)
 			return
 		}
-		for _, tr := range cam.pc.GetTransceivers() {
-			if tr.Sender() == s {
-				cam.mids[source] = tr.Mid()
-			}
+		if err := slot.SetSender(s, track); err != nil {
+			cam.t.Error(err)
+			return
 		}
+		cam.mids[source] = mid
 		go func() {
 			for cam.pc.ConnectionState() != webrtc.PeerConnectionStateClosed {
 				if err := track.WriteSample(media.Sample{Data: make([]byte, 600), Duration: 33 * time.Millisecond}); err != nil {
@@ -69,9 +82,25 @@ func (cam *camera) attach(pc *webrtc.PeerConnection, sl *slots) {
 			}
 		}()
 	}
-	if cam.mids[sourceCamera] != sl.Camera || cam.mids[sourceScreen] != sl.Screen {
-		cam.t.Errorf("the camera and screen went out on %v, not the slots %+v", cam.mids, *sl)
+}
+
+// sendsOnSlots names a slot an offer sends something on: the server only
+// ever receives on them.
+func sendsOnSlots(offer string, sl *slots) string {
+	var d sdp.SessionDescription
+	if err := d.UnmarshalString(offer); err != nil {
+		return err.Error()
 	}
+	for _, m := range d.MediaDescriptions {
+		mid, _ := m.Attribute("mid")
+		if mid != sl.Camera && mid != sl.Screen {
+			continue
+		}
+		if _, ok := m.Attribute("recvonly"); !ok {
+			return "mid " + mid
+		}
+	}
+	return ""
 }
 
 func (cam *camera) pli(source string) int {
@@ -169,6 +198,13 @@ func TestRoomForwardsCamerasAndScreens(t *testing.T) {
 
 	// A video message from one without slots changes nothing.
 	s.video("s-carol", sourceCamera, true)
+
+	// Nothing ever went to bob on his own slots.
+	bob.mu.Lock()
+	if len(bob.slotSends) > 0 {
+		t.Errorf("offers sent to bob on his slots: %v", bob.slotSends)
+	}
+	bob.mu.Unlock()
 
 	// When alice leaves, both go.
 	s.engine.Send(s.rooms, disconnect{channelID: "room", session: "s-alice", reason: "left"})

@@ -381,6 +381,37 @@ func (r *room) keyframe(p *peer, source string) {
 	}
 }
 
+// send adds a track to a peer's connection. A voice goes where Pion's
+// AddTrack puts it, the first time on the transceiver the peer's own voice
+// comes in on, which browsers answer sendrecv. A camera or screen never
+// goes on the peer's slots, which Pion would take as free: the server never
+// takes an offer, so Pion never learns that browsers answer them sendonly.
+// It goes on a video transceiver one went out on before, or a new one.
+func (r *room) send(p *peer, t *roomTrack) (*webrtc.RTPSender, error) {
+	if t.source == sourceMic {
+		return p.pc.AddTrack(t.local)
+	}
+	for _, tr := range p.pc.GetTransceivers() {
+		if tr.Kind() != webrtc.RTPCodecTypeVideo || tr.Sender() != nil || p.slots[sourceCamera] == tr || p.slots[sourceScreen] == tr {
+			continue
+		}
+		s, err := r.media.api.NewRTPSender(t.local, p.pc.SCTP().Transport())
+		if err != nil {
+			return nil, err
+		}
+		if err := tr.SetSender(s, t.local); err != nil {
+			_ = s.Stop()
+			return nil, err
+		}
+		return s, nil
+	}
+	tr, err := p.pc.AddTransceiverFromTrack(t.local, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendonly})
+	if err != nil {
+		return nil, err
+	}
+	return tr.Sender(), nil
+}
+
 // readRTCP reads what a receiver reports on a track it gets, until the
 // track leaves it. Pion's interceptors answer its NACKs on the way; its
 // requests for a keyframe go to the room, for the track's sender.
@@ -489,7 +520,7 @@ func (r *room) syncOnce(c *actor.Context) bool {
 			if have[id] || t.owner == p.session || (t.source != sourceMic && !p.video) {
 				continue
 			}
-			s, err := p.pc.AddTrack(t.local)
+			s, err := r.send(p, t)
 			if err != nil {
 				return true
 			}

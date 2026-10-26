@@ -84,6 +84,7 @@ type client struct {
 	s       *sfu
 	session string
 	userID  string
+	api     *webrtc.API
 	pc      *webrtc.PeerConnection
 	out     *sender
 	mu      sync.Mutex
@@ -98,7 +99,10 @@ type client struct {
 	// slots are those of every offer, and beforeAnswer runs on each once
 	// it is set, as a browser puts its camera and screen on the slots.
 	slots        []*slots
-	beforeAnswer func(*webrtc.PeerConnection, *slots)
+	beforeAnswer func(*client, *slots)
+	// slotSends are the offers that sent something on a slot, which a
+	// browser takes for its own.
+	slotSends []string
 }
 
 func (s *sfu) join(session, userID string, send bool) (*client, error) {
@@ -107,16 +111,17 @@ func (s *sfu) join(session, userID string, send bool) (*client, error) {
 
 // joinWith joins a client that says it sends and shows video when video is
 // set.
-func (s *sfu) joinWith(session, userID string, send, video bool, beforeAnswer func(*webrtc.PeerConnection, *slots)) (*client, error) {
+func (s *sfu) joinWith(session, userID string, send, video bool, beforeAnswer func(*client, *slots)) (*client, error) {
 	se := webrtc.SettingEngine{}
 	se.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
-	pc, err := webrtc.NewAPI(webrtc.WithSettingEngine(se)).NewPeerConnection(webrtc.Configuration{})
+	api := webrtc.NewAPI(webrtc.WithSettingEngine(se))
+	pc, err := api.NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
 		s.t.Fatal(err)
 	}
 	s.t.Cleanup(func() { _ = pc.Close() })
 	c := &client{
-		t: s.t, s: s, session: session, userID: userID, pc: pc, out: newSender(256),
+		t: s.t, s: s, session: session, userID: userID, api: api, pc: pc, out: newSender(256),
 		got: map[string]int{}, remotes: map[string]*webrtc.TrackRemote{}, beforeAnswer: beforeAnswer,
 	}
 	if send {
@@ -181,9 +186,14 @@ func (c *client) pump() {
 				}
 				c.mu.Lock()
 				c.slots = append(c.slots, m.Slots)
+				if m.Slots != nil {
+					if bad := sendsOnSlots(m.SDP, m.Slots); bad != "" {
+						c.slotSends = append(c.slotSends, bad)
+					}
+				}
 				c.mu.Unlock()
 				if c.beforeAnswer != nil && m.Slots != nil {
-					c.beforeAnswer(c.pc, m.Slots)
+					c.beforeAnswer(c, m.Slots)
 				}
 				ans, err := c.pc.CreateAnswer(nil)
 				if err != nil || c.pc.SetLocalDescription(ans) != nil {
