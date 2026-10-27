@@ -24,6 +24,7 @@ import (
 	"github.com/ssenerg/gochat/internal/services/convert"
 	"github.com/ssenerg/gochat/internal/services/hub"
 	"github.com/ssenerg/gochat/internal/services/index"
+	"github.com/ssenerg/gochat/internal/services/updates"
 )
 
 // DefaultChannel is the channel every team member stays in.
@@ -52,6 +53,11 @@ type channel struct {
 	asked      bool
 	handled    uint64
 	repeater   *actor.SendRepeater
+	// pts numbers the channel's latest update; stamp is when its state was
+	// last written, so a later number always wins.
+	pts   int64
+	stamp int64
+	bots  map[gocql.UUID]*botMember
 }
 
 func newChannel(d *Deps, id gocql.UUID) actor.Producer {
@@ -142,12 +148,24 @@ func (a *channel) load() {
 		a.loadErr = ierrors.Unavailable("channel is unavailable, try again")
 		return
 	}
+	pts, err := a.Repo.ChannelPts(ctx, a.id)
+	if err != nil {
+		a.Logger.Error("failed to load channel updates", zap.String("channel", a.id.String()), zap.Error(err))
+		a.loadErr = ierrors.Unavailable("channel is unavailable, try again")
+		return
+	}
+	a.pts = pts
 	a.pins = len(pins)
 	a.ch = ch
 	a.bucket, a.hasBucket = bucket, has
 	a.members = make(map[gocql.UUID]models.ChannelRole, len(members))
 	for _, m := range members {
 		a.members[m.UserID] = m.Role
+	}
+	if err := a.loadBots(ctx, members); err != nil {
+		a.Logger.Error("failed to load a channel's bots", zap.String("channel", a.id.String()), zap.Error(err))
+		a.loadErr = ierrors.Unavailable("channel is unavailable, try again")
+		return
 	}
 	a.cleared = make(map[gocql.UUID]gocql.UUID)
 	if ch.Kind == models.ChannelDirect {
@@ -166,25 +184,60 @@ func (a *channel) load() {
 	a.snapshot()
 }
 
-// snapshot rebuilds the recipients. Deliver messages share them, so they
-// are replaced, never modified.
+// snapshot rebuilds the recipients, the members who are not bots. Deliver
+// messages share them, so they are replaced, never modified.
 func (a *channel) snapshot() {
 	out := make(hub.Members, len(a.members))
 	for id := range a.members {
-		out[id.String()] = struct{}{}
+		if _, bot := a.bots[id]; !bot {
+			out[id.String()] = struct{}{}
+		}
 	}
 	a.recipients = out
 }
 
-// deliver sends ev to one user.
+// deliver numbers ev in one user's updates and sends it to them.
 func (a *channel) deliver(userID gocql.UUID, ev *pb.Event) {
-	a.Engine.Send(a.Hub, hub.Deliver{UserIDs: []string{userID.String()}, Event: ev})
+	if a.Updates == nil {
+		a.Engine.Send(a.Hub, hub.Deliver{UserIDs: []string{userID.String()}, Event: ev})
+		return
+	}
+	a.Engine.Send(a.Updates, updates.Push{UserIDs: []gocql.UUID{userID}, Event: ev})
 }
 
-// broadcast sends ev to every member.
-func (a *channel) broadcast(ev *pb.Event) {
+// broadcast numbers ev in the channel's updates and sends it to every
+// member, and to the bots that see it: about names the message it is
+// about, and that message's thread root when it is a reply.
+func (a *channel) broadcast(ev *pb.Event, about ...*models.Message) {
+	a.number(ev)
 	if len(a.recipients) > 0 {
 		a.Engine.Send(a.Hub, hub.Deliver{Members: a.recipients, Event: ev})
+	}
+	var m, root *models.Message
+	if len(about) > 0 {
+		m = about[0]
+	}
+	if len(about) > 1 {
+		root = about[1]
+	}
+	a.toBots(ev, m, root)
+}
+
+// number gives ev the channel's next number and logs it, before anyone
+// sees it, so a difference read after it was seen finds it.
+func (a *channel) number(ev *pb.Event) {
+	a.pts++
+	ev.Pts, ev.PtsCount, ev.PtsChannelId = a.pts, 1, a.id.String()
+	if cu := ev.GetChannelUpdated(); cu != nil {
+		cu.Channel.Pts = a.pts
+	}
+	e := updates.Entry(ev)
+	e.Pts, e.ChannelID = a.pts, gocql.UUID{}
+	a.stamp = max(time.Now().UnixMicro(), a.stamp+1)
+	ctx, cancel := a.ctx()
+	defer cancel()
+	if err := a.Repo.AppendChannelUpdate(ctx, a.id, e, a.stamp, a.UpdatesCfg.Retention); err != nil {
+		a.Logger.Warn("failed to log a channel update", zap.String("channel", a.id.String()), zap.Error(err))
 	}
 }
 
@@ -259,6 +312,12 @@ func (a *channel) handle(c *actor.Context, req Request) {
 		out, err = a.move(msg)
 	case DeleteConversation:
 		out, err = a.deleteConversation(msg)
+	case Difference:
+		err = a.difference(c, msg)
+	case Press:
+		out, err = a.press(msg)
+	case BotMembers:
+		out, err = a.botIDs(msg)
 	default:
 		return
 	}
@@ -280,7 +339,7 @@ func (a *channel) voiceRefuses(req Request) error {
 		return nil
 	}
 	switch req.(type) {
-	case Post, Edit, Delete, History, GetMessage, Thread, ThreadRead, Typing, React, Pin, Pins, Save, Follow, Mute, MarkRead, SetVoice:
+	case Post, Edit, Delete, History, GetMessage, Thread, ThreadRead, Typing, React, Pin, Pins, Save, Follow, Mute, MarkRead, SetVoice, Difference, Press:
 		return ierrors.FailedPrecondition("voice channels carry no messages")
 	case Join, AddMember:
 		return ierrors.FailedPrecondition("everyone in the team may talk in a voice channel: join the talk instead")
@@ -392,6 +451,7 @@ func (a *channel) channelFor(userID gocql.UUID, role models.ChannelRole) (*pb.Ch
 	if !a.ch.Kind.Conversation() {
 		out := convert.Channel(a.ch, role, gocql.UUID{}, nil)
 		out.PinnedCount = int32(a.pins) //nolint:gosec // at most maxPins
+		out.Pts = a.pts
 		return out, nil
 	}
 	ctx, cancel := a.ctx()
@@ -402,6 +462,7 @@ func (a *channel) channelFor(userID gocql.UUID, role models.ChannelRole) (*pb.Ch
 	}
 	out := convert.Conversation(a.ch, role, gocql.UUID{}, userID, people)
 	out.PinnedCount = int32(a.pins) //nolint:gosec // at most maxPins
+	out.Pts = a.pts
 	return out, nil
 }
 
@@ -458,6 +519,10 @@ func (a *channel) post(msg Post) (*pb.Message, error) {
 	if content == "" && len(attIDs) == 0 {
 		return nil, ierrors.InvalidArgument("message is empty")
 	}
+	markup, err := markupOf(msg.P, msg.Markup)
+	if err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := a.ctx()
 	defer cancel()
@@ -488,6 +553,7 @@ func (a *channel) post(msg Post) (*pb.Message, error) {
 		UserID:      msg.P.UserID,
 		Content:     content,
 		Attachments: attIDs,
+		Markup:      markup,
 	}
 	for i, att := range atts {
 		ok, err := a.Repo.ClaimAttachment(ctx, att, id)
@@ -523,7 +589,7 @@ func (a *channel) post(msg Post) (*pb.Message, error) {
 	delete(a.typing, msg.P.UserID)
 
 	out := convert.Message(m, convert.PublicUser(author), atts)
-	a.broadcast(&pb.Event{Payload: &pb.Event_MessagePosted{MessagePosted: a.posted(out, nil)}})
+	a.broadcast(&pb.Event{Payload: &pb.Event_MessagePosted{MessagePosted: a.posted(out, nil)}}, m)
 	a.recordMentions(m)
 	a.file(index.Add{Doc: a.doc(m)})
 	return out, nil
@@ -623,7 +689,7 @@ func (a *channel) reply(ctx context.Context, root, m *models.Message, author *mo
 		}
 	}
 	out := convert.Message(m, convert.PublicUser(author), atts)
-	a.broadcast(&pb.Event{Payload: &pb.Event_MessagePosted{MessagePosted: a.posted(out, notify)}})
+	a.broadcast(&pb.Event{Payload: &pb.Event_MessagePosted{MessagePosted: a.posted(out, notify)}}, m, root)
 	a.recordMentions(m)
 	a.file(index.Add{Doc: a.doc(m)})
 
@@ -647,7 +713,7 @@ func (a *channel) rootChanged(ctx context.Context, root *models.Message) {
 		a.Logger.Warn("failed to render a thread's root", zap.String("channel", a.id.String()), zap.Error(err))
 		return
 	}
-	a.broadcast(&pb.Event{Payload: &pb.Event_MessageEdited{MessageEdited: &pb.MessageEdited{Message: out[0]}}})
+	a.broadcast(&pb.Event{Payload: &pb.Event_MessageEdited{MessageEdited: &pb.MessageEdited{Message: out[0]}}}, root)
 }
 
 // unclaim returns attachments claimed for a message that was not written to
@@ -762,6 +828,10 @@ func (a *channel) edit(msg Edit) (*pb.Message, error) {
 	if content == "" && len(m.Attachments) == 0 {
 		return nil, ierrors.InvalidArgument("message is empty")
 	}
+	markup, err := markupOf(msg.P, msg.Markup)
+	if err != nil {
+		return nil, err
+	}
 	author, err := a.Users.Get(ctx, m.UserID)
 	if err != nil {
 		return nil, err
@@ -779,12 +849,19 @@ func (a *channel) edit(msg Edit) (*pb.Message, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A bot's edit sets its buttons, none when it gives none.
+	if msg.P.Bot && !slices.Equal(markup, m.Markup) {
+		if err := a.Repo.SetMarkup(ctx, a.id, m.RootID, m.ID, markup); err != nil {
+			return nil, err
+		}
+		m.Markup = markup
+	}
 	old := m.Content
 	m.Content, m.EditedAt = content, now
 	a.file(index.Update{Doc: a.doc(m), Old: old})
 	out := convert.Message(m, convert.PublicUser(author), orderAttachments(m.Attachments, atts))
 	mine := proto.CloneOf(out)
-	a.broadcast(&pb.Event{Payload: &pb.Event_MessageEdited{MessageEdited: &pb.MessageEdited{Message: out}}})
+	a.broadcast(&pb.Event{Payload: &pb.Event_MessageEdited{MessageEdited: &pb.MessageEdited{Message: out}}}, m)
 	return mine, a.markSaved(ctx, msg.P.UserID, []*pb.Message{mine})
 }
 
@@ -806,6 +883,8 @@ func (a *channel) delete(msg Delete) (Done, error) {
 		if !a.Authz.Can(authz.ObjMessage, authz.ActDeleteOwn, string(role), string(msg.P.Role)) {
 			return Done{}, ierrors.PermissionDenied()
 		}
+	} else if msg.P.Bot {
+		return Done{}, ierrors.PermissionDenied()
 	} else {
 		tr, err := a.teamRole(ctx, msg.P.UserID)
 		if err != nil {
@@ -836,7 +915,7 @@ func (a *channel) delete(msg Delete) (Done, error) {
 	}
 	a.broadcast(&pb.Event{Payload: &pb.Event_MessageDeleted{MessageDeleted: &pb.MessageDeleted{
 		ChannelId: a.id.String(), MessageId: m.ID.String(),
-	}}})
+	}}}, m)
 	return Done{}, nil
 }
 
@@ -850,7 +929,7 @@ func (a *channel) deleteReply(ctx context.Context, m *models.Message) error {
 	a.dropAttachments(m.Attachments)
 	a.broadcast(&pb.Event{Payload: &pb.Event_MessageDeleted{MessageDeleted: &pb.MessageDeleted{
 		ChannelId: a.id.String(), MessageId: m.ID.String(), RootId: m.RootID.String(),
-	}}})
+	}}}, m)
 	root, err := a.Repo.GetMessage(ctx, a.id, m.RootID)
 	if err != nil {
 		return nil
@@ -948,7 +1027,7 @@ func (a *channel) react(msg React) ([]*pb.Reaction, error) {
 	out := groupReactions(rows)[m.ID]
 	a.broadcast(&pb.Event{Payload: &pb.Event_ReactionsChanged{ReactionsChanged: &pb.ReactionsChanged{
 		ChannelId: a.id.String(), MessageId: m.ID.String(), RootId: convert.ID(m.RootID), Reactions: out,
-	}}})
+	}}}, m)
 	return out, nil
 }
 
@@ -1047,6 +1126,15 @@ func orderAttachments(order []gocql.UUID, atts []*models.Attachment) []*models.A
 }
 
 func (a *channel) canRead(p *models.Principal) error {
+	if err := a.mayRead(p); err != nil {
+		return err
+	}
+	return a.readsHistory(p)
+}
+
+// mayRead checks p may read the channel's messages, though a bot in privacy
+// mode only those it was sent.
+func (a *channel) mayRead(p *models.Principal) error {
 	role, err := a.member(p)
 	if err != nil {
 		return err
@@ -1109,16 +1197,16 @@ func (a *channel) history(c *actor.Context, msg History) error {
 }
 
 func (a *channel) getMessage(c *actor.Context, msg GetMessage) error {
-	if err := a.canRead(msg.P); err != nil {
+	if err := a.mayRead(msg.P); err != nil {
 		return err
 	}
-	cleared := a.cleared[msg.P.UserID]
+	cleared, bot := a.cleared[msg.P.UserID], a.privacyBot(msg.P)
 	a.async(c, func(ctx context.Context) (any, error) {
 		m, err := a.messageOf(ctx, msg.MessageID, msg.RootID)
 		if err != nil {
 			return nil, err
 		}
-		if !shown(m, cleared) {
+		if !shown(m, cleared) || (bot != nil && !a.sentTo(ctx, msg.P.UserID, bot, m)) {
 			return nil, ierrors.NotFound("message not found")
 		}
 		out, err := a.render(ctx, []*models.Message{m})
@@ -1175,19 +1263,31 @@ func (a *channel) thread(c *actor.Context, msg Thread) error {
 
 // render attaches authors and attachments to stored messages.
 func (a *channel) render(ctx context.Context, list []*models.Message) ([]*pb.Message, error) {
+	return Render(a.Deps)(ctx, a.id, list)
+}
+
+// Render renders a channel's stored messages with their authors,
+// attachments and reactions.
+func Render(d *Deps) updates.Renderer {
+	return func(ctx context.Context, channelID gocql.UUID, list []*models.Message) ([]*pb.Message, error) {
+		return render(ctx, d, channelID, list)
+	}
+}
+
+func render(ctx context.Context, d *Deps, channelID gocql.UUID, list []*models.Message) ([]*pb.Message, error) {
 	userIDs := make([]gocql.UUID, 0, len(list))
 	var attIDs []gocql.UUID
 	for _, m := range list {
 		userIDs = append(userIDs, m.UserID)
 		attIDs = append(attIDs, m.Attachments...)
 	}
-	authors, err := a.Users.GetMany(ctx, userIDs)
+	authors, err := d.Users.GetMany(ctx, userIDs)
 	if err != nil {
 		return nil, err
 	}
 	atts := make(map[gocql.UUID]*models.Attachment, len(attIDs))
 	for start := 0; start < len(attIDs); start += 100 {
-		found, err := a.Repo.GetAttachments(ctx, attIDs[start:min(start+100, len(attIDs))])
+		found, err := d.Repo.GetAttachments(ctx, attIDs[start:min(start+100, len(attIDs))])
 		if err != nil {
 			return nil, err
 		}
@@ -1199,7 +1299,7 @@ func (a *channel) render(ctx context.Context, list []*models.Message) ([]*pb.Mes
 	for i, m := range list {
 		msgIDs[i] = m.ID
 	}
-	rows, err := a.Repo.ListReactions(ctx, a.id, msgIDs)
+	rows, err := d.Repo.ListReactions(ctx, channelID, msgIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -1262,11 +1362,17 @@ func (a *channel) markRead(c *actor.Context, msg MarkRead) error {
 }
 
 func (a *channel) addLocal(ctx context.Context, userID gocql.UUID, role models.ChannelRole) error {
-	m := &models.ChannelMember{ChannelID: a.id, UserID: userID, TeamID: a.ch.TeamID, Role: role, JoinedAt: time.Now().UTC()}
+	m, bot, err := a.newMember(ctx, userID, role)
+	if err != nil {
+		return err
+	}
 	if err := a.Repo.AddChannelMember(ctx, m); err != nil {
 		return err
 	}
 	a.members[userID] = role
+	if bot != nil {
+		a.bots[userID] = bot
+	}
 	a.snapshot()
 	return nil
 }
@@ -1279,6 +1385,7 @@ func (a *channel) removeLocal(ctx context.Context, userID gocql.UUID) error {
 	delete(a.members, userID)
 	delete(a.typing, userID)
 	delete(a.posters, userID)
+	delete(a.bots, userID)
 	a.snapshot()
 	return nil
 }
@@ -1394,6 +1501,9 @@ func (a *channel) addMember(msg AddMember) (Done, error) {
 	}
 	if tr == "" {
 		return Done{}, ierrors.InvalidArgument("only team members can be added")
+	}
+	if err := a.mayAddBot(ctx, msg.P, role, target); err != nil {
+		return Done{}, err
 	}
 	if err := a.addTeamMember(ctx, target); err != nil {
 		if ierrors.Is(err, ierrors.CodeNotFound) {

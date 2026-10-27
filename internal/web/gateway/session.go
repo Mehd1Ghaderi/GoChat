@@ -68,6 +68,9 @@ type (
 	// refetched is a message read again to show it as it now is.
 	refetched struct{ m *pb.Message }
 	failed    struct{ text string }
+	// pressed is the query of a button this tab pressed, whose answer it
+	// shows.
+	pressed   struct{ queryID string }
 	expired   struct{}
 	resyncDue struct{}
 	// viewChecked carries the newest message of the channel a tab opened.
@@ -130,6 +133,15 @@ type session struct {
 	expiry    *time.Timer
 	// early holds what the browser sent before the server attached it.
 	early [][]byte
+	// presses holds the buttons this tab pressed, by query, until answered,
+	// and answers that came before the tab knew the press was its own.
+	presses map[string]*press
+}
+
+type press struct {
+	at     time.Time
+	mine   bool
+	answer *pb.CallbackAnswer
 }
 
 func NewSession(d *Deps, connID uint64, call drpc.Call, ws *websocket.Conn, in *Inflow) actor.Producer {
@@ -151,6 +163,7 @@ func NewSession(d *Deps, connID uint64, call drpc.Call, ws *websocket.Conn, in *
 			peers:    make(map[string]bool),
 			reads:    make(map[string]string),
 			posts:    make(chan *pb.PostMessageRequest, queuedPosts),
+			presses:  make(map[string]*press),
 		}
 	}
 }
@@ -295,6 +308,8 @@ func (s *session) Receive(c *actor.Context) {
 		}
 	case failed:
 		s.toast("error", msg.text)
+	case pressed:
+		s.pressed(msg.queryID)
 	}
 }
 
@@ -533,6 +548,9 @@ type clientFrame struct {
 	Attachment json.RawMessage `json:"attachment"`
 	// Sidebar is the key of the sidebar the page came with.
 	Sidebar string `json:"sidebar"`
+	// MessageID and Data name a button pressed.
+	MessageID string `json:"message_id"`
+	Data      string `json:"data"`
 }
 
 func (f *clientFrame) attachments() []string {
@@ -574,6 +592,8 @@ func (s *session) frame(c *actor.Context, data []byte) {
 		if (f.RootID == "" || uuidRe.MatchString(f.RootID)) && (f.ChannelID == "" || uuidRe.MatchString(f.ChannelID)) {
 			s.threadID, s.threadChannel = f.RootID, f.ChannelID
 		}
+	case "press":
+		s.press(c, &f)
 	case "typing":
 		if f.ChannelID != s.channelID || !uuidRe.MatchString(f.ChannelID) {
 			return
@@ -584,6 +604,77 @@ func (s *session) frame(c *actor.Context, data []byte) {
 			return nil
 		})
 	}
+}
+
+const (
+	// pressTTL is how long a press waits for its bot's answer.
+	pressTTL = 2 * time.Minute
+	// A bot may answer before the tab hears its press went through: the
+	// answer waits that long, among that many.
+	earlyTTL   = 10 * time.Second
+	maxPresses = 64
+)
+
+// pressed notes the tab's press, showing its answer if it came first.
+func (s *session) pressed(queryID string) {
+	s.sweepPresses()
+	if p := s.presses[queryID]; p != nil && p.answer != nil {
+		delete(s.presses, queryID)
+		s.showAnswer(p.answer)
+		return
+	}
+	s.presses[queryID] = &press{at: time.Now(), mine: true}
+}
+
+// answered shows the answer to a press of this tab's, or holds it a while
+// in case the press is one the tab has not heard of yet.
+func (s *session) answered(a *pb.CallbackAnswer) {
+	p := s.presses[a.QueryId]
+	if p != nil && p.mine {
+		delete(s.presses, a.QueryId)
+		s.showAnswer(a)
+		return
+	}
+	s.sweepPresses()
+	if p == nil && len(s.presses) < maxPresses {
+		s.presses[a.QueryId] = &press{at: time.Now(), answer: a}
+	}
+}
+
+func (s *session) sweepPresses() {
+	now := time.Now()
+	for id, p := range s.presses {
+		if (p.mine && now.Sub(p.at) > pressTTL) || (!p.mine && now.Sub(p.at) > earlyTTL) {
+			delete(s.presses, id)
+		}
+	}
+}
+
+func (s *session) showAnswer(a *pb.CallbackAnswer) {
+	if a.Text == "" {
+		return
+	}
+	kind := "bot"
+	if a.Alert {
+		kind = "bot sticky"
+	}
+	s.toast(kind, render.DisplayName(a.Bot)+": "+a.Text)
+}
+
+// press presses a bot's button for the tab, which alone shows the answer.
+func (s *session) press(c *actor.Context, f *clientFrame) {
+	if !uuidRe.MatchString(f.ChannelID) || !uuidRe.MatchString(f.MessageID) || (f.RootID != "" && !uuidRe.MatchString(f.RootID)) ||
+		f.Data == "" || len(f.Data) > 64 {
+		return
+	}
+	req := &pb.PressButtonRequest{ChannelId: f.ChannelID, MessageId: f.MessageID, RootId: f.RootID, Data: f.Data}
+	s.rpc(c, func(ctx context.Context) any {
+		res, err := s.Client.Messages.PressButton(ctx, req)
+		if err != nil {
+			return failed{text: drpc.Err(err).Message}
+		}
+		return pressed{queryID: res.QueryId}
+	})
 }
 
 // post sends a tab's messages one at a time, in the order it wrote them.
@@ -907,6 +998,8 @@ func (s *session) event(c *actor.Context, ev *pb.Event) {
 		if s.peerOf[s.channelID] == d.ID {
 			s.fragment("head-presence", d)
 		}
+	case *pb.Event_CallbackAnswer:
+		s.answered(p.CallbackAnswer)
 	case *pb.Event_ProfileChanged:
 		u := p.ProfileChanged.User
 		if u.GetId() == me {

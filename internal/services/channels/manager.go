@@ -16,6 +16,7 @@ import (
 	"github.com/ssenerg/gochat/internal/authz"
 	"github.com/ssenerg/gochat/internal/core/models"
 	"github.com/ssenerg/gochat/internal/repos/scylla"
+	"github.com/ssenerg/gochat/internal/services/updates"
 	"github.com/ssenerg/gochat/internal/services/users"
 )
 
@@ -78,6 +79,12 @@ type Repo interface {
 	UnclaimAttachment(ctx context.Context, a *models.Attachment, messageID gocql.UUID) error
 	DeleteAttachment(ctx context.Context, a *models.Attachment) error
 	PendObject(ctx context.Context, id gocql.UUID, key string, at time.Time) error
+	ChannelPts(ctx context.Context, channelID gocql.UUID) (int64, error)
+	GetBot(ctx context.Context, id gocql.UUID) (*models.Bot, error)
+	SetMarkup(ctx context.Context, channelID, rootID, id gocql.UUID, markup []byte) error
+	AppendChannelUpdate(ctx context.Context, channelID gocql.UUID, e *scylla.LogEntry, stamp int64, ttl time.Duration) error
+	ChannelUpdates(ctx context.Context, channelID gocql.UUID, after, upTo int64, limit int) ([]*scylla.LogEntry, error)
+	DeleteChannelUpdates(ctx context.Context, channelID gocql.UUID, upTo int64) error
 }
 
 type Storage interface {
@@ -95,6 +102,11 @@ type Deps struct {
 	Hub     *actor.PID
 	// Search files messages for search; nil leaves them out.
 	Search *actor.PID
+	// Updates numbers what happens to each account.
+	Updates    *actor.PID
+	UpdatesCfg *updates.Config
+	// Callbacks holds the button presses bots have yet to answer.
+	Callbacks *actor.PID
 }
 
 // passivate asks to stop an idle channel actor that has handled requests.

@@ -44,6 +44,8 @@ func Mux(sys *services.System, storage *minio.Storage, cfg *services.Config) (*d
 		func() error { return pb.DRPCRegisterMessageService(mux, &messageService{b}) },
 		func() error { return pb.DRPCRegisterFileService(mux, &fileService{b}) },
 		func() error { return pb.DRPCRegisterUserService(mux, &userService{b}) },
+		func() error { return pb.DRPCRegisterUpdatesService(mux, &updatesService{b}) },
+		func() error { return pb.DRPCRegisterBotService(mux, &botService{b}) },
 		func() error { return pb.DRPCRegisterGatewayService(mux, &gatewayService{b}) },
 		func() error { return pb.DRPCRegisterAdminService(mux, &adminService{b}) },
 		func() error { return pb.DRPCRegisterVoiceService(mux, &voiceService{b}) },
@@ -687,7 +689,9 @@ func (s *messageService) PostMessage(ctx context.Context, req *pb.PostMessageReq
 	if err != nil {
 		return nil, err
 	}
-	m, err := actors.Ask[*pb.Message](ctx, s.sys.Engine, s.sys.Channels, channels.Post{Target: t, Content: req.Content, AttachmentIDs: req.AttachmentIds, RootID: req.RootId})
+	m, err := actors.Ask[*pb.Message](ctx, s.sys.Engine, s.sys.Channels, channels.Post{
+		Target: t, Content: req.Content, AttachmentIDs: req.AttachmentIds, RootID: req.RootId, Markup: req.Markup,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -699,7 +703,9 @@ func (s *messageService) EditMessage(ctx context.Context, req *pb.EditMessageReq
 	if err != nil {
 		return nil, err
 	}
-	m, err := actors.Ask[*pb.Message](ctx, s.sys.Engine, s.sys.Channels, channels.Edit{Target: t, MessageID: req.MessageId, RootID: req.RootId, Content: req.Content})
+	m, err := actors.Ask[*pb.Message](ctx, s.sys.Engine, s.sys.Channels, channels.Edit{
+		Target: t, MessageID: req.MessageId, RootID: req.RootId, Content: req.Content, Markup: req.Markup,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -847,6 +853,20 @@ func (s *messageService) ListSaved(ctx context.Context, req *pb.ListSavedRequest
 		return nil, err
 	}
 	return &pb.ListSavedResponse{Hits: res.Hits, MessageIds: res.IDs}, nil
+}
+
+func (s *messageService) PressButton(ctx context.Context, req *pb.PressButtonRequest) (*pb.PressButtonResponse, error) {
+	t, err := channelTarget(ctx, req.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	id, err := actors.Ask[string](ctx, s.sys.Engine, s.sys.Channels, channels.Press{
+		Target: t, MessageID: req.MessageId, RootID: req.RootId, Data: req.Data,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.PressButtonResponse{QueryId: id}, nil
 }
 
 func (s *messageService) MarkThreadRead(ctx context.Context, req *pb.MarkThreadReadRequest) (*pb.MarkThreadReadResponse, error) {

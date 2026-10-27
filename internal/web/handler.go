@@ -55,21 +55,24 @@ type Handler struct {
 	zipper     *zipper
 	// zipped holds the static files gzipped, by name.
 	zipped map[string][]byte
+	// botPolls holds the bots' getUpdates that wait.
+	botPolls *botPolls
 }
 
 func NewHandler(logger *zap.Logger, cfg *Config, client *drpc.Client, r *render.Renderer, engine *actor.Engine, gw *gateway.Deps) *Handler {
 	u, _ := url.Parse(cfg.PublicURL)
 	h := &Handler{
-		logger: logger.Named("web"),
-		cfg:    cfg,
-		client: client,
-		render: r,
-		engine: engine,
-		gw:     gw,
-		secure: u.Scheme == "https",
-		origin: u.Scheme + "://" + u.Host,
-		auth:   newIPLimiter(rate.Limit(cfg.RateLimit.AuthPerMinute/60), cfg.RateLimit.AuthBurst),
-		reqs:   newIPLimiter(rate.Limit(cfg.RateLimit.RequestsPerSecond), cfg.RateLimit.RequestBurst),
+		logger:   logger.Named("web"),
+		cfg:      cfg,
+		client:   client,
+		render:   r,
+		engine:   engine,
+		gw:       gw,
+		secure:   u.Scheme == "https",
+		botPolls: &botPolls{polls: make(map[string]*poll)},
+		origin:   u.Scheme + "://" + u.Host,
+		auth:     newIPLimiter(rate.Limit(cfg.RateLimit.AuthPerMinute/60), cfg.RateLimit.AuthBurst),
+		reqs:     newIPLimiter(rate.Limit(cfg.RateLimit.RequestsPerSecond), cfg.RateLimit.RequestBurst),
 
 		apiSessions: newIPLimiter(rate.Limit(cfg.RateLimit.RequestsPerSecond), cfg.RateLimit.RequestBurst),
 		apiShared:   newIPLimiter(rate.Limit(cfg.RateLimit.RequestsPerSecond*apiSharedFactor), cfg.RateLimit.RequestBurst*apiSharedFactor),
@@ -188,6 +191,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /t/{team}/saved", h.savedPanel)
 	mux.HandleFunc("GET /t/{team}/threads", h.threadsPage)
 	mux.HandleFunc("GET /m/{channel}/people", h.mentionSuggestions)
+	mux.HandleFunc("GET /m/{channel}/commands", h.commandSuggestions)
 	mux.HandleFunc("GET /c/{channel}", h.channelLink)
 	mux.Handle("POST /t/{team}/ch/{channel}/mute", h.csrf(http.HandlerFunc(h.muteChannel)))
 	mux.HandleFunc("GET /m/{channel}/{message}/react", h.reactionPicker)
@@ -218,6 +222,11 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("POST /settings/totp/disable", h.csrf(http.HandlerFunc(h.disableTOTP)))
 	mux.Handle("POST /settings/sessions/{id}/revoke", h.csrf(http.HandlerFunc(h.revokeSession)))
 	mux.Handle("POST /settings/sessions/revoke", h.csrf(http.HandlerFunc(h.revokeOtherSessions)))
+	mux.Handle("POST /settings/bots", h.csrf(http.HandlerFunc(h.createBot)))
+	mux.Handle("POST /settings/bots/{bot}", h.csrf(http.HandlerFunc(h.updateBot)))
+	mux.Handle("POST /settings/bots/{bot}/token", h.csrf(http.HandlerFunc(h.resetBotToken)))
+	mux.Handle("POST /settings/bots/{bot}/delete", h.csrf(http.HandlerFunc(h.deleteBot)))
+	mux.Handle("POST /settings/bots/{bot}/team", h.csrf(http.HandlerFunc(h.addBotToTeam)))
 
 	mux.HandleFunc("GET /admin/users", h.adminUsers)
 	mux.Handle("POST /admin/users/{user}/deactivate", h.csrf(http.HandlerFunc(h.adminDeactivate)))
@@ -234,6 +243,10 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/files/{id}", h.apiDownload)
 	mux.HandleFunc("GET /api/v1/photos/{kind}/{id}/{version}", h.apiPhoto)
 	mux.HandleFunc("POST /api/v1/photo", h.apiSetPhoto)
+	mux.HandleFunc("GET /api/v2/socket", h.apiSocket)
+	mux.HandleFunc("POST /api/v2/files", h.apiUpload)
+	mux.HandleFunc("GET /api/v2/files/{id}", h.apiDownload)
+	mux.HandleFunc("POST /api/v2/bot/{method...}", h.botAPI)
 
 	return h.recover(h.headers(h.throttle(mux)))
 }

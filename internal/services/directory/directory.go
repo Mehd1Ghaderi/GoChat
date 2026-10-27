@@ -33,12 +33,15 @@ import (
 	"github.com/ssenerg/gochat/internal/services/convert"
 	"github.com/ssenerg/gochat/internal/services/hub"
 	"github.com/ssenerg/gochat/internal/services/invites"
+	"github.com/ssenerg/gochat/internal/services/updates"
 	"github.com/ssenerg/gochat/internal/services/users"
 	"github.com/ssenerg/gochat/internal/services/voice"
 )
 
 type Repo interface {
 	GetUser(ctx context.Context, id gocql.UUID) (*models.User, error)
+	ChannelsPts(ctx context.Context, channelIDs []gocql.UUID) (map[gocql.UUID]int64, error)
+	ListBotIDs(ctx context.Context, owner gocql.UUID) ([]gocql.UUID, error)
 	UpdateDisplayName(ctx context.Context, id gocql.UUID, name string, now time.Time) error
 	UpdateMemberDisplayName(ctx context.Context, userID gocql.UUID, name string) error
 	SetUserPhoto(ctx context.Context, id gocql.UUID, version string, now time.Time) error
@@ -98,8 +101,10 @@ type Deps struct {
 	Hub      *actor.PID
 	Channels *actor.PID
 	Voice    *actor.PID
-	invited  *window.Counter
-	created  *window.Counter
+	// Updates numbers what happens to each account.
+	Updates *actor.PID
+	invited *window.Counter
+	created *window.Counter
 	// teamLocks serializes the changes that could leave a team without an
 	// admin.
 	teamLocks *keylock.Locks
@@ -139,6 +144,10 @@ func (w *worker) Receive(c *actor.Context) {
 		out, err = w.listTeamMembers(ctx, msg)
 	case RemoveTeamMember:
 		out, err = w.removeTeamMember(ctx, msg)
+	case AddBot:
+		out, err = w.addBot(ctx, msg)
+	case RemoveBot:
+		out, err = w.removeBot(ctx, msg)
 	case UpdateTeamMemberRole:
 		out, err = w.updateTeamMemberRole(ctx, msg)
 	case CreateInvite:
@@ -228,8 +237,18 @@ func (w *worker) membership(ctx context.Context, teamID, userID gocql.UUID) (*mo
 	return m, nil
 }
 
-func (w *worker) deliver(userID gocql.UUID, ev *pb.Event) {
-	w.Engine.Send(w.Hub, hub.Deliver{UserIDs: []string{userID.String()}, Event: ev})
+// deliver numbers ev in the updates of each of userIDs and sends it to
+// them.
+func (w *worker) deliver(ev *pb.Event, userIDs ...gocql.UUID) {
+	if w.Updates == nil {
+		to := make([]string, len(userIDs))
+		for i, id := range userIDs {
+			to[i] = id.String()
+		}
+		w.Engine.Send(w.Hub, hub.Deliver{UserIDs: to, Event: ev})
+		return
+	}
+	w.Engine.Send(w.Updates, updates.Push{UserIDs: userIDs, Event: ev})
 }
 
 func (w *worker) createTeam(ctx context.Context, msg CreateTeam) (*pb.Team, error) {
@@ -277,7 +296,7 @@ func (w *worker) createTeam(ctx context.Context, msg CreateTeam) (*pb.Team, erro
 		w.created.Add(key)
 	}
 	out := convert.Team(team, models.TeamRoleAdmin)
-	w.deliver(creator.ID, &pb.Event{Payload: &pb.Event_TeamJoined{TeamJoined: &pb.TeamJoined{Team: out}}})
+	w.deliver(&pb.Event{Payload: &pb.Event_TeamJoined{TeamJoined: &pb.TeamJoined{Team: out}}}, creator.ID)
 	w.Logger.Info("team created", zap.String("team", team.ID.String()), zap.String("by", creator.ID.String()))
 	return out, nil
 }
@@ -456,18 +475,12 @@ func (w *worker) removeTeamMember(ctx context.Context, msg RemoveTeamMember) (Do
 	}
 	// The channels go after the team: a join racing the removal then finds
 	// no team, or joined in time to be listed here.
-	memberships, err := w.Repo.ListUserChannels(ctx, target, teamID)
-	if err != nil {
+	if err := w.leaveChannels(ctx, msg.P, teamID, target); err != nil {
 		return Done{}, err
 	}
-	for _, cm := range memberships {
-		req := channels.RemoveMember{Target: channels.Target{P: msg.P, ChannelID: cm.ChannelID}, UserID: target, System: true}
-		if _, err := actors.Ask[channels.Done](ctx, w.Engine, w.Channels, req); err != nil {
-			return Done{}, err
-		}
+	if err := w.dropBots(ctx, msg.P, teamID, target); err != nil {
+		return Done{}, err
 	}
-	w.Engine.Send(w.Voice, voice.DropUser{UserID: target, TeamID: teamID})
-	w.deliver(target, &pb.Event{Payload: &pb.Event_TeamLeft{TeamLeft: &pb.TeamLeft{TeamId: teamID.String()}}})
 	go w.recheckWatches(context.WithoutCancel(ctx), target)
 	return Done{}, nil
 }
@@ -845,7 +858,7 @@ func (w *worker) joinTeam(ctx context.Context, userID, teamID gocql.UUID) (*pb.T
 	}
 	out := convert.Team(team, role)
 	w.Engine.Send(w.Voice, voice.TeamChanged{TeamID: teamID})
-	w.deliver(userID, &pb.Event{Payload: &pb.Event_TeamJoined{TeamJoined: &pb.TeamJoined{Team: out}}})
+	w.deliver(&pb.Event{Payload: &pb.Event_TeamJoined{TeamJoined: &pb.TeamJoined{Team: out}}}, userID)
 	return out, nil
 }
 
@@ -898,6 +911,10 @@ func (w *worker) listChannels(ctx context.Context, msg ListChannels) ([]*pb.Chan
 	if err != nil {
 		return nil, err
 	}
+	pts, err := w.Repo.ChannelsPts(ctx, chIDs)
+	if err != nil {
+		return nil, err
+	}
 	var all []*models.Channel
 	for start := 0; start < len(chIDs); start += 100 {
 		found, err := w.Repo.GetChannels(ctx, chIDs[start:min(start+100, len(chIDs))])
@@ -928,6 +945,7 @@ func (w *worker) listChannels(ctx context.Context, msg ListChannels) ([]*pb.Chan
 		}
 		view.MentionCount = int32(min(mentions[ch.ID], 9999)) //nolint:gosec // bounded
 		view.Muted = muted[ch.ID]
+		view.Pts = pts[ch.ID]
 		out = append(out, view)
 	}
 	slices.SortFunc(out, func(a, b *pb.Channel) int { return cmp.Compare(sortKey(a), sortKey(b)) })
@@ -1045,7 +1063,7 @@ func (w *worker) createChannel(ctx context.Context, msg CreateChannel) (*pb.Chan
 		return nil, err
 	}
 	out := convert.Channel(ch, models.ChannelRoleAdmin, gocql.UUID{}, nil)
-	w.deliver(msg.P.UserID, &pb.Event{Payload: &pb.Event_ChannelJoined{ChannelJoined: &pb.ChannelJoined{Channel: out}}})
+	w.deliver(&pb.Event{Payload: &pb.Event_ChannelJoined{ChannelJoined: &pb.ChannelJoined{Channel: out}}}, msg.P.UserID)
 	if ch.Kind == models.ChannelVoice {
 		w.announce(ctx, ch, msg.P.UserID)
 	}
@@ -1060,14 +1078,14 @@ func (w *worker) announce(ctx context.Context, ch *models.Channel, creator gocql
 		w.Logger.Warn("failed to announce a voice channel", zap.String("channel", ch.ID.String()), zap.Error(err))
 		return
 	}
-	ids := make([]string, 0, len(members))
+	to := make([]gocql.UUID, 0, len(members))
 	for _, m := range members {
 		if m.UserID != creator {
-			ids = append(ids, m.UserID.String())
+			to = append(to, m.UserID)
 		}
 	}
 	view := convert.Channel(ch, "", gocql.UUID{}, nil)
-	w.Engine.Send(w.Hub, hub.Deliver{UserIDs: ids, Event: &pb.Event{Payload: &pb.Event_ChannelJoined{ChannelJoined: &pb.ChannelJoined{Channel: view}}}})
+	w.deliver(&pb.Event{Payload: &pb.Event_ChannelJoined{ChannelJoined: &pb.ChannelJoined{Channel: view}}}, to...)
 }
 
 func (w *worker) getUser(ctx context.Context, msg GetUser) (*pb.User, error) {
