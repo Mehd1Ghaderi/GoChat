@@ -54,10 +54,7 @@ func (h *Handler) voiceState(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := h.ctx(r)
 	defer cancel()
-	req := &pb.UpdateVoiceStateRequest{
-		SelfMute: r.PostFormValue("self_mute") == "1", SelfDeaf: r.PostFormValue("self_deaf") == "1",
-		SelfVideo: r.PostFormValue("self_video") == "1", SelfStream: r.PostFormValue("self_stream") == "1",
-	}
+	req := &pb.UpdateVoiceStateRequest{SelfMute: r.PostFormValue("self_mute") == "1", SelfDeaf: r.PostFormValue("self_deaf") == "1"}
 	if _, err := h.client.Voice.UpdateVoiceState(ctx, req); err != nil {
 		h.fail(w, r, err)
 		return

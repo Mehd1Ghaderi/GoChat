@@ -18,6 +18,9 @@ final class ScreenBroadcast {
     private let queue = DispatchQueue(label: "io.github.ssenerg.gochat.screen")
     private let context = CIContext()
     private var server: Int32 = -1
+    // The extension's connection while a broadcast goes on.
+    private let lock = NSLock()
+    private var client: Int32 = -1
     private var pool: CVPixelBufferPool?
     private var poolSize = CGSize.zero
 
@@ -44,9 +47,12 @@ final class ScreenBroadcast {
         queue.async { [weak self] in self?.serve() }
     }
 
-    /// Asks the extension to end the broadcast; onEnd follows once it has.
+    /// Ends the broadcast by closing the extension's connection, which it
+    /// hears; onEnd follows.
     func stop() {
-        Broadcast.post(Broadcast.stopNotification)
+        lock.lock()
+        defer { lock.unlock() }
+        if client >= 0 { shutdown(client, SHUT_RDWR) }
     }
 
     /// Takes one broadcast after the other, for as long as the app runs.
@@ -59,12 +65,18 @@ final class ScreenBroadcast {
             }
             var on: Int32 = 1
             setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+            lock.lock()
+            client = fd
+            lock.unlock()
             DispatchQueue.main.async { self.onStart?() }
             while let header = Broadcast.read(fd, 4) {
                 let length = Broadcast.length(header)
                 guard length > 0, length <= Broadcast.maxFrame, let jpeg = Broadcast.read(fd, length) else { break }
                 deliver(jpeg)
             }
+            lock.lock()
+            client = -1
+            lock.unlock()
             close(fd)
             DispatchQueue.main.async { self.onEnd?() }
         }

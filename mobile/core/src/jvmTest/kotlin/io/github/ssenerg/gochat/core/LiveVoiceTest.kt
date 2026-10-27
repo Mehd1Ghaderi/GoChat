@@ -142,7 +142,8 @@ class LiveVoiceTest {
         assertTrue(call.video)
 
         // A camera turned on before the voice connects goes out once the
-        // slots are answered.
+        // slots are answered. The others see its mark once the voice server
+        // forwards it, which a fake WebRTC never sends it anything to.
         withContext(scope.coroutineContext) {
             call.join(room)
             call.toggleCamera()
@@ -151,12 +152,11 @@ class LiveVoiceTest {
         assertNotNull(rtc.slots, "the first offer names the slots")
         rtc.listener!!.onState(RtcState.Connected)
         rtc.camera.first { it }
-        session.state.first { s -> s.voice[room.id]?.states?.any { it.user?.id == me && it.self_video } == true }
         call.videos.first { v -> v.any { it.local && it.source == VideoSource.Camera && it.userId == me } }
 
-        // The screen goes out beside it, and shows the person live.
+        // The screen goes out beside it.
         withContext(scope.coroutineContext) { call.setVideo(VideoSource.Screen, true) }
-        session.state.first { s -> s.voice[room.id]?.states?.any { it.user?.id == me && it.self_video && it.self_stream } == true }
+        call.videos.first { v -> v.any { it.local && it.source == VideoSource.Screen } }
 
         // Someone else's camera comes and goes as their stream does.
         rtc.listener!!.onVideo("u2:camera", "their camera")
@@ -167,13 +167,18 @@ class LiveVoiceTest {
         // The system stopping the capture stops the screen.
         rtc.listener!!.onScreenEnded()
         call.state.first { it?.screen == false }
-        session.state.first { s -> s.voice[room.id]?.states?.any { it.user?.id == me && it.self_video && !it.self_stream } == true }
+        call.videos.first { v -> v.none { it.local && it.source == VideoSource.Screen } }
+
+        // A camera that stops by itself goes off and says so.
+        var errors = scope.async { call.errors.first() }
+        rtc.listener!!.onCameraEnded()
+        assertEquals("The camera stopped.", errors.await())
+        call.state.first { it?.camera == false }
+        call.videos.first { v -> v.none { it.local && it.source == VideoSource.Camera } }
 
         // A camera that cannot start goes back off and says so.
-        withContext(scope.coroutineContext) { call.toggleCamera() }
-        session.state.first { s -> s.voice[room.id]?.states?.any { it.user?.id == me && !it.self_video } == true }
         rtc.broken = true
-        val errors = scope.async { call.errors.first() }
+        errors = scope.async { call.errors.first() }
         withContext(scope.coroutineContext) { call.toggleCamera() }
         assertEquals("Could not turn the camera on.", errors.await())
         call.state.first { it?.camera == false }

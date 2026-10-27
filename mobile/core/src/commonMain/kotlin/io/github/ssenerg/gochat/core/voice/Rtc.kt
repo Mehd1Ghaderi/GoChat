@@ -49,6 +49,9 @@ interface RtcListener {
 
     /** The screen is no longer captured: the person or the system stopped it. */
     fun onScreenEnded() {}
+
+    /** The camera stopped capturing: another app took it, or it failed. */
+    fun onCameraEnded() {}
 }
 
 /**

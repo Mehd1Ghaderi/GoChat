@@ -6,8 +6,9 @@ import Foundation
 /// broadcast extension. The app listens on a Unix socket in the container
 /// of the app group they share; the extension connects to it once the
 /// person starts the broadcast and writes each frame as a JPEG, after its
-/// length as four big-endian bytes. The socket closing ends the broadcast;
-/// the app ends it from its side with a Darwin notification.
+/// length as four big-endian bytes. Either side closing the socket ends the
+/// broadcast: the app closes it to stop sharing. Only the app's group can
+/// reach the socket, unlike a Darwin notification, which any app may post.
 enum Broadcast {
     /// The app group both belong to, as their Info.plist names it.
     static var group: String? {
@@ -19,9 +20,6 @@ enum Broadcast {
         guard let group = group else { return nil }
         return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)?.appendingPathComponent("screen.sock").path
     }
-
-    /// Asks the extension to end the broadcast.
-    static let stopNotification = "io.github.ssenerg.gochat.broadcast.stop"
 
     /// The longest side of a frame the extension sends, as the apps cap a screen.
     static let longSide: CGFloat = 1280
@@ -39,11 +37,6 @@ enum Broadcast {
             path.withCString { _ = strncpy(buf.baseAddress!.assumingMemoryBound(to: CChar.self), $0, capacity - 1) }
         }
         return addr
-    }
-
-    /// Posts a Darwin notification, which crosses between the app and the extension.
-    static func post(_ name: String) {
-        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), CFNotificationName(name as CFString), nil, nil, true)
     }
 
     /// Writes all of [data], or says it could not.

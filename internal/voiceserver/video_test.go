@@ -165,6 +165,8 @@ func TestRoomForwardsCamerasAndScreens(t *testing.T) {
 
 	s.video("s-alice", sourceCamera, true)
 	eventually(t, "bob sees alice's camera", func() bool { return bob.heard("alice:camera") > 10 })
+	eventually(t, "bob gets reports on it", func() bool { return bob.reported("alice:camera") > 0 })
+	eventually(t, "the chat server hears alice's camera is on", func() bool { return s.link.sends("s-alice", true, false) })
 	eventually(t, "alice is asked for a keyframe for bob", func() bool { return aliceCam.pli(sourceCamera) > 0 })
 	if carol.heard("alice:camera") != 0 || alice.heard("alice:camera") != 0 {
 		t.Fatal("alice's camera went to carol, who does no video, or back to alice")
@@ -184,25 +186,41 @@ func TestRoomForwardsCamerasAndScreens(t *testing.T) {
 	// Her screen goes out beside it.
 	s.video("s-alice", sourceScreen, true)
 	eventually(t, "bob sees alice's screen", func() bool { return bob.heard("alice:screen") > 10 })
+	eventually(t, "the chat server hears alice is live", func() bool { return s.link.sends("s-alice", true, true) })
+
+	// The room forwards two at most here: bob's camera is refused, and
+	// goes to nobody.
+	s.video("s-bob", sourceCamera, true)
+	eventually(t, "bob is told his camera is refused", func() bool {
+		bob.mu.Lock()
+		defer bob.mu.Unlock()
+		return len(bob.refused) == 1 && bob.refused[0] == sourceCamera
+	})
+	if alice.heard("bob:camera") != 0 || s.link.sends("s-bob", true, false) {
+		t.Fatal("a camera past the cap went out")
+	}
 
 	// Turning the camera off stops it for bob and leaves the screen.
 	s.video("s-alice", sourceCamera, false)
 	eventually(t, "bob stops getting alice's camera", func() bool { return bob.stops("alice:camera") })
+	eventually(t, "the chat server hears alice's camera is off", func() bool { return s.link.sends("s-alice", false, true) })
 	screen := bob.heard("alice:screen")
 	eventually(t, "the screen goes on", func() bool { return bob.heard("alice:screen") > screen+10 })
 
-	// And on again.
-	camera := bob.heard("alice:camera")
+	// And on again, on the transceiver it left, which still sends reports
+	// and so answers NACKs: Pion's interceptors carry it.
+	camera, reports := bob.heard("alice:camera"), bob.reported("alice:camera")
 	s.video("s-alice", sourceCamera, true)
 	eventually(t, "bob sees alice's camera again", func() bool { return bob.heard("alice:camera") > camera+10 })
+	eventually(t, "bob gets reports on it again", func() bool { return bob.reported("alice:camera") > reports })
 
 	// A video message from one without slots changes nothing.
 	s.video("s-carol", sourceCamera, true)
 
-	// Nothing ever went to bob on his own slots.
+	// Nothing ever went to bob on his own slots, or took another's place.
 	bob.mu.Lock()
-	if len(bob.slotSends) > 0 {
-		t.Errorf("offers sent to bob on his slots: %v", bob.slotSends)
+	if len(bob.slotSends) > 0 || len(bob.swaps) > 0 {
+		t.Errorf("offers sent to bob on his slots, %v, or swapped tracks, %v", bob.slotSends, bob.swaps)
 	}
 	bob.mu.Unlock()
 
@@ -214,4 +232,87 @@ func TestRoomForwardsCamerasAndScreens(t *testing.T) {
 	if bob.heard("carol") == 0 {
 		t.Fatal("bob lost carol")
 	}
+}
+
+// gate holds a client's answers while it is closed.
+type gate struct {
+	mu      sync.Mutex
+	held    bool
+	open    chan struct{}
+	waiting chan struct{}
+}
+
+func (g *gate) hold() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.held, g.open, g.waiting = true, make(chan struct{}), make(chan struct{}, 1)
+}
+
+func (g *gate) release() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.held {
+		g.held = false
+		close(g.open)
+	}
+}
+
+// pass waits while the gate is held, and says it does.
+func (g *gate) pass() {
+	g.mu.Lock()
+	held, open, waiting := g.held, g.open, g.waiting
+	g.mu.Unlock()
+	if !held {
+		return
+	}
+	select {
+	case waiting <- struct{}{}:
+	default:
+	}
+	<-open
+}
+
+func TestAVideoNeverTakesAnothersPlaceUnderAnOffer(t *testing.T) {
+	s := newSFU(t, 4)
+	alice, _ := s.joinCamera("s-alice", "alice")
+	s.joinCamera("s-bob", "bob")
+	var g gate
+	cam := &camera{t: t}
+	carol, err := s.joinWith("s-carol", "carol", true, true, func(c *client, sl *slots) {
+		cam.attach(c, sl)
+		g.pass()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(g.release)
+	s.video("s-alice", sourceCamera, true)
+	eventually(t, "carol sees alice's camera", func() bool { return carol.heard("alice:camera") > 10 })
+
+	// Dave joining sends carol an offer, which she holds while alice's
+	// camera goes and bob's comes: bob's must not take the transceiver
+	// alice's left before carol hears it go.
+	g.hold()
+	if _, err := s.join("s-dave", "dave", true); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-g.waiting:
+	case <-time.After(patience):
+		t.Fatal("carol got no offer")
+	}
+	s.video("s-alice", sourceCamera, false)
+	s.video("s-bob", sourceCamera, true)
+	eventually(t, "alice sees bob's camera", func() bool { return alice.heard("bob:camera") > 10 })
+	g.release()
+
+	eventually(t, "carol is offered bob's camera", func() bool { return carol.offered("bob:camera") })
+	carol.mu.Lock()
+	swaps := carol.swaps
+	carol.mu.Unlock()
+	if len(swaps) > 0 {
+		t.Fatalf("a track took another's place on carol's connection: %v", swaps)
+	}
+	eventually(t, "carol sees bob's camera", func() bool { return carol.heard("bob:camera") > 10 })
+	eventually(t, "carol gets reports on it", func() bool { return carol.reported("bob:camera") > 0 })
 }

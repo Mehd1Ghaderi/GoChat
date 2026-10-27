@@ -97,11 +97,9 @@ type (
 	}
 	Ticket struct{ Endpoint, Token string }
 	Leave  struct{ UserID gocql.UUID }
-	// Update sets what a person in a voice channel sends: Video is their
-	// camera and Stream their screen.
 	Update struct {
-		UserID                    gocql.UUID
-		Mute, Deaf, Video, Stream bool
+		UserID     gocql.UUID
+		Mute, Deaf bool
 	}
 	Kick struct{ ChannelID, UserID gocql.UUID }
 	// List replies with the []*pb.VoiceChannelState of TeamID when the
@@ -146,6 +144,13 @@ type (
 	PeerLeft struct {
 		Key                        string
 		UserID, ChannelID, Session string
+	}
+	// PeerMedia says whether a voice server forwards a peer's camera, and
+	// its screen.
+	PeerMedia struct {
+		Key                        string
+		UserID, ChannelID, Session string
+		Video, Stream              bool
 	}
 )
 
@@ -277,6 +282,8 @@ func (v *voice) Receive(c *actor.Context) {
 		v.claim(c, msg)
 	case PeerLeft:
 		v.peerLeft(msg)
+	case PeerMedia:
+		v.peerMedia(msg)
 	}
 }
 
@@ -345,8 +352,8 @@ func (v *voice) update(msg Update) (Done, error) {
 	}
 	// Deafened people cannot be heard either, as in Discord.
 	mute := msg.Mute || msg.Deaf
-	if st.mute != mute || st.deaf != msg.Deaf || st.video != msg.Video || st.stream != msg.Stream {
-		st.mute, st.deaf, st.video, st.stream = mute, msg.Deaf, msg.Video, msg.Stream
+	if st.mute != mute || st.deaf != msg.Deaf {
+		st.mute, st.deaf = mute, msg.Deaf
 		v.changed(st.channelID)
 	}
 	return Done{}, nil
@@ -524,6 +531,20 @@ func (v *voice) peerLeft(msg PeerLeft) {
 	for _, st := range v.states {
 		if st.server == msg.Key && st.session == msg.Session && st.userID.String() == msg.UserID && st.channelID.String() == msg.ChannelID {
 			v.remove(st, "")
+			return
+		}
+	}
+}
+
+// peerMedia shows a camera and a screen as the voice server forwards
+// them: what a client says of itself shows nobody anything.
+func (v *voice) peerMedia(msg PeerMedia) {
+	for _, st := range v.states {
+		if st.server == msg.Key && st.session == msg.Session && st.userID.String() == msg.UserID && st.channelID.String() == msg.ChannelID {
+			if st.video != msg.Video || st.stream != msg.Stream {
+				st.video, st.stream = msg.Video, msg.Stream
+				v.changed(st.channelID)
+			}
 			return
 		}
 	}

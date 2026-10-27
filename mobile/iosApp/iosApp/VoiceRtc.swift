@@ -121,6 +121,12 @@ final class VoiceRtc: NSObject, IosRtcEngine {
         if broadcasting { broadcast.stop() }
     }
 
+    /// Forgets a connection that closed, so a broadcast started after it
+    /// has no call to go to.
+    fileprivate func closed(_ peer: VoicePeer) {
+        if current === peer { current = nil }
+    }
+
     private func broadcastStarted() {
         // A broadcast outside a call has nowhere to go.
         guard current != nil else {
@@ -345,6 +351,7 @@ private final class VoicePeer: NSObject, IosRtcPeer, RTCPeerConnectionDelegate {
         pc?.close()
         pc = nil
         mic = nil
+        engine.closed(self)
     }
 
     /// A voice that comes in plays while its track is enabled.

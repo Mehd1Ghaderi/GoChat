@@ -293,6 +293,13 @@
       case "speaking":
         setSpeaking(msg.user_id, !!msg.speaking);
         return null;
+      case "video":
+        // The room forwards no more cameras and screens.
+        if (msg.on === false && (msg.source === "camera" || msg.source === "screen") && state[msg.source]) {
+          stopVideo(state, msg.source);
+          toast("Your " + msg.source + " is off: " + (msg.reason || "the voice channel refused it") + ".");
+        }
+        return null;
     }
     return null;
   }
@@ -419,7 +426,6 @@
         toast("Could not send the " + source + ".");
       });
     send(state, { op: "video", source: source, on: true });
-    report();
     render();
   }
 
@@ -431,7 +437,6 @@
     if (t) t.sender.replaceTrack(null).catch(function () {});
     stopTracks(stream);
     send(state, { op: "video", source: source, on: false });
-    report();
     render();
   }
 
@@ -668,12 +673,10 @@
     });
   }
 
+  // report tells the chat server of a mute; the voice server tells it of
+  // the camera and the screen, which it forwards.
   function report() {
-    if (!call || !call.ws) return;
-    post("/voice/state", {
-      self_mute: muted || deafened ? "1" : "0", self_deaf: deafened ? "1" : "0",
-      self_video: call.camera ? "1" : "0", self_stream: call.screen ? "1" : "0"
-    }).catch(function () {});
+    if (call && call.ws) post("/voice/state", { self_mute: muted || deafened ? "1" : "0", self_deaf: deafened ? "1" : "0" }).catch(function () {});
   }
 
   function toggleMute() {

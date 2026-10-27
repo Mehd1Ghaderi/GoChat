@@ -25,6 +25,7 @@ import kotlinx.coroutines.withContext
 import org.webrtc.AudioSource
 import org.webrtc.AudioTrack
 import org.webrtc.Camera2Enumerator
+import org.webrtc.CameraVideoCapturer
 import org.webrtc.DataChannel
 import org.webrtc.DefaultVideoDecoderFactory
 import org.webrtc.DefaultVideoEncoderFactory
@@ -43,7 +44,9 @@ import org.webrtc.SurfaceTextureHelper
 import org.webrtc.VideoCapturer
 import org.webrtc.VideoTrack
 import org.webrtc.audio.JavaAudioDeviceModule
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -71,6 +74,13 @@ class AndroidRtcEngine(context: Context) : RtcEngine {
 
     private var camera: Capture? = null
     private var screen: Capture? = null
+
+    /** Counts the camera's stops: a start one overtook lets go of what it opened. */
+    private var cameraStops = 0
+
+    /** Set once the system stopped the screen's capture, with or without a connection to hear it. */
+    @Volatile
+    private var screenEnded = false
 
     /** The person's consent to capture the screen, which serves one capture. */
     @Volatile
@@ -102,22 +112,64 @@ class AndroidRtcEngine(context: Context) : RtcEngine {
         screenGrant = data
     }
 
-    /** Starts the front camera, or the first there is; null when the phone has none or it would not start. */
-    @Synchronized
+    /**
+     * Starts the front camera, or the first there is, and waits for its
+     * first frame; null when the phone has none or it would not open, as
+     * when another app has it.
+     */
     internal fun startCamera(): VideoTrack? {
-        camera?.let { return it.track }
+        val stops = synchronized(this) {
+            camera?.let { return it.track }
+            cameraStops
+        }
         val enumerator = Camera2Enumerator(context)
         val names = enumerator.deviceNames
         val name = names.firstOrNull(enumerator::isFrontFacing) ?: names.firstOrNull() ?: return null
-        val capturer = enumerator.createCapturer(name, null) ?: return null
-        camera = capture("camera", capturer, screencast = false, CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_FPS)
-        return camera?.track
+        val opened = CompletableFuture<Boolean>()
+        val capturer = enumerator.createCapturer(name, CameraEvents(opened)) ?: return null
+        val started = capture("camera", capturer, screencast = false, CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_FPS) ?: return null
+        // The camera opens on its own thread, and says only there whether it
+        // could; the engine is not held meanwhile, so a call may end.
+        val ok = runCatching { opened.get(CAMERA_OPEN_SECONDS, TimeUnit.SECONDS) }.getOrDefault(false) == true
+        val kept = synchronized(this) {
+            when {
+                !ok || cameraStops != stops -> null
+                camera != null -> camera
+                else -> started.also { camera = it }
+            }
+        }
+        if (kept !== started) started.dispose()
+        return kept?.track
     }
 
-    @Synchronized
+    /** Hears the camera open, or fail then or later. */
+    private inner class CameraEvents(private val opened: CompletableFuture<Boolean>) : CameraVideoCapturer.CameraEventsHandler {
+        override fun onFirstFrameAvailable() {
+            opened.complete(true)
+        }
+
+        override fun onCameraError(error: String) = failed()
+
+        override fun onCameraDisconnected() = failed()
+
+        // A camera that worked and stopped ends the call's camera.
+        private fun failed() {
+            if (!opened.complete(false)) events?.onCameraEnded()
+        }
+
+        override fun onCameraFreezed(error: String) {}
+
+        override fun onCameraOpening(cameraName: String) {}
+
+        override fun onCameraClosed() {}
+    }
+
     internal fun stopCamera() {
-        camera?.dispose()
-        camera = null
+        val stopped = synchronized(this) {
+            cameraStops++
+            camera.also { camera = null }
+        }
+        stopped?.dispose()
     }
 
     /**
@@ -127,15 +179,19 @@ class AndroidRtcEngine(context: Context) : RtcEngine {
      */
     @Synchronized
     internal fun startScreen(): VideoTrack? {
-        screen?.let { return it.track }
+        if (!screenEnded) screen?.let { return it.track }
+        stopScreen()
         val grant = screenGrant ?: return null
         screenGrant = null
+        screenEnded = false
         val capturer = ScreenCapturerAndroid(
             grant,
             object : MediaProjection.Callback() {
                 // The person stopped it from the system, or the system took
                 // it back: the call stops sending it, and so stops it here.
+                // Between connections, the next one hears of it.
                 override fun onStop() {
+                    screenEnded = true
                     events?.onScreenEnded()
                 }
             },
@@ -153,6 +209,14 @@ class AndroidRtcEngine(context: Context) : RtcEngine {
     internal fun stopScreen() {
         screen?.dispose()
         screen = null
+    }
+
+    /** Lets go of a screen the system stopped while no connection heard it; says whether there was one. */
+    @Synchronized
+    private fun dropEndedScreen(): Boolean {
+        if (screen == null || !screenEnded) return false
+        stopScreen()
+        return true
     }
 
     override fun stopVideo() {
@@ -197,6 +261,7 @@ class AndroidRtcEngine(context: Context) : RtcEngine {
         pc.addTrack(track, listOf("mic"))
         val routing = AudioRouting(context).also { it.start() }
         events = listener
+        if (dropEndedScreen()) listener.onScreenEnded()
         return AndroidRtcPeer(this, pc, source, track, routing, audio) {
             if (events === listener) events = null
         }
@@ -206,6 +271,7 @@ class AndroidRtcEngine(context: Context) : RtcEngine {
         const val CAMERA_WIDTH = 1280
         const val CAMERA_HEIGHT = 720
         const val CAMERA_FPS = 24
+        const val CAMERA_OPEN_SECONDS = 12L
         const val SCREEN_LONG_SIDE = 1280
         const val SCREEN_FPS = 15
     }

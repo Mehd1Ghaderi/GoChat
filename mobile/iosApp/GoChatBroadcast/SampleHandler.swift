@@ -20,19 +20,6 @@ final class SampleHandler: RPBroadcastSampleHandler {
             finish("Join a voice channel in GoChat to share your screen.")
             return
         }
-        // The person stopped sharing in the app.
-        let observer = Unmanaged.passUnretained(self).toOpaque()
-        CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            observer,
-            { _, observer, _, _, _ in
-                guard let observer = observer else { return }
-                Unmanaged<SampleHandler>.fromOpaque(observer).takeUnretainedValue().finish("You stopped sharing your screen in GoChat.")
-            },
-            Broadcast.stopNotification as CFString,
-            nil,
-            .deliverImmediately
-        )
     }
 
     override func broadcastFinished() {
@@ -91,16 +78,39 @@ final class SampleHandler: RPBroadcastSampleHandler {
         lock.lock()
         self.fd = fd
         lock.unlock()
+        watch(fd)
         return true
     }
 
+    /// Waits for the app to close its side, as it does when the person
+    /// stops sharing there, or when it goes.
+    private func watch(_ fd: Int32) {
+        Thread.detachNewThread { [weak self] in
+            var byte: UInt8 = 0
+            while true {
+                let n = Darwin.read(fd, &byte, 1)
+                if n > 0 || (n < 0 && errno == EINTR) { continue }
+                break
+            }
+            guard let self = self else { return }
+            self.lock.lock()
+            let open = self.fd == fd
+            self.lock.unlock()
+            // The extension closing it itself says nothing more.
+            if open { self.finish("GoChat stopped sharing your screen.") }
+        }
+    }
+
     private func disconnect() {
-        CFNotificationCenterRemoveEveryObserver(CFNotificationCenterGetDarwinNotifyCenter(), Unmanaged.passUnretained(self).toOpaque())
         lock.lock()
         let fd = self.fd
         self.fd = -1
         lock.unlock()
-        if fd >= 0 { close(fd) }
+        if fd >= 0 {
+            // Wakes the watch, which then sees the extension closed it.
+            shutdown(fd, SHUT_RDWR)
+            close(fd)
+        }
     }
 
     /// Ends the broadcast, and says why on the system's notice.

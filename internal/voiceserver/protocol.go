@@ -18,7 +18,9 @@ import "github.com/pion/webrtc/v4"
 // message when it starts or stops, so turning one on or off never needs a
 // new offer. The others receive each as a video stream whose id is the
 // sender's user id, a colon and the source, as "u123:camera"; a voice's
-// stream id is the user id alone.
+// stream id is the user id alone. A room forwards a few cameras and
+// screens at most: past them, the server answers a video message with its
+// own, on false and a reason, and the browser stops that source.
 const (
 	opIdentify  = "identify"
 	opReady     = "ready"
@@ -68,6 +70,10 @@ type outbound struct {
 	Slots      *slots                   `json:"slots,omitempty"`
 	Candidate  *webrtc.ICECandidateInit `json:"candidate,omitempty"`
 	Speaking   *bool                    `json:"speaking,omitempty"`
+	// Source, On and Reason, on video, refuse a camera or screen.
+	Source string `json:"source,omitempty"`
+	On     *bool  `json:"on,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // slots are the mids of the transceivers a browser sends its camera and

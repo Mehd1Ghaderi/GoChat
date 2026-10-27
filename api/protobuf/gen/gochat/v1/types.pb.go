@@ -1497,7 +1497,8 @@ type VoiceState struct {
 	ChannelId string                 `protobuf:"bytes,2,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
 	SelfMute  bool                   `protobuf:"varint,3,opt,name=self_mute,json=selfMute,proto3" json:"self_mute,omitempty"`
 	SelfDeaf  bool                   `protobuf:"varint,4,opt,name=self_deaf,json=selfDeaf,proto3" json:"self_deaf,omitempty"`
-	// Whether they send their camera, and their screen.
+	// Whether the others get their camera, and their screen, as the voice
+	// server reports it.
 	SelfVideo     bool `protobuf:"varint,5,opt,name=self_video,json=selfVideo,proto3" json:"self_video,omitempty"`
 	SelfStream    bool `protobuf:"varint,6,opt,name=self_stream,json=selfStream,proto3" json:"self_stream,omitempty"`
 	unknownFields protoimpl.UnknownFields

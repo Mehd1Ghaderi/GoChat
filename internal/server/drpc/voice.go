@@ -65,9 +65,7 @@ func (s *voiceService) UpdateVoiceState(ctx context.Context, req *pb.UpdateVoice
 	if err != nil {
 		return nil, err
 	}
-	if _, err := actors.Ask[voice.Done](ctx, s.sys.Engine, s.sys.Voice, voice.Update{
-		UserID: p.UserID, Mute: req.SelfMute, Deaf: req.SelfDeaf, Video: req.SelfVideo, Stream: req.SelfStream,
-	}); err != nil {
+	if _, err := actors.Ask[voice.Done](ctx, s.sys.Engine, s.sys.Voice, voice.Update{UserID: p.UserID, Mute: req.SelfMute, Deaf: req.SelfDeaf}); err != nil {
 		return nil, err
 	}
 	return &pb.UpdateVoiceStateResponse{}, nil
@@ -143,6 +141,9 @@ func (s *voiceServerService) Connect(stream pb.DRPCVoiceServerService_ConnectStr
 		case *pb.VoiceServerServiceConnectRequest_PeerLeft:
 			l := f.PeerLeft
 			s.sys.Engine.Send(s.sys.Voice, voice.PeerLeft{Key: key, UserID: l.UserId, ChannelID: l.ChannelId, Session: l.Session})
+		case *pb.VoiceServerServiceConnectRequest_PeerMedia:
+			m := f.PeerMedia
+			s.sys.Engine.Send(s.sys.Voice, voice.PeerMedia{Key: key, UserID: m.UserId, ChannelID: m.ChannelId, Session: m.Session, Video: m.Video, Stream: m.Stream})
 		}
 	}
 }

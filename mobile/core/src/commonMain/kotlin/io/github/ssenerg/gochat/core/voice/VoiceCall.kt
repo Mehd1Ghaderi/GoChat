@@ -167,23 +167,15 @@ class VoiceCall internal constructor(
     }
 
     /**
-     * Tells the others whether the person is muted or deafened, and sends
-     * their camera or screen; the last call carries the latest.
+     * Tells the others whether the person is muted or deafened; the last
+     * call carries the latest. The voice server tells them of the camera
+     * and the screen, which it forwards.
      */
     private fun report() {
         if (!identified) return
         scope.launch {
             reporting.withLock {
-                if (identified) {
-                    runCatching {
-                        api.updateVoiceState(
-                            _muted.value || _deafened.value,
-                            _deafened.value,
-                            VideoSource.Camera in sending,
-                            VideoSource.Screen in sending,
-                        )
-                    }
-                }
+                if (identified) runCatching { api.updateVoiceState(_muted.value || _deafened.value, _deafened.value) }
             }
         }
     }
@@ -266,6 +258,8 @@ class VoiceCall internal constructor(
 
         data object ScreenEnded : Signal
 
+        data object CameraEnded : Signal
+
         data object TimedOut : Signal
 
         data object Closed : Signal
@@ -300,6 +294,10 @@ class VoiceCall internal constructor(
 
             override fun onScreenEnded() {
                 signals.trySend(Signal.ScreenEnded)
+            }
+
+            override fun onCameraEnded() {
+                signals.trySend(Signal.CameraEnded)
             }
         }
         var p: RtcPeer? = null
@@ -381,6 +379,14 @@ class VoiceCall internal constructor(
                                     val user = msg.string("user_id") ?: continue@loop
                                     setSpeaking(user, msg["speaking"]?.jsonPrimitive?.booleanOrNull == true)
                                 }
+                                // The room forwards no more cameras and screens: this one goes off.
+                                "video" -> {
+                                    val source = VideoSource.entries.firstOrNull { it.wire == msg.string("source") } ?: continue@loop
+                                    if (msg["on"]?.jsonPrimitive?.booleanOrNull == false && source in sending) {
+                                        setVideo(source, false)
+                                        _errors.tryEmit("Your ${source.wire} is off: ${msg.string("reason") ?: "the voice channel refused it"}.")
+                                    }
+                                }
                             }
                         }
                         is Signal.Candidate -> emit(
@@ -459,10 +465,13 @@ class VoiceCall internal constructor(
                                     list.filterNot { it.local && it.source == source } +
                                         listOfNotNull(track?.let { CallVideo(myId, source, it, local = true) })
                                 }
-                                report()
                             }
                         }
                         Signal.ScreenEnded -> setVideo(VideoSource.Screen, false)
+                        Signal.CameraEnded -> if (_state.value?.camera == true) {
+                            setVideo(VideoSource.Camera, false)
+                            _errors.tryEmit("The camera stopped.")
+                        }
                         Signal.TimedOut -> if (!connected) {
                             outcome = Outcome.Failed(NETWORK)
                             break@loop
